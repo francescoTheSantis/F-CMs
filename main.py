@@ -12,7 +12,7 @@ from src.server import get_evaluate_fn
 from src.strategy import CustomFedAvgWithModelSaving
 
 
-@hydra.main(version_base=None, config_path="conf", config_name="base")
+@hydra.main(version_base=None, config_path="conf", config_name="base_v2")
 def run(cfg : DictConfig):
 
     print(OmegaConf.to_yaml(cfg))
