@@ -1,84 +1,138 @@
-import pickle
-from pathlib import Path
-
-import flwr as fl
+import random
+import numpy as np
+import torch
+import os
+import warnings
 import hydra
-from hydra.utils import call, instantiate
-from hydra.core.hydra_config import HydraConfig
-from omegaconf import DictConfig, OmegaConf
+import pickle
+# import jpype
+from hydra.utils import instantiate
+from omegaconf import DictConfig, open_dict
 
+# pytorch lightning
+from torch.utils.data import DataLoader
+from pytorch_lightning.loggers import WandbLogger
 
-from src.server import get_evaluate_fn
-from src.strategy import CustomFedAvgWithModelSaving
+# data loading
+from src.data.dataset_block import get_dataset
 
+# causal discovery
+from src.causal_discovery.causal_discovery_block import causal_discovery
 
-@hydra.main(version_base=None, config_path="conf", config_name="base_v2")
-def run(cfg : DictConfig):
+# graph completion block
+from src.completion.completion_block import complete_graph_with_llm
 
-    print(OmegaConf.to_yaml(cfg))
+# training and utils
+from src.trainer import Trainer
+from src.hydra import parse_hyperparams
+from src.data.utils import static_graph_collate
+from src.metrics import hamming_distance
+from src.plots import maybe_plot_graph
+from src.utils import get_intervention_policy, remove_cycles, remove_problematic_edges
+from src.utils import clean_empty_configs, update_config_from_data, maybe_update_config_with_graph
+from src.utils import finetune_model
 
-    # Each time you run this, Hydra will create a new directory containing
-    # the config you used as well as the generated log. You can retrieve
-    # the path to this directory as shown below. Ideally, here is where
-    # you'd be saving any output (e.g. checkpoints) for this experiment
-    save_path = HydraConfig.get().runtime.output_dir
-    print(f"Output directory for this experiment: {save_path}")
-
-    # let's prepare the dataset (download + partition)
-    fed_dir, testset = call(cfg.dataset.prepare)
-
-    # let's define our strategy (instantiating the object defined in the config)
-    # You can pass additional arguments needed for the object (that weren't possible
-    # to define in the config maybe becasue they are defined at runtime). You need to
-    # use keyword arguments.
-    # in this case, the function to evaluate the global model requires passing the testset object
-    # Our strategy config might contain other nodes with _target_. Often, we want to delay when these
-    # are instantiated until, for instance, all variables needed to do so are ready. We set _recursive_=False
-    # to leave those nodes un-initialised (we set that in the config itself with the appropiate value)
-    strategy = instantiate(cfg.strategy, evaluate_fn=get_evaluate_fn(testset, cfg.model))
+# Suppress specific warning
+warnings.filterwarnings("ignore", message="When grouping with a length-1 list-like")
     
-    def client_fn(cid: str):
-        # Create a single client instance
-        # The type of client class is set at runtime based on the config used. Recall we need to pass
-        # extra arguemtns that weren't available when when the config is parsed. Also, let's not instantiate
-        # every object inside the client config (use `_recursive_`=False). This will give us full control on
-        # when instantiation happens.
-        return instantiate(cfg.client.object, cid=cid, fed_dir_data=fed_dir, _recursive_=False).to_client()
+def seed_everything(seed: int):
+    print(f"Seed set to {seed}")
+    random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+@hydra.main(config_path="conf", config_name="my_sweep", version_base="1.3")
+def main(cfg: DictConfig) -> None:
+    # various preliminaries, it set the seed for reproducibility
+    torch.set_num_threads(cfg.get("num_threads", 1))
+    seed_everything(cfg.get("seed"))
+    os.mkdir('results')
+    with open_dict(cfg): cfg.update(device="cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using {cfg.device} device")
+
+    # adjust config
+    cfg = clean_empty_configs(cfg)
+
+    # instantiate the dataset, split into train, val, test
+    # preprocess all of them and save the preprocessed dataset
+    dataset, true_graph, dataset_directory = get_dataset(cfg)
+
+    # get the causal graph
+    if cfg.dataset.load_true_graph:
+        graph = true_graph
+    else:
+        if cfg.dataset.load_graph:
+            with open(os.path.join(dataset_directory, "graph.pkl"), 'rb') as f:
+                graph = pickle.load(f)
+        else:
+            # estimate causal graph with causal structural learning algorithms
+            predicted_graph = causal_discovery(cfg, dataset, true_graph)
+            if true_graph is not None:
+                hamming = hamming_distance(true_graph, predicted_graph)
+                print('(after CD) structural hamming distance: ', hamming)    
+
+            # complete the causal graph with LLM and RAG
+            completed_graph = complete_graph_with_llm(cfg, predicted_graph, cfg.dataset.name)
+            if true_graph is not None:
+                hamming = hamming_distance(true_graph, completed_graph)
+                print('(after LLM + RAG) structural hamming distance: ', hamming)
+            graph = completed_graph
+
+            # save graph
+            with open(os.path.join(dataset_directory, "graph.pkl"), 'wb') as f:
+                pickle.dump(graph, f)
+
+    # fix the graph
+    # (part 1): remove bidirected and undirected edges + add virtual nodes
+    # edge be only be directed at this stage, the following function is just here in 
+    # case the CD + LLM + RAG pipeline is modified and could produce bidirected or undirected edges
+    graph, dataset = remove_problematic_edges(graph, dataset)
+    # (part 2): remove cycles
+    y_index = list(graph.index).index(dataset.y_info['names'][0]); assert y_index == len(graph) - 1
+    graph = remove_cycles(graph, y_index)
+
+    if true_graph is not None:
+        hamming = hamming_distance(true_graph, graph)
+        print('(after fix) structural hamming distance: ', hamming)
+    maybe_plot_graph(graph, 'fixed_graph')
+
+    # use the graph to define an intervention policy at test time
+    interv_policy, ip_names = get_intervention_policy(graph, y_index)
+    print('intervention policy:', interv_policy)
+    print('intervention policy names:', ip_names)
+
+    # update config based on the dataset
+    # e.g., set input and output size of the model
+    cfg = update_config_from_data(cfg, dataset)
+    cfg = maybe_update_config_with_graph(cfg, graph, interv_policy)
     
-    # (optional) specify Ray config
-    # If you want to do multi-node simulations you want the VCE to attach to an existing Ray server
-    ray_init_args = {"include_dashboard": False, "address": "auto" if cfg.misc.attach else None}
-
-    # start simulation
-    history = fl.simulation.start_simulation(
-        client_fn=client_fn,
-        num_clients=cfg.server.pool, # total number of clients in the experiment
-        client_resources=cfg.client.resources, # resources that will be reserved for each client
-        config=fl.server.ServerConfig(num_rounds=cfg.server.num_rounds),
-        strategy=strategy,
-        ray_init_args=ray_init_args,
-    )
-
-    # now you can for instance save your results in to a Python pickle
-    extra_results = {} # add here any other results you want to save
-
-    # if your strategy is keepting track of some variables you want to retreive once
-    # the experiments is completed, you can totally do so. You might want to do this
-    # for instance, in order to save the global model weights
-    if isinstance(strategy, CustomFedAvgWithModelSaving):
-        model_parameters = strategy.global_parameters
-        extra_results['global_parameters'] = model_parameters
-
-    # add everything into a single dictionary
-    data = {'history': history, **extra_results}
-
-    results_path = Path(save_path)/'results.pkl'
-    # save to pickle
-    with open(str(results_path), "wb") as handle:
-        pickle.dump(data, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    ############ model block ########################################################################################
+    [dataset.data[split].register_graph(graph) for split in dataset.data]
+    train_dataloader = DataLoader(dataset.data['train'], batch_size=cfg.dataset.batch_size, collate_fn=static_graph_collate)
+    val_dataloader = DataLoader(dataset.data['val'], batch_size=cfg.dataset.batch_size, collate_fn=static_graph_collate)
+    test_dataloader = DataLoader(dataset.data['test'], batch_size=cfg.dataset.batch_size, collate_fn=static_graph_collate)
     
-    print(f"Results saved into: {results_path}")
+    engine = instantiate(cfg.engine)
+    try:
+        trainer = Trainer(cfg)
+        trainer.logger.log_hyperparams(parse_hyperparams(cfg))
+        # ---- train
+        trainer.fit(engine, train_dataloader, val_dataloader)
+        # ---- finetune the encoder (eventually)
+        if cfg.dataset.loader.ftune_size > 0: 
+            trainer, engine = finetune_model(cfg, engine, dataset)
+        # ----- test
+        trainer.test(engine, test_dataloader)
+        trainer.logger.finalize("success")
+    finally:
+        if isinstance(trainer.logger, WandbLogger):
+            trainer.logger.experiment.finish()
+    ############################################################################################
+
 
 if __name__ == "__main__":
-
-    run()
+    main()
+    print('done')

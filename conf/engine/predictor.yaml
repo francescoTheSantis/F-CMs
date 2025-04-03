@@ -1,0 +1,16 @@
+defaults:
+  - metrics: default
+  - _self_
+  
+
+_target_: "src.engines.predictor.Predictor"
+model: "${model}"
+optim_class:
+  _target_: "hydra.utils.get_class"
+  path: "torch.optim.Adam"
+optim_kwargs:
+  lr: 0.00075
+# loss_fn:
+#   _target_: "tsl.metrics.torch.MaskedMAE"
+intervention_prob: 0.1
+test_interv_noise: 0.
