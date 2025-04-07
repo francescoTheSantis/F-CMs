@@ -5,32 +5,32 @@ import os
 import warnings
 import hydra
 import pickle
-# import jpype
-from hydra.utils import instantiate
-from omegaconf import DictConfig, open_dict
-
-# pytorch lightning
 from torch.utils.data import DataLoader
-from pytorch_lightning.loggers import WandbLogger
-
-# data loading
-from src.data.dataset_block import get_dataset
-
-# causal discovery
-from src.causal_discovery.causal_discovery_block import causal_discovery
-
-# graph completion block
-from src.completion.completion_block import complete_graph_with_llm
-
-# training and utils
-from src.trainer import Trainer
-from src.hydra import parse_hyperparams
 from src.data.utils import static_graph_collate
-from src.metrics import hamming_distance
-from src.plots import maybe_plot_graph
+from pytorch_lightning.loggers import WandbLogger
+from src.trainer import Trainer
+
+from hydra.utils import instantiate, call
+from omegaconf import DictConfig, open_dict, OmegaConf
+
+import pickle
+from pathlib import Path
+import warnings
+
+import flwr as fl
+import hydra
+from hydra.core.hydra_config import HydraConfig
+
+#from src.server import get_evaluate_fn
+#from src.strategy import CustomFedAvgWithModelSaving
+from src.utils import clean_empty_configs
+from src.data.dataset_block import get_dataset
 from src.utils import get_intervention_policy, remove_cycles, remove_problematic_edges
 from src.utils import clean_empty_configs, update_config_from_data, maybe_update_config_with_graph
-from src.utils import finetune_model
+from src.plots import maybe_plot_graph
+from src.hydra import parse_hyperparams
+from src.data.generate_split import generate_split
+from env import CACHE
 
 # Suppress specific warning
 warnings.filterwarnings("ignore", message="When grouping with a length-1 list-like")
@@ -59,44 +59,14 @@ def main(cfg: DictConfig) -> None:
     # instantiate the dataset, split into train, val, test
     # preprocess all of them and save the preprocessed dataset
     dataset, true_graph, dataset_directory = get_dataset(cfg)
+    graph = true_graph
 
-    # get the causal graph
-    if cfg.dataset.load_true_graph:
-        graph = true_graph
-    else:
-        if cfg.dataset.load_graph:
-            with open(os.path.join(dataset_directory, "graph.pkl"), 'rb') as f:
-                graph = pickle.load(f)
-        else:
-            # estimate causal graph with causal structural learning algorithms
-            predicted_graph = causal_discovery(cfg, dataset, true_graph)
-            if true_graph is not None:
-                hamming = hamming_distance(true_graph, predicted_graph)
-                print('(after CD) structural hamming distance: ', hamming)    
+    print(OmegaConf.to_yaml(cfg))
 
-            # complete the causal graph with LLM and RAG
-            completed_graph = complete_graph_with_llm(cfg, predicted_graph, cfg.dataset.name)
-            if true_graph is not None:
-                hamming = hamming_distance(true_graph, completed_graph)
-                print('(after LLM + RAG) structural hamming distance: ', hamming)
-            graph = completed_graph
-
-            # save graph
-            with open(os.path.join(dataset_directory, "graph.pkl"), 'wb') as f:
-                pickle.dump(graph, f)
-
-    # fix the graph
-    # (part 1): remove bidirected and undirected edges + add virtual nodes
-    # edge be only be directed at this stage, the following function is just here in 
-    # case the CD + LLM + RAG pipeline is modified and could produce bidirected or undirected edges
     graph, dataset = remove_problematic_edges(graph, dataset)
     # (part 2): remove cycles
     y_index = list(graph.index).index(dataset.y_info['names'][0]); assert y_index == len(graph) - 1
     graph = remove_cycles(graph, y_index)
-
-    if true_graph is not None:
-        hamming = hamming_distance(true_graph, graph)
-        print('(after fix) structural hamming distance: ', hamming)
     maybe_plot_graph(graph, 'fixed_graph')
 
     # use the graph to define an intervention policy at test time
@@ -109,30 +79,56 @@ def main(cfg: DictConfig) -> None:
     cfg = update_config_from_data(cfg, dataset)
     cfg = maybe_update_config_with_graph(cfg, graph, interv_policy)
     
-    ############ model block ########################################################################################
+    ############ data block ########################################################################################
     [dataset.data[split].register_graph(graph) for split in dataset.data]
-    train_dataloader = DataLoader(dataset.data['train'], batch_size=cfg.dataset.batch_size, collate_fn=static_graph_collate)
-    val_dataloader = DataLoader(dataset.data['val'], batch_size=cfg.dataset.batch_size, collate_fn=static_graph_collate)
-    test_dataloader = DataLoader(dataset.data['test'], batch_size=cfg.dataset.batch_size, collate_fn=static_graph_collate)
-    
-    engine = instantiate(cfg.engine)
-    try:
-        trainer = Trainer(cfg)
-        trainer.logger.log_hyperparams(parse_hyperparams(cfg))
-        # ---- train
-        trainer.fit(engine, train_dataloader, val_dataloader)
-        # ---- finetune the encoder (eventually)
-        if cfg.dataset.loader.ftune_size > 0: 
-            trainer, engine = finetune_model(cfg, engine, dataset)
-        # ----- test
-        trainer.test(engine, test_dataloader)
-        trainer.logger.finalize("success")
-    finally:
-        if isinstance(trainer.logger, WandbLogger):
-            trainer.logger.experiment.finish()
-    ############################################################################################
+              
+    # We split the data by selecting a sub-graph for each split
+    generate_split(cfg, dataset, graph)
+
+    # If the training is centralized
+    if cfg.learning.mode in ['centralized', 'localized']:
+        if cfg.learning.mode == 'localized':
+            # Load only the training and validation split specified by the local training parameters
+            # From cache get the dataloader
+            path = str(CACHE / cfg.dataset.name)
+            # Iterate in the directory and get the path of the file containing a certain substring
+            for file in os.listdir(path):
+                if ('trainset_'+str(cfg.learning.client_id)) in file:
+                    train_path = os.path.join(path, file)
+                if ('valset_'+str(cfg.learning.client_id)) in file:
+                    val_path = os.path.join(path, file)
+            # if the file is not found, raise an error
+            if not os.path.exists(train_path) or not os.path.exists(val_path):
+                raise FileNotFoundError(f"File {train_path} or {val_path} not found")
+            # Load the dataloaders
+            with open(train_path, 'rb') as f:
+                train_dataloader = pickle.load(f)
+            with open(val_path, 'rb') as f:
+                val_dataloader = pickle.load(f)            
+        else:
+            # Load all the training and validation splits
+            train_dataloader = DataLoader(dataset.data['train'], batch_size=cfg.dataset.batch_size, collate_fn=static_graph_collate)
+            val_dataloader = DataLoader(dataset.data['val'], batch_size=cfg.dataset.batch_size, collate_fn=static_graph_collate)
+        # Load the unique test-set
+        test_dataloader = DataLoader(dataset.data['test'], batch_size=cfg.dataset.batch_size, collate_fn=static_graph_collate)
+
+        engine = instantiate(cfg.engine)
+        try:
+            trainer = Trainer(cfg)
+            trainer.logger.log_hyperparams(parse_hyperparams(cfg))
+            # ---- train
+            trainer.fit(engine, train_dataloader, val_dataloader)
+            # ----- test
+            trainer.test(engine, test_dataloader)
+            trainer.logger.finalize("success")
+        finally:
+            if isinstance(trainer.logger, WandbLogger):
+                trainer.logger.experiment.finish()
+    elif cfg.learning.mode == 'federated':
+        pass
+    else:
+        raise ValueError('Whaaaaat?')
 
 
 if __name__ == "__main__":
     main()
-    print('done')

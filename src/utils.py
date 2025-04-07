@@ -2,22 +2,8 @@ import torch
 import numpy as np
 import pandas as pd
 from omegaconf import DictConfig, open_dict
-from torch.utils.data import DataLoader
-import torch.nn.functional as F
-
-from src.trainer import Trainer
 from src.hydra import parse_hyperparams, target_classname
-from src.data.utils import static_graph_collate
 from src.metrics import edge_type
-from torch.distributions import MultivariateNormal
-import scipy
-from scipy.stats import chi2
-from scipy.optimize import minimize
-from scipy.optimize import minimize as minimize_scipy
-from scipy.sparse.linalg import LinearOperator
-from scipy.optimize import Bounds, NonlinearConstraint
-import warnings
-import numbers
 
 def model_has_concepts(model):
     if target_classname(model) in ['BlackBox_Multi', 'CBM', 'CEM', 'C2BM', 'SCBM']:
@@ -82,17 +68,6 @@ def maybe_update_config_with_graph(cfg: DictConfig, graph, interv_policy) -> Dic
                 test_interv_policy = interv_policy
             )
     return cfg
-    
-def finetune_model(cfg, engine, dataset):
-    ftune_dataloader = DataLoader(dataset.data['ftune'], batch_size=cfg.dataset.batch_size, collate_fn=static_graph_collate) 
-    ftuneval_dataloader = DataLoader(dataset.data['ftune_val'], batch_size=cfg.dataset.batch_size, collate_fn=static_graph_collate)
-    # Freeze all parameters except encoder
-    for name, param in engine.model.named_parameters():
-        param.requires_grad = 'encoder' in name
-    trainer = Trainer(cfg)
-    trainer.logger.log_hyperparams(parse_hyperparams(cfg))
-    trainer.fit(engine, ftune_dataloader, ftuneval_dataloader)
-    return trainer, engine
 
 def get_parents(graph, i):
     # get the indices of the parents of the node i
@@ -306,52 +281,3 @@ def get_intervention_policy(graph, y_index):
     levels = [[node for node in level if '#virtual_' not in names[node]] for level in levels]
     level_names = [[names[i] for i in level] for level in levels] 
     return levels, level_names
-
-def numerical_stability_check(cov, device, epsilon=1e-6):
-    """
-    Check for numerical stability of covariance matrix.
-    If not stable (i.e., not positive definite), add epsilon to diagonal.
-
-    Parameters:
-    cov (Tensor): The covariance matrix to check.
-    epsilon (float, optional): The value to add to the diagonal if the matrix is not positive definite. Default is 1e-6.
-
-    Returns:
-    Tensor: The potentially adjusted covariance matrix.
-    """
-    num_added = 0
-    if cov.dim() == 2:
-        cov = (cov + cov.transpose(dim0=0, dim1=1)) / 2
-    else:
-        cov = (cov + cov.transpose(dim0=1, dim1=2)) / 2
-
-    while True:
-        try:
-            # Attempt Cholesky decomposition; if it fails, the matrix is not positive definite
-            torch.linalg.cholesky(cov)
-            if num_added > 0.0001:
-                print(
-                    "Added {} to the diagonal of the covariance matrix.".format(
-                        num_added
-                    )
-                )
-            break
-        except RuntimeError:
-            # Add epsilon to the diagonal
-            if cov.dim() == 2:
-                cov = cov + epsilon * torch.eye(cov.size(0), device=device)
-            else:
-                cov = cov + epsilon * torch.eye(cov.size(1), device=device)
-            num_added += epsilon
-            epsilon *= 2
-    return cov
-
-class SCBMPercentileStrategy:
-    # Set intervened concept logits to 0.05 & 0.95
-    def __init__(self):
-        pass
-
-    def compute_intervened_logits(self, c_mu, c_cov, c_true, c_mask):
-        c_intervened_probs = (0.05 + 0.9 * c_true) * c_mask
-        c_intervened_logits = torch.logit(c_intervened_probs, eps=1e-6)
-        return c_intervened_logits

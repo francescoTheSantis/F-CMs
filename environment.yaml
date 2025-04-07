@@ -42,7 +42,8 @@ dependencies:
     - langchain_core
     - langchain_huggingface
     - accelerate>=0.26.0
-    - bnlearn
+    - bnlearn==0.10.2
+    - pgmpy==0.1.18
     - nltk
     - mistralai
     - openai
@@ -51,3 +52,4 @@ dependencies:
     - lxml
     - duckduckgo_search
     - flwr['simulation']
+    - seaborn

@@ -34,8 +34,6 @@ class BNDataset():
         self.test_size = test_size
         self.val_size = val_size
         self.ftune_size = ftune_size
-
-        self.bias = bias
         
         c_names = [name for name in list(self.bn_model.nodes()) if name != task_name]  # All except the last node
         y_name = [task_name]
@@ -62,25 +60,18 @@ class BNDataset():
         # self.bn_model is biased after this point
         self.data['train'] = _BNDataset(bn_model = self.bn_model,
                                         n_samples = int(self.dataset_n_samples*(1-self.val_size-self.test_size)),
-                                        task_name = self.y_info['names'][0],
-                                        bias_mode = self.bias['train'].get('mode'),
-                                        bias_kwargs = self.bias['train'].get('kwargs'))
+                                        task_name = self.y_info['names'][0]
+        )
         self.data['val'] = _BNDataset(bn_model = self.bn_model,
                                       n_samples = int(self.dataset_n_samples*self.val_size),
                                       task_name = self.y_info['names'][0],
-                                      bias_mode = self.bias['train'].get('mode'),
-                                      bias_kwargs = self.bias['train'].get('kwargs'))
+        )
         self.data['test'] = _BNDataset(bn_model = self.bn_model,
                                        n_samples = int(self.dataset_n_samples*self.test_size),
                                        task_name = self.y_info['names'][0],
-                                       bias_mode = self.bias['test'].get('mode'),
-                                       bias_kwargs = self.bias['test'].get('kwargs'))
+        )
         self.data['train'].split_type = 'train'
         self.data['val'].split_type = 'val'
-        if self.ftune_size > 0:
-            self.data['test'], self.data['ftune'] = split_dataset(self.data['test'], self.ftune_size)
-            self.data['ftune'].split_type = 'ftune'
-
 
 class _BNDataset(torch.utils.data.Dataset):
 
@@ -88,45 +79,25 @@ class _BNDataset(torch.utils.data.Dataset):
                     bn_model: dict,
                     n_samples: int, 
                     task_name: str,
-                    bias_mode: str = 'random',
                     bias_kwargs: dict = {}):
         
         super().__init__()
 
         self.bn_model = bn_model.copy()
         self.n_samples = n_samples
-        self.bias_mode = bias_mode
         self.bias_kwargs = bias_kwargs
         self.split_type = ""
         self.graph = []
 
-        self._generate_biased_data()
+        inference = BayesianModelSampling(self.bn_model)
+        self.data = inference.forward_sample(size=self.n_samples)
         
         concept_names = [name for name in list(self.data.columns) if name != task_name]
         reordered_names = concept_names + [task_name]
         self.y = torch.Tensor(self.data.loc[:,task_name].values).float().unsqueeze(1)
         self.c = torch.Tensor(self.data.loc[:,concept_names].values).float()
         self.X = torch.Tensor(self.data.loc[:,reordered_names].values).float()
-
-    def _generate_biased_data(self):
-        if self.bias_mode == False:
-            inference = BayesianModelSampling(self.bn_model)
-            self.data = inference.forward_sample(size=self.n_samples)
-        elif self.bias_mode == 'custom':
-            for arc, probs in zip(self.bias_kwargs['add_arc'], self.bias_kwargs['add_arc_prob']):
-                self.bn_model.add_edge(arc[0], arc[1])
-                evidence_card = [self.bn_model.get_cardinality()[node] for node in self.bn_model.get_parents(arc[1])]
-                new_cpd = TabularCPD(variable=arc[1], 
-                                     variable_card=self.bn_model.get_cardinality()[arc[1]],  # binary variable (0 or 1)
-                                     values=probs, 
-                                     evidence=self.bn_model.get_parents(arc[1]), 
-                                     evidence_card=evidence_card) 
-                self.bn_model.add_cpds(new_cpd)
-            inference = BayesianModelSampling(self.bn_model)
-            self.data = inference.forward_sample(size=self.n_samples)
-        else:
-            raise ValueError(f"Unknown bias mode: {self.bias_mode}")    
-
+ 
     def register_graph(self, graph):
         self.graph = graph
 

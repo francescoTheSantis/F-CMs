@@ -1,10 +1,7 @@
 defaults:
   - default
-  - override causal_discovery: ges
-  - override llm: gpt
-  - override rag: standard
   - _self_
-
+ 
 hydra:
   mode: MULTIRUN
   sweeper:
@@ -13,11 +10,13 @@ hydra:
       # colormnist, colormnist_ood, celeba, celeba_unfair, siim_pneumothorax
       # asia, sachs, alarm, hailfinder, insurance
       seed: 1 #, 2, 3, 4, 5
-      dataset: cub #, sachs, alarm
+      dataset: asia #, sachs, alarm
       # possible models are:
       # blackbox, blackbox_multi, cbm_linear, cbm_mlp, cem, c2bm
-      model: blackbox_multi #, cbm_linear, cbm_mlp, cem, c2bm
-
+      model: cbm_linear #, cbm_linear, cbm_mlp, cem, c2bm
+      learning: localized
+      
+      
 model:
   hidden_size: 64
 
@@ -31,14 +30,14 @@ dataset:
 
 engine:
   intervention_prob: 0.8
-  #test_interv_noise: 0.9   # for bndatasets only
+  test_interv_noise: 0.8   # for bndatasets only
   optim_kwargs:
     lr: 0.00075
 
 trainer:
   # logger: wandb
   devices: [0]
-  max_epochs: 20
+  max_epochs: 500
   patience: 30
 
 rag:
