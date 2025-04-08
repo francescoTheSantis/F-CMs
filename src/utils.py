@@ -53,15 +53,13 @@ def update_config_from_data(cfg: DictConfig, dataset) -> DictConfig:
                     # Get the substring between "subgraph_" and "."
                     subgraph_id = file.split('subgraph_')[1].split('.')[0]
             _, updated_c_names = get_subgraph_dict(cfg)  
-            updated_c_names =  updated_c_names['subgraph_'+subgraph_id]       
+            updated_c_names = updated_c_names['subgraph_'+subgraph_id]       
             c_names = [name for name in dataset.c_info['names'] if name in updated_c_names]
             c_cardinality = [card for card, name in zip(dataset.c_info['cardinality'], dataset.c_info['names']) if name in c_names]
             c_info = {'names': c_names, 'cardinality': c_cardinality}
         else:
-            # update the c_info and c_names according to the subgraph
             c_info = dataset.c_info
             c_names = dataset.c_info['names']
-            pass
 
         cfg.engine.model.update(
             input_size = dataset.data["train"].X.shape[-1] if dataset.data["train"].X is not None else None,
@@ -89,6 +87,31 @@ def maybe_update_config_with_graph(cfg: DictConfig, graph, interv_policy) -> Dic
                 test_interv_policy = interv_policy
             )
     return cfg
+
+def update_intervention_policy_and_graph(cfg: DictConfig, interv_policy, graph):
+    path = str(CACHE / cfg.dataset.name)
+    # Get the subgraph giventhe client id
+    for file in os.listdir(path):
+        if ('trainset_'+str(cfg.learning.client_id)) in file:
+            # Get the substring between "subgraph_" and "."
+            subgraph_id = file.split('subgraph_')[1].split('.')[0]
+    c_index, c_names = get_subgraph_dict(cfg) 
+    c_index = c_index['subgraph_'+subgraph_id]  
+    c_names = c_names['subgraph_'+subgraph_id] 
+
+    # Update policy
+    updated_policy = []
+    for level in interv_policy:
+        level_policy = []
+        for i, node in enumerate(level):
+            if node in c_index:
+                level_policy.append(node)
+        if len(level_policy) > 0:
+            updated_policy.append(level_policy)
+                
+    # Update graph
+    updated_graph = graph.loc[c_names+cfg.model.y_info['names'], c_names+cfg.model.y_info['names']]
+    return updated_policy, updated_graph
 
 def get_parents(graph, i):
     # get the indices of the parents of the node i

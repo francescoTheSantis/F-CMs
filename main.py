@@ -26,10 +26,11 @@ from hydra.core.hydra_config import HydraConfig
 from src.utils import clean_empty_configs
 from src.data.dataset_block import get_dataset
 from src.utils import get_intervention_policy, remove_cycles, remove_problematic_edges
-from src.utils import clean_empty_configs, update_config_from_data, maybe_update_config_with_graph
+from src.utils import clean_empty_configs, update_config_from_data, maybe_update_config_with_graph, update_intervention_policy_and_graph
 from src.plots import maybe_plot_graph
 from src.hydra import parse_hyperparams
-from src.data.generate_split import generate_split
+from src.data.generate_split import generate_split, get_subgraph_dict
+
 from env import CACHE
 
 # Suppress specific warning
@@ -77,11 +78,13 @@ def main(cfg: DictConfig) -> None:
     # update config based on the dataset
     # e.g., set input and output size of the model
     cfg = update_config_from_data(cfg, dataset)
+    if cfg.learning.mode == 'localized':
+        interv_policy, graph = update_intervention_policy_and_graph(cfg, interv_policy, graph)
     cfg = maybe_update_config_with_graph(cfg, graph, interv_policy)
-    
+
     ############ data block ########################################################################################
     [dataset.data[split].register_graph(graph) for split in dataset.data]
-              
+                
     # We split the data by selecting a sub-graph for each split
     generate_split(cfg, dataset, graph)
 
