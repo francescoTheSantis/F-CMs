@@ -7,19 +7,22 @@ import pickle
 import os
 
 def generate_split(cfg, dataset, graph):
-    if cfg.dataset.name=='asia':
-        split_and_save(cfg, dataset, graph, 'train')
-        split_and_save(cfg, dataset, graph, 'val')
-        test_dataloader = DataLoader(dataset.data['test'], batch_size=cfg.dataset.batch_size, collate_fn=static_graph_collate)
-        # Save the test dataloader
-        path = os.path.join(str(CACHE / cfg.dataset.name), f"test.pkl")
-        with open(path, 'wb') as f:
-            pickle.dump(test_dataloader, f) 
-    else:
+    split_and_save(cfg, dataset, graph, 'train')
+    split_and_save(cfg, dataset, graph, 'val')
+    test_dataloader = DataLoader(dataset.data['test'], batch_size=cfg.dataset.batch_size, collate_fn=static_graph_collate)
+    # Save the test dataloader
+    path = os.path.join(str(CACHE / cfg.dataset.name), f"test.pkl")
+    with open(path, 'wb') as f:
+        pickle.dump(test_dataloader, f)
+
+    # Update graph and c_names
+    if cfg.learning.mode == 'localized':
+        # Update the graph and c_names
         pass
+    
 
 def split_and_save(cfg, data, graph, set):
-        # Create a smany splits as the product of n_client_x_split * n_clients     
+        # Create as many splits as the number of clients     
         x, c, y = [], [], []
         for row in data.data[set]:
             x.append(row['x'].unsqueeze(0))
@@ -30,10 +33,10 @@ def split_and_save(cfg, data, graph, set):
         y = torch.cat(y, dim=0)
 
         # create n random splits from the preivous tensors
-        n = 9 #cfg.fl.n_splits_x_client * cfg.fl.n_clients
+        n = cfg.learning.n_clients
 
         # Get the disctionary containing the subgraphs given the dataset's name
-        subgraphs = get_subgraph_dict(cfg)
+        subgraphs, _ = get_subgraph_dict(cfg)
 
         # Ensure the tensors can be evenly split
         assert x.size(0) == c.size(0) == y.size(0), "Tensors must have the same number of rows"
@@ -57,12 +60,6 @@ def split_and_save(cfg, data, graph, set):
         for i in range(n):
             j = i % len(subgraphs)
             masked_c_splits = apply_mask(c_splits[i], subgraphs[f'subgraph_{j+1}'])
-            split = {
-                'x': x_splits[i],
-                'c': masked_c_splits,
-                'y': y_splits[i],
-                'graph': graph
-            }
 
             dataloader = DataLoader(
                 CustomDataset(x_splits[i], masked_c_splits, y_splits[i], graph),
@@ -71,7 +68,7 @@ def split_and_save(cfg, data, graph, set):
             )
 
             # Store the dataloader in the 
-            path = os.path.join(str(CACHE / cfg.dataset.name), f"{set}set_{i}_subgraph_{j+1}.pkl")
+            path = os.path.join(str(CACHE / cfg.dataset.name), f"{set}set_{i+1}_subgraph_{j+1}.pkl") # Start to count from 1
             with open(path, 'wb') as f:
                 pickle.dump(dataloader, f)
 
@@ -82,9 +79,14 @@ def get_subgraph_dict(cfg):
              'subgraph_2': [2,3,5],
              'subgraph_3': [2,4]
         }
+        subgraphs_concept_names = {
+            'subgraph_1': ['asia', 'tub', 'either'],
+            'subgraph_2': ['smoke', 'lung', 'either'],
+            'subgraph_3': ['smoke', 'bronc']   
+        }
     else:
         pass
-    return subgraphs
+    return subgraphs, subgraphs_concept_names
 
 def apply_mask(tensor, keep):
     """

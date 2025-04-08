@@ -1,2 +1,6 @@
+defaults:
+  - commons
+  - _self_
+  
 mode: localized
 client_id: 1

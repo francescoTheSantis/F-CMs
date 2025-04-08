@@ -1,4 +1,5 @@
 defaults:
+  - commons
   - _self_
   
 mode: centralized

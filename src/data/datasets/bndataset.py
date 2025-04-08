@@ -44,6 +44,7 @@ class BNDataset():
         self.y_info = {'names': y_name,
                        'cardinality': y_cardinality}  
         self.data = {}
+        self.subgraphs_concept_names = {}
         
         
     def load_ground_truth_graph(self): 

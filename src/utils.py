@@ -4,6 +4,9 @@ import pandas as pd
 from omegaconf import DictConfig, open_dict
 from src.hydra import parse_hyperparams, target_classname
 from src.metrics import edge_type
+from env import CACHE
+import os
+from src.data.generate_split import get_subgraph_dict
 
 def model_has_concepts(model):
     if target_classname(model) in ['BlackBox_Multi', 'CBM', 'CEM', 'C2BM', 'SCBM']:
@@ -42,14 +45,32 @@ def clean_empty_configs(cfg: DictConfig) -> DictConfig:
 def update_config_from_data(cfg: DictConfig, dataset) -> DictConfig:
     """ can be used to update the config based on the data, e.g., set input and output size """
     with open_dict(cfg):
+        if cfg.learning.mode=='localized':
+            path = str(CACHE / cfg.dataset.name)
+            # Get the subgraph giventhe client id
+            for file in os.listdir(path):
+                if ('trainset_'+str(cfg.learning.client_id)) in file:
+                    # Get the substring between "subgraph_" and "."
+                    subgraph_id = file.split('subgraph_')[1].split('.')[0]
+            _, updated_c_names = get_subgraph_dict(cfg)  
+            updated_c_names =  updated_c_names['subgraph_'+subgraph_id]       
+            c_names = [name for name in dataset.c_info['names'] if name in updated_c_names]
+            c_cardinality = [card for card, name in zip(dataset.c_info['cardinality'], dataset.c_info['names']) if name in c_names]
+            c_info = {'names': c_names, 'cardinality': c_cardinality}
+        else:
+            # update the c_info and c_names according to the subgraph
+            c_info = dataset.c_info
+            c_names = dataset.c_info['names']
+            pass
+
         cfg.engine.model.update(
             input_size = dataset.data["train"].X.shape[-1] if dataset.data["train"].X is not None else None,
             output_size = dataset.y_info['cardinality'][0], # we assume single class classification
-            c_info = dataset.c_info,
+            c_info = c_info,
             y_info = dataset.y_info,
         )
         cfg.engine.update(
-            c_names = dataset.c_info['names']
+            c_names = c_names
         )
     return cfg
 
