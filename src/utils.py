@@ -44,6 +44,7 @@ def clean_empty_configs(cfg: DictConfig) -> DictConfig:
 
 def update_config_from_data(cfg: DictConfig, dataset) -> DictConfig:
     """ can be used to update the config based on the data, e.g., set input and output size """
+    original_c_names = dataset.c_info['names']
     with open_dict(cfg):
         if cfg.learning.mode=='localized':
             path = str(CACHE / cfg.dataset.name)
@@ -59,13 +60,14 @@ def update_config_from_data(cfg: DictConfig, dataset) -> DictConfig:
             c_info = {'names': c_names, 'cardinality': c_cardinality}
         else:
             c_info = dataset.c_info
-            c_names = dataset.c_info['names']
+            c_names = original_c_names
 
         cfg.engine.model.update(
             input_size = dataset.data["train"].X.shape[-1] if dataset.data["train"].X is not None else None,
             output_size = dataset.y_info['cardinality'][0], # we assume single class classification
             c_info = c_info,
             y_info = dataset.y_info,
+            c_name_index = {name: i for i, name in enumerate(original_c_names)},
         )
         cfg.engine.update(
             c_names = c_names
@@ -101,11 +103,12 @@ def update_intervention_policy_and_graph(cfg: DictConfig, interv_policy, graph):
 
     # Update policy
     updated_policy = []
+    c_name_idx = {k:v for k, v in zip(c_index, range(len(c_names)))}
     for level in interv_policy:
         level_policy = []
         for i, node in enumerate(level):
             if node in c_index:
-                level_policy.append(node)
+                level_policy.append(c_name_idx[node])
         if len(level_policy) > 0:
             updated_policy.append(level_policy)
                 
@@ -325,3 +328,17 @@ def get_intervention_policy(graph, y_index):
     levels = [[node for node in level if '#virtual_' not in names[node]] for level in levels]
     level_names = [[names[i] for i in level] for level in levels] 
     return levels, level_names
+
+def extract_between(text, split):
+    if split=='train':
+        substring1 = 'trainset_'
+    elif split=='val':
+        substring1 = 'valset_'
+    substring2 = '_subgraph'
+    start = text.find(substring1)
+    end = text.find(substring2, start + len(substring1))
+    
+    if start != -1 and end != -1:
+        return text[start + len(substring1):end]
+    else:
+        return None
