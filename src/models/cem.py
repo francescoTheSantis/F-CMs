@@ -19,12 +19,14 @@ class CEM(nn.Module):
                  activation='leaky_relu',
                  concept_loss_weight=0.5,
                  c_info={},
-                 y_info={}):
+                 y_info={},
+                 c_name_index=None):
         super(CEM, self).__init__()
 
         # to be stored for every model
         self.has_concepts = True
         self.is_causal = False
+        self.c_name_index = c_name_index
 
         # concepts info
         self.concept_names = c_info['names']
@@ -73,7 +75,7 @@ class CEM(nn.Module):
         c_embeddings, c_hat_probs = {}, {}
         for name in self.concept_names:
             if name in self.virtual_roots: continue
-            i = self.concept_names.index(name)
+            i = self.c_name_index[name]
             c_embeddings[name], c_hat_probs[name] = self.concept_encoders[name](x_encoded, 
                                                                                 c[:,i], 
                                                                                 intervention_index[:,i])
@@ -111,7 +113,8 @@ class CEM(nn.Module):
         # -- concepts loss
         concept_loss = 0
         for name, c_hat in c_hat_dict.items():
-            c_hat = torch.log(c_hat + 1e-6)
-            concept_loss += loss_form(c_hat, c[:,self.concept_names.index(name)].long())
-        
+            if not (c[:,self.c_name_index[name]].long()!=-1).sum()==0:
+                c_hat = torch.log(c_hat + 1e-6)
+                concept_loss += loss_form(c_hat, c[:,self.c_name_index[name]].long())    
+
         return self.concept_loss_weight * concept_loss + (1-self.concept_loss_weight) * task_loss

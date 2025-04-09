@@ -22,6 +22,7 @@ class Predictor(pl.LightningModule):
                 c_names: Optional[list] = None,
                 test_interv_policy: Optional[str] = None,
                 test_interv_noise: Optional[float] = 0.,
+                c_name_index: Optional[Mapping[str, int]] = None,
                 ):
         super(Predictor, self).__init__()         
         self.model = model
@@ -40,6 +41,7 @@ class Predictor(pl.LightningModule):
 
         self.c_names = c_names
         self.n_concepts = len(c_names)
+        self.c_name_index = c_name_index
 
         if metrics is None:
             metrics = dict()
@@ -261,7 +263,7 @@ class Predictor(pl.LightningModule):
         # log metrics for all predicted concepts 
         # (not necessarily all concepts, some models predicts only a subset of concepts)
         for k, v in c_hat.items():
-            c_collection[k].update(v, c[:,self.c_names.index(k)])
+            c_collection[k].update(v, c[:,self.c_name_index[k]])
         self.log_metrics(c_collection, batch_size=batch['batch_size'])
 
     def shared_step(self, batch, step):

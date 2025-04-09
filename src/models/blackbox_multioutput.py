@@ -16,13 +16,15 @@ class BlackBox_Multi(nn.Module):
                  activation='leaky_relu',
                  concept_loss_weight=0.5,
                  c_info={},
-                 y_info={}):
+                 y_info={},
+                 c_name_index=None):
         super(BlackBox_Multi, self).__init__()
         
         # to be stored for every model
         self.has_concepts = False
         self.is_causal = False
-        
+        self.c_name_index = c_name_index
+
         self.concept_names = c_info['names']
         self.concept_cardinality = c_info['cardinality']
         self.task_cardinality = y_info['cardinality']
@@ -80,7 +82,8 @@ class BlackBox_Multi(nn.Module):
         # -- concepts loss
         concept_loss = 0
         for name, c_hat in c_hat_dict.items():
-            c_hat = torch.log(c_hat + 1e-6)
-            concept_loss += loss_form(c_hat, c[:,self.concept_names.index(name)].long())
-        
+            if not (c[:,self.c_name_index[name]].long()!=-1).sum()==0:
+                c_hat = torch.log(c_hat + 1e-6)
+                concept_loss += loss_form(c_hat, c[:,self.c_name_index[name]].long())    
+
         return self.concept_loss_weight * concept_loss + (1-self.concept_loss_weight) * task_loss

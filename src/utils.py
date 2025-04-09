@@ -70,7 +70,8 @@ def update_config_from_data(cfg: DictConfig, dataset) -> DictConfig:
             c_name_index = {name: i for i, name in enumerate(original_c_names)},
         )
         cfg.engine.update(
-            c_names = c_names
+            c_names = c_names,
+            c_name_index = {name: i for i, name in enumerate(original_c_names)}
         )
     return cfg
 
