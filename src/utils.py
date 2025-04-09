@@ -342,3 +342,11 @@ def extract_between(text, split):
         return text[start + len(substring1):end]
     else:
         return None
+    
+def get_split_paths(cfg, path):
+    for file in os.listdir(path):
+        if extract_between(file, 'train') == str(cfg.learning.client_id):
+            train_path = os.path.join(path, file)
+        if extract_between(file, 'val') == str(cfg.learning.client_id):
+            val_path = os.path.join(path, file)
+    return train_path, val_path

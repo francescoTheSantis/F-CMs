@@ -67,8 +67,8 @@ class CBM(nn.Module):
     def forward(self, x, c=None, intervention_index=None):
         x_encoded = self.encoder(x)
         # filter out virtual roots from c and intervention_index
-        filtered_c = c[:, [i for i, name in enumerate(self.concept_names) if name not in self.virtual_roots]]
-        filtered_intervention_index = intervention_index[:, [i for i, name in enumerate(self.concept_names) if name not in self.virtual_roots]]
+        filtered_c = c[:, [v for k, v in self.c_name_index.items() if k in self.concept_names and k not in self.virtual_roots]]
+        filtered_intervention_index = intervention_index[:, [v for k, v in self.c_name_index.items() if k in self.concept_names and k not in self.virtual_roots]]
         
         c_hat_logits = self.c_mlp(x_encoded)
         c_hat_probs = {}

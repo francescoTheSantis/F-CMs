@@ -25,7 +25,7 @@ from hydra.core.hydra_config import HydraConfig
 #from src.strategy import CustomFedAvgWithModelSaving
 from src.utils import clean_empty_configs
 from src.data.dataset_block import get_dataset
-from src.utils import get_intervention_policy, remove_cycles, remove_problematic_edges, extract_between
+from src.utils import get_intervention_policy, remove_cycles, remove_problematic_edges, get_split_paths
 from src.utils import clean_empty_configs, update_config_from_data, maybe_update_config_with_graph, update_intervention_policy_and_graph
 from src.plots import maybe_plot_graph
 from src.hydra import parse_hyperparams
@@ -94,15 +94,7 @@ def main(cfg: DictConfig) -> None:
             # Load only the training and validation split specified by the local training parameters
             # From cache get the dataloader
             path = str(CACHE / cfg.dataset.name)
-            # Iterate in the directory and get the path of the file containing a certain substring
-            substring_train = 'trainset_'
-            substring_val = 'valset_'
-            substring_end = '_subgraph'
-            for file in os.listdir(path):
-                if extract_between(file, 'train') == str(cfg.learning.client_id):
-                    train_path = os.path.join(path, file)
-                if extract_between(file, 'val') == str(cfg.learning.client_id):
-                    val_path = os.path.join(path, file)
+            train_path, val_path = get_split_paths(cfg, path)
             # if the file is not found, raise an error
             if not os.path.exists(train_path) or not os.path.exists(val_path):
                 raise FileNotFoundError(f"File {train_path} or {val_path} not found")
