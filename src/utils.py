@@ -7,6 +7,7 @@ from src.my_hydra import parse_hyperparams, target_classname
 from src.metrics import edge_type
 from env import CACHE
 import os
+import random
 from src.data.generate_split import get_subgraph_dict
 import matplotlib.pyplot as plt
 from typing import List
@@ -354,6 +355,57 @@ def get_split_paths(cfg, path):
         if extract_between(file, 'val') == str(cfg.learning.client_id):
             val_path = os.path.join(path, file)
     return train_path, val_path
+
+
+def get_single_partition(graph, task_index):
+    """
+    This function generate a partition of the graph.
+
+    """
+    torch_values_graph = torch.tensor(graph.values)
+    nodes = [task_index]
+    partition = [task_index]
+    while True:
+        # partition the graph starting from the task node
+        # get the parents of the nodes
+        parents = [get_parents(torch_values_graph, node) for node in nodes]
+        # eliminate empty tensors
+        parents = [t for t in parents if t.numel() > 0]
+        # if there are no parents, break the loop
+        if len(parents) == 0:
+            break
+        # Choose randomly between the two options for number_of_parents_to_keep
+        number_of_parents_to_keep = random.choices([
+            max((len(parents) + 1) // 2, 1),
+            max((len(parents) + 1) // 2, 2)],
+            weights= [0.6,0.4],
+            k=1
+        )[0]
+        # select, for each node, at least a random parent
+        parents = [list({random.choice(nodes) for _ in range(number_of_parents_to_keep)}) for nodes in parents]
+        # remove duplicates and flatten the list
+        parents = [int(item) for sublist in parents for item in sublist]
+        parents = list(set(parents))
+        partition.extend(parents)
+        nodes = parents
+    # flatten the list and obtain unique values
+    partition = sorted(list(set(partition)))
+
+    return partition
+
+def get_partitions(graph, task_index, n_clients):
+
+    max_attempts = 100
+    attempts = 0
+    generated_partitions = []
+    while len(generated_partitions)< n_clients and attempts < max_attempts:
+        partition = get_single_partition(graph, task_index)
+        if partition not in generated_partitions:
+            generated_partitions.append(partition)
+        attempts = attempts + 1
+
+    partitions = {i: list(partition) for i, partition in enumerate(generated_partitions)}
+    return partitions
 
 def get_split_paths_fl(cfg, path, client_id):
     for file in os.listdir(path):
