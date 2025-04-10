@@ -25,7 +25,7 @@ from hydra.core.hydra_config import HydraConfig
 #from src.strategy import CustomFedAvgWithModelSaving
 from src.utils import clean_empty_configs
 from src.data.dataset_block import get_dataset
-from src.utils import get_intervention_policy, remove_cycles, remove_problematic_edges, get_split_paths
+from src.utils import get_intervention_policy, remove_cycles, remove_problematic_edges, get_split_paths, get_partitions
 from src.utils import clean_empty_configs, update_config_from_data, maybe_update_config_with_graph, update_intervention_policy_and_graph
 from src.plots import maybe_plot_graph
 from src.hydra import parse_hyperparams
@@ -70,6 +70,13 @@ def main(cfg: DictConfig) -> None:
     graph = remove_cycles(graph, y_index)
     maybe_plot_graph(graph, 'fixed_graph')
 
+    #partitions = get_partitions(graph, y_index, n_clients = 5)
+    #col_to_index = {col: idx for idx, col in enumerate(graph.columns)}    
+    #partitions_named = {
+    #    term: [graph.columns[i] for i in indices]
+    #    for term, indices in partitions.items()
+    #}
+
     # use the graph to define an intervention policy at test time
     interv_policy, ip_names = get_intervention_policy(graph, y_index)
     print('intervention policy:', interv_policy)
@@ -84,7 +91,7 @@ def main(cfg: DictConfig) -> None:
 
     ############ data block ########################################################################################
     [dataset.data[split].register_graph(graph) for split in dataset.data]
-                
+           
     # We split the data by selecting a sub-graph for each split
     generate_split(cfg, dataset, graph)
 
