@@ -51,5 +51,5 @@ dependencies:
     - beautifulsoup4
     - lxml
     - duckduckgo_search
-    - flwr['simulation']
+    - flwr
     - seaborn

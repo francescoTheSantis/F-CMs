@@ -1,4 +1,3 @@
-import random
 import numpy as np
 import torch
 import os
@@ -9,6 +8,7 @@ from torch.utils.data import DataLoader
 from src.data.utils import static_graph_collate
 from pytorch_lightning.loggers import WandbLogger
 from src.trainer import Trainer
+import subprocess
 
 from hydra.utils import instantiate, call
 from omegaconf import DictConfig, open_dict, OmegaConf
@@ -20,6 +20,7 @@ import warnings
 import flwr as fl
 import hydra
 from hydra.core.hydra_config import HydraConfig
+from src.utils import seed_everything
 
 #from src.server import get_evaluate_fn
 #from src.strategy import CustomFedAvgWithModelSaving
@@ -28,7 +29,7 @@ from src.data.dataset_block import get_dataset
 from src.utils import get_intervention_policy, remove_cycles, remove_problematic_edges, get_split_paths
 from src.utils import clean_empty_configs, update_config_from_data, maybe_update_config_with_graph, update_intervention_policy_and_graph
 from src.plots import maybe_plot_graph
-from src.hydra import parse_hyperparams
+from src.my_hydra import parse_hyperparams
 from src.data.generate_split import generate_split, get_subgraph_dict
 
 from env import CACHE
@@ -36,14 +37,6 @@ from env import CACHE
 # Suppress specific warning
 warnings.filterwarnings("ignore", message="When grouping with a length-1 list-like")
     
-def seed_everything(seed: int):
-    print(f"Seed set to {seed}")
-    random.seed(seed)
-    os.environ['PYTHONHASHSEED'] = str(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
 
 @hydra.main(config_path="conf", config_name="my_sweep", version_base="1.3")
 def main(cfg: DictConfig) -> None:
@@ -79,18 +72,26 @@ def main(cfg: DictConfig) -> None:
     # e.g., set input and output size of the model
     cfg = update_config_from_data(cfg, dataset)
     if cfg.learning.mode == 'localized':
-        interv_policy, graph = update_intervention_policy_and_graph(cfg, interv_policy, graph)
+        interv_policy, graph = update_intervention_policy_and_graph(cfg, interv_policy, graph)  
     cfg = maybe_update_config_with_graph(cfg, graph, interv_policy)
 
     ############ data block ########################################################################################
     [dataset.data[split].register_graph(graph) for split in dataset.data]
-                
+                    
     # We split the data by selecting a sub-graph for each split
     generate_split(cfg, dataset, graph)
+
+    # Load the unique test-set
+    test_dataloader = DataLoader(dataset.data['test'], batch_size=cfg.dataset.batch_size, collate_fn=static_graph_collate)
+    # save the test dataloader
+    test_path = os.path.join(str(CACHE / cfg.dataset.name), "test_dataloader.pkl")
+    with open(test_path, 'wb') as f:
+        pickle.dump(test_dataloader, f)
 
     # If the training is centralized
     if cfg.learning.mode in ['centralized', 'localized']:
         if cfg.learning.mode == 'localized':
+            print("\033[93mLocalized training\033[0m")
             # Load only the training and validation split specified by the local training parameters
             # From cache get the dataloader
             path = str(CACHE / cfg.dataset.name)
@@ -101,14 +102,14 @@ def main(cfg: DictConfig) -> None:
             # Load the dataloaders
             with open(train_path, 'rb') as f:
                 train_dataloader = pickle.load(f)
+                print("train_dataloader", train_dataloader)
+                print("train_dataloader length", len(train_dataloader))
             with open(val_path, 'rb') as f:
                 val_dataloader = pickle.load(f)            
         else:
             # Load all the training and validation splits
             train_dataloader = DataLoader(dataset.data['train'], batch_size=cfg.dataset.batch_size, collate_fn=static_graph_collate)
             val_dataloader = DataLoader(dataset.data['val'], batch_size=cfg.dataset.batch_size, collate_fn=static_graph_collate)
-        # Load the unique test-set
-        test_dataloader = DataLoader(dataset.data['test'], batch_size=cfg.dataset.batch_size, collate_fn=static_graph_collate)
 
         engine = instantiate(cfg.engine)
         try:
@@ -123,7 +124,17 @@ def main(cfg: DictConfig) -> None:
             if isinstance(trainer.logger, WandbLogger):
                 trainer.logger.experiment.finish()
     elif cfg.learning.mode == 'federated':
-        pass
+        # Save the full configuration to a temporary file
+        config_filepath = "temp_config.yaml"
+        with open(config_filepath, "w") as f:
+            f.write(OmegaConf.to_yaml(cfg))
+        os.environ["config_path"] = os.path.join(os.getcwd(),config_filepath)
+
+        # Instantiate the FL training
+        subprocess.run(["bash", "../../../../../src/fl_training.sh"])
+        
+        # Delete the temporary config file
+        os.remove(config_filepath)
     else:
         raise ValueError('The learning mode is not supported. Please choose one of the following: centralized, localized, federated.')
 

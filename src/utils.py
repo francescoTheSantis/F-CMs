@@ -1,12 +1,15 @@
 import torch
+import random
 import numpy as np
 import pandas as pd
 from omegaconf import DictConfig, open_dict
-from src.hydra import parse_hyperparams, target_classname
+from src.my_hydra import parse_hyperparams, target_classname
 from src.metrics import edge_type
 from env import CACHE
 import os
 from src.data.generate_split import get_subgraph_dict
+import matplotlib.pyplot as plt
+from typing import List
 
 def model_has_concepts(model):
     if target_classname(model) in ['BlackBox_Multi', 'CBM', 'CEM', 'C2BM', 'SCBM']:
@@ -351,3 +354,79 @@ def get_split_paths(cfg, path):
         if extract_between(file, 'val') == str(cfg.learning.client_id):
             val_path = os.path.join(path, file)
     return train_path, val_path
+
+def get_split_paths_fl(cfg, path, client_id):
+    for file in os.listdir(path):
+        if extract_between(file, 'train') == str(client_id):
+            train_path = os.path.join(path, file)
+        if extract_between(file, 'val') == str(client_id):
+            val_path = os.path.join(path, file)
+    return train_path, val_path
+
+def seed_everything(seed: int):
+    print(f"Seed set to {seed}")
+    random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+# plot and save plot on server side
+def plot_loss_and_accuracy(
+        loss: List[float],
+        accuracy: List[float],
+        show: bool = True,
+        fold=0):
+    
+    # # Plot loss separately
+    plt.figure(figsize=(12, 6))
+    plt.plot(loss, label='Loss', color='blue')
+    min_loss_index = loss.index(min(loss))
+    plt.scatter(min_loss_index, loss[min_loss_index], color='red', marker='*', s=100, label='Min Loss')
+    
+    # Labels and title for loss
+    plt.xlabel('Rounds')
+    plt.ylabel('Loss')
+    plt.title('Distributed Loss (Weighted Average on Test-Set)')
+    plt.legend()
+    
+    # Save the loss plot
+    loss_plot_path = f"images/distributed_loss.png"
+    plt.savefig(loss_plot_path)
+    if show:
+        plt.show()
+    else:
+        plt.close()
+
+    # Plot accuracy separately
+    plt.figure(figsize=(12, 6))
+    plt.plot(accuracy, label='Accuracy', color='green')
+    max_accuracy_index = accuracy.index(max(accuracy))
+    plt.scatter(max_accuracy_index, accuracy[max_accuracy_index], color='orange', marker='*', s=100, label='Max Accuracy')
+    
+    # Labels and title for accuracy
+    plt.xlabel('Rounds')
+    plt.ylabel('Accuracy')
+    plt.title('Distributed Accuracy (Weighted Average on Test-Set)')
+    plt.legend()
+    
+    # Save the accuracy plot
+    accuracy_plot_path = f"images/distributed_accuracy.png"
+    plt.savefig(accuracy_plot_path)
+    if show:
+        plt.show()
+    else:
+        plt.close()
+
+    # Print out server-side information
+    print(f"\n\033[1;34mServer Side\033[0m \nMinimum Loss occurred at round {min_loss_index + 1} with a loss value of {loss[min_loss_index]:.3f} \nMaximum Accuracy occurred at round {max_accuracy_index + 1} with an accuracy value of {accuracy[max_accuracy_index]*100:.2f}\n")
+    
+    return min_loss_index + 1, max_accuracy_index + 1
+
+# create folders
+def create_folders():
+    os.makedirs('images', exist_ok=True)
+    os.makedirs('results', exist_ok=True)
+    os.makedirs('checkpoints', exist_ok=True)
+    os.makedirs('histories', exist_ok=True)

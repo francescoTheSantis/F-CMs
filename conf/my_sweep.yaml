@@ -1,7 +1,9 @@
 defaults:
   - default
   - _self_
- 
+
+client_id: 1
+
 hydra:
   mode: MULTIRUN
   sweeper:
@@ -14,7 +16,7 @@ hydra:
       # possible models are:
       # blackbox, blackbox_multi, cbm_linear, cbm_mlp, cem, c2bm
       model: cbm_linear #, cbm_linear, cbm_mlp, cem, c2bm
-      learning: localized
+      learning: federated # localized, federated
       
       
 model:
@@ -37,7 +39,7 @@ engine:
 trainer:
   # logger: wandb
   devices: [0]
-  max_epochs: 500
+  max_epochs: 100
   patience: 30
 
 rag:
