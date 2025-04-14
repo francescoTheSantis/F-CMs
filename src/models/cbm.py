@@ -108,7 +108,7 @@ class CBM(nn.Module):
         task_loss = loss_form(y_hat, y)
 
         # feee the parameters related to the computation of the concepts that are masked
-        
+
 
         # -- concepts loss
         concept_loss = 0

@@ -2,7 +2,7 @@ defaults:
   - default
   - _self_
 
-client_id: 2
+client_id: 1
 
 hydra:
   mode: MULTIRUN
@@ -15,8 +15,8 @@ hydra:
       dataset: asia #, sachs, alarm
       # possible models are:
       # blackbox, blackbox_multi, cbm_linear, cbm_mlp, cem, c2bm
-      model: cbm_linear #, cbm_linear, cbm_mlp, cem, c2bm
-      learning: localized # localized, federated, centralized
+      model: blackbox_multi #, cbm_linear, cbm_mlp, cem, c2bm
+      learning: federated # localized, federated, centralized
       
       
 model:

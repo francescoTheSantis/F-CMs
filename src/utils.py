@@ -499,6 +499,8 @@ def plot_loss_and_accuracy(
 
 # create folders
 def create_folders():
+    # print current working directory
+    print("Current working directory:", os.getcwd())
     os.makedirs('images', exist_ok=True)
     os.makedirs('results', exist_ok=True)
     os.makedirs('checkpoints', exist_ok=True)

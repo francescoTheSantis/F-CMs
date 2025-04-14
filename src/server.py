@@ -146,6 +146,9 @@ def main(cfg: DictConfig) -> None:
     # config_filepath = "/home/dario/Desktop/Federated-C2BM/outputs/multirun/2025-04-09/17-46-33/0/temp_config.yaml"
     cfg = OmegaConf.load(config_filepath)
     # cfg = OmegaConf.merge(cfg, cfg_overrides) #TODO: merge?
+    with open_dict(cfg): 
+        root = cfg.path
+    os.chdir(root)
 
     # various preliminaries, it set the seed for reproducibility
     torch.set_num_threads(cfg.get("num_threads", 1))

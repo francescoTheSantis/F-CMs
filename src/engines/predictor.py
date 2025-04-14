@@ -47,6 +47,8 @@ class Predictor(pl.LightningModule):
             metrics = dict()
         self._set_metrics(metrics)
 
+        self.ood_interventions = None
+
     def forward(self, *args, **kwargs):
         return self.model(*args, **kwargs)
 
@@ -59,6 +61,25 @@ class Predictor(pl.LightningModule):
         metric.reset()
         return metric
     
+    def set_id_ood_interventions(self, id_concepts):
+        id_interventions = []
+        self.ood_interventions = []
+        for level in self.test_interv_policy:
+            level_id_list = []
+            level_ood_list = []
+            for concept in level:
+                if concept in id_concepts:
+                    level_id_list.append(concept)
+                else:
+                    level_ood_list.append(concept)
+            if level_ood_list != []:
+                # the OOD interventions is the list of concepts that are not in the ID concepts
+                self.ood_interventions.append(level_ood_list)
+            if level_id_list != []:
+                id_interventions.append(level_id_list)
+        # the intervention policy is updated to the ID concepts (defined by the client available concepts)
+        self.test_interv_policy = id_interventions
+
     def _set_metrics(self, metrics):
         # --- accuracy metrics ---
         y_acc_metrics = {'y_accuracy': metrics.get('classification_acc')}

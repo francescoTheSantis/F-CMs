@@ -79,7 +79,7 @@ def main(cfg: DictConfig) -> None:
                     
     # We split the data by selecting a sub-graph for each split
     generate_split(cfg, dataset, graph)
-    
+
     # update config based on the dataset
     # e.g., set input and output size of the model
     cfg = update_config_from_data(cfg, dataset)
@@ -137,11 +137,17 @@ def main(cfg: DictConfig) -> None:
             if isinstance(trainer.logger, WandbLogger):
                 trainer.logger.experiment.finish()
     elif cfg.learning.mode == 'federated':
+
+        # Add path to cfg
+        with open_dict(cfg):
+            cfg.path = os.getcwd()
+
         # Save the full configuration to a temporary file
         config_filepath = "temp_config.yaml"
         with open(config_filepath, "w") as f:
             f.write(OmegaConf.to_yaml(cfg))
         os.environ["config_path"] = os.path.join(os.getcwd(),config_filepath)
+        print(f"Config file saved to {os.path.join(os.getcwd(),config_filepath)}")
 
         # Instantiate the FL training
         subprocess.run(["bash", "../../../../../src/fl_training.sh"])

@@ -92,8 +92,8 @@ def main(cfg: DictConfig) -> None:
     client_id = cfg.client_id
     
     # Read and Merge the external configuration
-    config_filepath = os.getenv("config_path", "default_config.yaml") #TODO
-    # config_filepath = "/home/dario/Desktop/Federated-C2BM/outputs/multirun/2025-04-09/17-46-33/0/temp_config.yaml"
+    # config_filepath = os.getenv("config_path", "default_config.yaml") #TODO
+    config_filepath = "/home/fdesantis/projects/Federated-C2BM/outputs/multirun/2025-04-14/17-01-42/0/temp_config.yaml"
     cfg = OmegaConf.load(config_filepath)
     # cfg = OmegaConf.merge(cfg, cfg_overrides) #TODO: merge?
     
@@ -119,15 +119,34 @@ def main(cfg: DictConfig) -> None:
         train_dataloader = pickle.load(f)
     with open(val_path, 'rb') as f:
         val_dataloader = pickle.load(f)  
-            
+
+    # Load test dataloader
+    test_path = os.path.join(str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption), "test_dataloader.pkl")
+    #path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
+    #test_path = get_split_paths(cfg, path, True)
+    with open(test_path, 'rb') as f:
+        test_dataloader = pickle.load(f)   
     # instantiate the engine
     engine = hydra.utils.instantiate(cfg.engine)  
 
     # instantiate the trainer
     trainer = Trainer(cfg)
     trainer.logger.log_hyperparams(parse_hyperparams(cfg))  
+
+    # Local training   
+    trainer.fit(engine, train_dataloader)
+
+    # testing
+    trainer.test(engine, test_dataloader)
     
-    # Start Flower client
+    # Local training   
+    trainer.fit(engine, train_dataloader)
+    
+    # testing
+    trainer.test(engine, test_dataloader)
+
+    
+    # Start Flower client
     client = FlowerClient(
         engine=engine,
         trainer=trainer,
