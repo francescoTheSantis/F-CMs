@@ -44,7 +44,7 @@ parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
 from src.utils import get_intervention_policy, remove_cycles, remove_problematic_edges, get_split_paths_fl
 from src.my_hydra import parse_hyperparams
-from src.utils import seed_everything, create_folders, plot_loss_and_accuracy
+from src.utils import seed_everything, create_folders, plot_loss_and_accuracy, get_split_paths
 from src.trainer import Trainer
 from env import CACHE
 
@@ -155,7 +155,9 @@ def main(cfg: DictConfig) -> None:
     print(f"Server uses {cfg.device} device")
     
     # Load test dataloader
-    test_path = os.path.join(str(CACHE / cfg.dataset.name), "test_dataloader.pkl")
+    test_path = os.path.join(str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption), "test_dataloader.pkl")
+    #path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
+    #test_path = get_split_paths(cfg, path, True)
     with open(test_path, 'rb') as f:
         test_dataloader = pickle.load(f)
     

@@ -186,7 +186,7 @@ class Predictor(pl.LightningModule):
             self.test_intervention_single_y['_baseline'].update(y_hat, y)            
 
             # interventions on individual concepts
-            for i, c_name_i in enumerate(self.c_names):
+            for i, c_name_i in [(i, name) for name, i in self.c_name_index.items() if name in self.c_names]:
                 if c_name_i in self.model.virtual_roots: continue
                 # intervene on concept c_name_i
                 intervention_index = get_test_intervention_index(c.shape, i)

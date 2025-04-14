@@ -9,17 +9,13 @@ import os
 def generate_split(cfg, dataset, graph):
     split_and_save(cfg, dataset, graph, 'train')
     split_and_save(cfg, dataset, graph, 'val')
+    split_and_save(cfg, dataset, graph, 'test')
+    # Save the dataloader for the unique, real test-set
     test_dataloader = DataLoader(dataset.data['test'], batch_size=cfg.dataset.batch_size, collate_fn=static_graph_collate)
-    # Save the test dataloader
-    path = os.path.join(str(CACHE / cfg.dataset.name), f"test.pkl")
+    root = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
+    path = os.path.join(root, f"test.pkl")
     with open(path, 'wb') as f:
         pickle.dump(test_dataloader, f)
-
-    # Update graph and c_names
-    if cfg.learning.mode == 'localized':
-        # Update the graph and c_names
-        pass
-    
 
 def split_and_save(cfg, data, graph, set):
         # Create as many splits as the number of clients     
@@ -67,8 +63,11 @@ def split_and_save(cfg, data, graph, set):
                 collate_fn=static_graph_collate
             )
 
+            # Create directory if it doesn't exist
+            root = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
+            os.makedirs(os.path.join(root), exist_ok=True)
             # Store the dataloader in the 
-            path = os.path.join(str(CACHE / cfg.dataset.name), f"{set}set_{i+1}_subgraph_{j+1}.pkl") # Start to count from 1
+            path = os.path.join(root, f"{set}set_{i+1}_subgraph_{j+1}.pkl") # Start to count from 1
             with open(path, 'wb') as f:
                 pickle.dump(dataloader, f)
 

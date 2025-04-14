@@ -109,7 +109,7 @@ def main(cfg: DictConfig) -> None:
     print(f"Client {client_id} uses {cfg.device} device")
     
     # Load client data
-    path = str(CACHE / cfg.dataset.name)
+    path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
     train_path, val_path = get_split_paths_fl(cfg, path, client_id)
     # if the file is not found, raise an error
     if not os.path.exists(train_path) or not os.path.exists(val_path):

@@ -107,8 +107,12 @@ class CBM(nn.Module):
         y_hat = torch.log(y_hat + 1e-6)
         task_loss = loss_form(y_hat, y)
 
+        # feee the parameters related to the computation of the concepts that are masked
+        
+
         # -- concepts loss
         concept_loss = 0
+
         for name, c_hat in c_hat_dict.items():
             if not (c[:,self.c_name_index[name]].long()!=-1).sum()==0:
                 c_hat = torch.log(c_hat + 1e-6)

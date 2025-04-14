@@ -26,12 +26,14 @@ class C2BM(nn.Module):
                  graph=None,
                  graph_labels=None,
                  prop_type='linear',
-                 cat_latent=False):
+                 cat_latent=False,
+                 c_name_index=None):
         super(C2BM, self).__init__()
         
         # to be stored for every model
         self.has_concepts = True
         self.is_causal = True
+        self.c_name_index = c_name_index
 
         # define concepts info parameters
         self.c_names = c_info['names'] # used later to retrieve which are concepts 

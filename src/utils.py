@@ -11,6 +11,7 @@ import random
 from src.data.generate_split import get_subgraph_dict
 import matplotlib.pyplot as plt
 from typing import List
+import re
 
 def model_has_concepts(model):
     if target_classname(model) in ['BlackBox_Multi', 'CBM', 'CEM', 'C2BM', 'SCBM']:
@@ -46,17 +47,29 @@ def clean_empty_configs(cfg: DictConfig) -> DictConfig:
 #         cfg.causal_discovery = None
 #     return cfg
 
+def extract_number_between_substrings(s, start_substring='trainset_', end_substring='_subgraph'):
+    pattern = re.escape(start_substring) + r'(\d+)' + re.escape(end_substring)
+    match = re.search(pattern, s)
+    if match:
+        return int(match.group(1))
+    return None
+
+def identify_subgraph(path, client_id):
+    for file in os.listdir(path):
+        if extract_number_between_substrings(file) == client_id:
+            # Get the substring between "subgraph_" and "."
+            subgraph_id = file.split('subgraph_')[1].split('.')[0]
+            return subgraph_id
+    return None
+
 def update_config_from_data(cfg: DictConfig, dataset) -> DictConfig:
     """ can be used to update the config based on the data, e.g., set input and output size """
     original_c_names = dataset.c_info['names']
     with open_dict(cfg):
         if cfg.learning.mode=='localized':
-            path = str(CACHE / cfg.dataset.name)
+            path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
             # Get the subgraph giventhe client id
-            for file in os.listdir(path):
-                if ('trainset_'+str(cfg.learning.client_id)) in file:
-                    # Get the substring between "subgraph_" and "."
-                    subgraph_id = file.split('subgraph_')[1].split('.')[0]
+            subgraph_id = identify_subgraph(path, cfg.client_id)#file.split('subgraph_')[1].split('.')[0]
             _, updated_c_names = get_subgraph_dict(cfg)  
             updated_c_names = updated_c_names['subgraph_'+subgraph_id]       
             c_names = [name for name in dataset.c_info['names'] if name in updated_c_names]
@@ -96,10 +109,10 @@ def maybe_update_config_with_graph(cfg: DictConfig, graph, interv_policy) -> Dic
     return cfg
 
 def update_intervention_policy_and_graph(cfg: DictConfig, interv_policy, graph):
-    path = str(CACHE / cfg.dataset.name)
+    path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
     # Get the subgraph giventhe client id
     for file in os.listdir(path):
-        if ('trainset_'+str(cfg.learning.client_id)) in file:
+        if ('trainset_'+str(cfg.client_id)) in file:
             # Get the substring between "subgraph_" and "."
             subgraph_id = file.split('subgraph_')[1].split('.')[0]
     c_index, c_names = get_subgraph_dict(cfg) 
@@ -339,6 +352,8 @@ def extract_between(text, split):
         substring1 = 'trainset_'
     elif split=='val':
         substring1 = 'valset_'
+    elif split=='test':
+        substring1 = 'testset_'
     substring2 = '_subgraph'
     start = text.find(substring1)
     end = text.find(substring2, start + len(substring1))
@@ -348,13 +363,19 @@ def extract_between(text, split):
     else:
         return None
     
-def get_split_paths(cfg, path):
-    for file in os.listdir(path):
-        if extract_between(file, 'train') == str(cfg.learning.client_id):
-            train_path = os.path.join(path, file)
-        if extract_between(file, 'val') == str(cfg.learning.client_id):
-            val_path = os.path.join(path, file)
-    return train_path, val_path
+def get_split_paths(cfg, path, test=False):
+    if not test:
+        for file in os.listdir(path):
+            if extract_between(file, 'train') == str(cfg.client_id):
+                train_path = os.path.join(path, file)
+            if extract_between(file, 'val') == str(cfg.client_id):
+                val_path = os.path.join(path, file)
+        return train_path, val_path
+    else:
+        for file in os.listdir(path):
+            if extract_between(file, 'test') == str(cfg.client_id):
+                test_path = os.path.join(path, file)
+        return test_path
 
 
 def get_single_partition(graph, task_index):

@@ -91,9 +91,15 @@ def main(cfg: DictConfig) -> None:
     # Load the unique test-set
     test_dataloader = DataLoader(dataset.data['test'], batch_size=cfg.dataset.batch_size, collate_fn=static_graph_collate)
     # save the test dataloader
-    test_path = os.path.join(str(CACHE / cfg.dataset.name), "test_dataloader.pkl")
+    test_path = os.path.join(str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption), "test_dataloader.pkl")
     with open(test_path, 'wb') as f:
         pickle.dump(test_dataloader, f)
+
+    # Load the test dataloader for the specific client
+    path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
+    #test_path = get_split_paths(cfg, path, True)
+    #with open(test_path, 'rb') as f:
+    #    test_dataloader = pickle.load(f)
 
     # If the training is centralized
     if cfg.learning.mode in ['centralized', 'localized']:
@@ -101,7 +107,6 @@ def main(cfg: DictConfig) -> None:
             print("\033[93mLocalized training\033[0m")
             # Load only the training and validation split specified by the local training parameters
             # From cache get the dataloader
-            path = str(CACHE / cfg.dataset.name)
             train_path, val_path = get_split_paths(cfg, path)
             # if the file is not found, raise an error
             if not os.path.exists(train_path) or not os.path.exists(val_path):
