@@ -149,10 +149,18 @@ def main(cfg: DictConfig) -> None:
     with open_dict(cfg): 
         root = cfg.path
     os.chdir(root)
-
+    
+    # hyperparameters
+    num_threads = cfg.learning.settings.num_threads
+    n_rounds = cfg.learning.settings.n_rounds
+    local_epochs = cfg.learning.settings.local_epochs
+    n_clients = cfg.learning.n_clients
+    ip = cfg.learning.ip 
+    port = cfg.learning.port
+    
     # various preliminaries, it set the seed for reproducibility
-    torch.set_num_threads(cfg.get("num_threads", 1))
-    seed_everything(cfg.get("seed"))
+    torch.set_num_threads(num_threads)
+    seed_everything(cfg.seed)
     create_folders()
     with open_dict(cfg): cfg.update(device="cuda" if torch.cuda.is_available() else "cpu")
     print(f"Server uses {cfg.device} device")
@@ -181,8 +189,8 @@ def main(cfg: DictConfig) -> None:
         """
         config = {
             "current_round": server_round,
-            "local_epochs": cfg.get("local_epochs", 1),
-            "tot_rounds": cfg.get("n_rounds", 100),
+            "local_epochs": local_epochs,
+            "tot_rounds": n_rounds,
         }
         return config
 
@@ -192,9 +200,9 @@ def main(cfg: DictConfig) -> None:
         model=model,
         saving_path="checkpoints",
         # super
-        min_fit_clients=cfg.get("n_clients", 10), # always all training
-        min_evaluate_clients=cfg.get("n_clients", 10), # always all evaluating
-        min_available_clients=cfg.get("n_clients", 10), # always all available
+        min_fit_clients=n_clients, # always all training
+        min_evaluate_clients=n_clients, # always all evaluating
+        min_available_clients=n_clients, # always all available
         evaluate_metrics_aggregation_fn=weighted_average, #TODO
         on_fit_config_fn=fit_config,
         on_evaluate_config_fn=fit_config,
@@ -202,8 +210,8 @@ def main(cfg: DictConfig) -> None:
 
     # Start Flower server and (finish all training and evaluation)
     history = fl.server.start_server(
-        server_address=f"{cfg.get('ip','0.0.0.0')}:{cfg.get('port', '8018')}",   # 0.0.0.0 listens to all available interfaces
-        config=fl.server.ServerConfig(num_rounds=cfg.get("n_rounds", 100)),
+        server_address=f"{ip}:{port}",   # 0.0.0.0 listens to all available interfaces
+        config=fl.server.ServerConfig(num_rounds=n_rounds),
         strategy=strategy,
     )
 
@@ -222,12 +230,11 @@ def main(cfg: DictConfig) -> None:
     # Plots and Evaluation the model on the client datasets, (averaged)
     best_loss_round, best_acc_round = plot_loss_and_accuracy(loss, accuracy, show=False)
     model.load_state_dict(torch.load(f"checkpoints/model_round_{best_loss_round}.pth", weights_only=False))
+    engine.model = model # probably unnecessary
 
     # Evaluate the model on the client datasets    
     trainer.test(engine, test_dataloader)
     print(f"\033[90mTraining time: {round((time.time() - start_time)/60, 2)} minutes\033[0m")
-    
-    # for clients
     
     
 if __name__ == "__main__":

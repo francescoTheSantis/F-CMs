@@ -392,4 +392,5 @@ class Predictor(pl.LightningModule):
             if metric is not None:
                 cfg["monitor"] = metric
         return cfg
+
  

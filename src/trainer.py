@@ -16,6 +16,7 @@ from env import PROJECT_NAME, WANDB_ENTITY
 from hydra.core.hydra_config import HydraConfig
 from src.my_hydra import parse_hyperparams
 from wandb.sdk.lib.runid import generate_id
+import os
 
 class GradientMonitor_afterB(pl.Callback):
     def on_after_backward(self, trainer, pl_module):
@@ -50,7 +51,7 @@ def _get_logger(cfg: DictConfig):
 
 
 class Trainer(_Trainer_):
-    def __init__(self, cfg: DictConfig):
+    def __init__(self, cfg: DictConfig, client_id: int = None):
         callbacks = []
         if cfg.trainer.get("monitor", None) is not None:
             if cfg.trainer.get("patience", None) is not None:
@@ -59,8 +60,8 @@ class Trainer(_Trainer_):
                         monitor=cfg.trainer.monitor,
                         patience=cfg.trainer.patience,
                     )
-                )
-            callbacks.append(
+                )                
+                callbacks.append(
                 ModelCheckpoint(
                     dirpath="checkpoints",
                     every_n_epochs=None,
@@ -76,6 +77,22 @@ class Trainer(_Trainer_):
                 logging_interval="step",
             )
         )
+        
+        # for federated 
+        if client_id is not None:
+            print(f"\033[94mClient ID: {client_id} in trainer\033[0m")
+            ckpt_dir = os.path.join("checkpoints", f"client_{client_id}")
+            callbacks.append(
+                ModelCheckpoint(
+                    dirpath=ckpt_dir,
+                    every_n_epochs=None,
+                    monitor="train_loss",
+                    save_top_k=1,
+                    mode="min",
+                    save_last=True,
+                    save_weights_only=False,
+                )
+            )
         # callbacks.append(GradientMonitor_afterB())
         if cuda.is_available():
             accelerator = "gpu"
@@ -96,3 +113,6 @@ class Trainer(_Trainer_):
             logger=logger,
             **trainer_kwargs,
         )
+    
+    def get_model(self):
+        return self.model

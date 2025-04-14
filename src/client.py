@@ -10,15 +10,16 @@ In a distributed environment, the server_address should be the IP address of the
 have this code running.
 """
 
-from collections import OrderedDict
 
 import torch
 import flwr as fl
+import time
+import shutil
 
 import hydra
-from omegaconf import DictConfig, open_dict, OmegaConf
+from omegaconf import open_dict, OmegaConf
 from omegaconf import OmegaConf
-from omegaconf import DictConfig
+from collections import OrderedDict
 import pickle
 
 import sys
@@ -31,22 +32,23 @@ from src.my_hydra import parse_hyperparams
 from src.utils import seed_everything
 from src.trainer import Trainer
 from env import CACHE
+import argparse
 
 
 # Define Flower client
 class FlowerClient(fl.client.NumPyClient):
     def __init__(self,
             engine,
-            trainer,
             client_id,
             train_dataloader,
             val_dataloader,
+            cfg,
         ):
         self.engine = engine
-        self.trainer = trainer
         self.client_id = client_id # [0,cfg.n_clients]
         self.train_dataloader = train_dataloader
         self.val_dataloader = val_dataloader
+        self.cfg = cfg
 
 
     # get the parameters of the model
@@ -63,7 +65,9 @@ class FlowerClient(fl.client.NumPyClient):
     def fit(self, parameters, config):
         self.set_parameters(parameters)
 
-        # Local training   
+        # Local training 
+        self.trainer = Trainer(self.cfg, client_id=self.client_id)
+        self.trainer.logger.log_hyperparams(parse_hyperparams(self.cfg)) 
         self.trainer.fit(self.engine, self.train_dataloader)
 
         return self.get_parameters(config), len(self.train_dataloader.dataset), {}
@@ -86,24 +90,31 @@ class FlowerClient(fl.client.NumPyClient):
         }
 
 # main
-@hydra.main(config_path="../conf", config_name="my_sweep", version_base="1.3")
-def main(cfg: DictConfig) -> None:
-    # Get client id
-    client_id = cfg.client_id
+def main():
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(description="Flower Client")
+    parser.add_argument("--client_id", type=int, required=True, help="ID of the client")
+    args = parser.parse_args()
+
+    # get client id
+    client_id = args.client_id
     
     # Read and Merge the external configuration
-    # config_filepath = os.getenv("config_path", "default_config.yaml") #TODO
-    config_filepath = "/home/fdesantis/projects/Federated-C2BM/outputs/multirun/2025-04-14/17-01-42/0/temp_config.yaml"
+    config_filepath = os.getenv("config_path", "default_config.yaml") #TODO
+    # config_filepath = "/home/dario/Desktop/Federated-C2BM/outputs/multirun/2025-04-14/17-46-46/0/temp_config.yaml"
     cfg = OmegaConf.load(config_filepath)
     # cfg = OmegaConf.merge(cfg, cfg_overrides) #TODO: merge?
     
-    # TODO: write properly in the federated.yaml
-    cfg.trainer.max_epochs = cfg.get("local_epochs", 1)
+    # hyperparameters
+    num_threads = cfg.learning.settings.num_threads
+    ip = cfg.learning.ip 
+    port = cfg.learning.port
+    cfg.trainer.max_epochs = cfg.learning.settings.local_epochs
     cfg.trainer.patience = 0
     
     # various preliminaries, it set the seed for reproducibility
-    torch.set_num_threads(cfg.get("num_threads", 1))
-    seed_everything(cfg.get("seed"))
+    torch.set_num_threads(num_threads)
+    seed_everything(cfg.seed)
     os.makedirs('results', exist_ok=True)
     with open_dict(cfg): cfg.update(device="cuda" if torch.cuda.is_available() else "cpu")
     print(f"Client {client_id} uses {cfg.device} device")
@@ -120,42 +131,24 @@ def main(cfg: DictConfig) -> None:
     with open(val_path, 'rb') as f:
         val_dataloader = pickle.load(f)  
 
-    # Load test dataloader
-    test_path = os.path.join(str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption), "test_dataloader.pkl")
-    #path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
-    #test_path = get_split_paths(cfg, path, True)
-    with open(test_path, 'rb') as f:
-        test_dataloader = pickle.load(f)   
     # instantiate the engine
-    engine = hydra.utils.instantiate(cfg.engine)  
-
-    # instantiate the trainer
-    trainer = Trainer(cfg)
-    trainer.logger.log_hyperparams(parse_hyperparams(cfg))  
-
-    # Local training   
-    trainer.fit(engine, train_dataloader)
-
-    # testing
-    trainer.test(engine, test_dataloader)
-    
-    # Local training   
-    trainer.fit(engine, train_dataloader)
-    
-    # testing
-    trainer.test(engine, test_dataloader)
-
-    
+    engine = hydra.utils.instantiate(cfg.engine) 
+     
     # Start Flower client
     client = FlowerClient(
         engine=engine,
-        trainer=trainer,
         client_id=client_id,
         train_dataloader=train_dataloader,
         val_dataloader=val_dataloader,
+        cfg=cfg,
     ).to_client()
-    
-    fl.client.start_client(server_address=f"{cfg.get('ip','0.0.0.0')}:{cfg.get('port', '8018')}", client=client) # local host
+    fl.client.start_client(server_address=f"{ip}:{port}", client=client) # local host
 
+    # delete unecessary folders
+    if client_id == 1:
+        time.sleep(5)
+        shutil.rmtree("checkpoints/")
+        shutil.rmtree("results/")
+        
 if __name__ == "__main__":
     main()
