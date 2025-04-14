@@ -43,12 +43,21 @@ class CBM(nn.Module):
                            n_layers=n_layers_encoder,
                            activation=activation)
         
-        # Concept encoder
-        self.c_mlp = MLP(input_size=hidden_size,
-                         hidden_size=concept_hidden_size,
-                         output_size=sum(self.filtered_c_info['cardinality']),
-                         n_layers=n_layers_concept_encoder,
-                         activation=activation)
+        ## Concept encoder
+        #self.c_mlp = MLP(input_size=hidden_size,
+        #                 hidden_size=concept_hidden_size,
+        #                 output_size=sum(self.filtered_c_info['cardinality']),
+        #                 n_layers=n_layers_concept_encoder,
+        #                 activation=activation)
+
+        # Concept encoders, one for each concept
+        self.c_mlp = nn.ModuleDict()
+        for name in self.filtered_c_info['names']:
+            self.c_mlp[name] = MLP(input_size=hidden_size,
+                                   hidden_size=concept_hidden_size,
+                                   output_size=self.filtered_c_info['cardinality'][self.filtered_c_info['names'].index(name)],
+                                   n_layers=n_layers_concept_encoder,
+                                   activation=activation)
         
         # Decoder
         if decoder_type == 'mlp':
@@ -70,10 +79,14 @@ class CBM(nn.Module):
         filtered_c = c[:, [v for k, v in self.c_name_index.items() if k in self.concept_names and k not in self.virtual_roots]]
         filtered_intervention_index = intervention_index[:, [v for k, v in self.c_name_index.items() if k in self.concept_names and k not in self.virtual_roots]]
         
-        c_hat_logits = self.c_mlp(x_encoded)
+        #c_hat_logits = self.c_mlp(x_encoded)
+        c_hat_logits = {}
         c_hat_probs = {}
         for i, name in enumerate(self.filtered_c_info['names']):
-            c_hat_probs[name] = torch.softmax(c_hat_logits[:,sum(self.filtered_c_info['cardinality'][:i]):sum(self.filtered_c_info['cardinality'][:i+1])], dim=1)
+            # Get the logits for the current concept
+            #c_hat_probs[name] = torch.softmax(c_hat_logits[:,sum(self.filtered_c_info['cardinality'][:i]):sum(self.filtered_c_info['cardinality'][:i+1])], dim=1)
+            c_hat_logits[name] = self.c_mlp[name](x_encoded)
+            c_hat_probs[name] = torch.softmax(c_hat_logits[name], dim=1)
             # Maybe intervene on concepts probabilities
             if filtered_c[:,i] is not None and filtered_intervention_index[:,i] is not None:
                 c_hat_probs[name] = maybe_intervene(c_hat_probs[name], filtered_c[:,i], filtered_intervention_index[:,i])
@@ -107,8 +120,8 @@ class CBM(nn.Module):
         y_hat = torch.log(y_hat + 1e-6)
         task_loss = loss_form(y_hat, y)
 
-        # feee the parameters related to the computation of the concepts that are masked
-
+        # freeze the parameters related to the computation of the concepts that are masked
+        
 
         # -- concepts loss
         concept_loss = 0
