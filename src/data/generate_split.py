@@ -85,10 +85,10 @@ def split_and_save(cfg, data, graph, set):
         n = cfg.learning.n_clients
 
         # Get the disctionary containing the subgraphs given the dataset's name
-        #subgraphs, _ = get_subgraph_dict(cfg)
+        subgraphs, _ = get_subgraph_dict(cfg)
         # Get the index of the y variable in the graph
-        y_index = graph.columns.get_loc(cfg.dataset.loader.task_name)
-        subgraphs, _ = get_nodes_subgroups(graph, y_index = y_index, n_subgroups =3, modality = 'task_excluded')
+        #y_index = graph.columns.get_loc(cfg.dataset.loader.task_name)
+        #subgraphs, _ = get_nodes_subgroups(graph, y_index = y_index, n_subgroups =3, modality = 'task_excluded')
 
         # Ensure the tensors can be evenly split
         assert x.size(0) == c.size(0) == y.size(0), "Tensors must have the same number of rows"
