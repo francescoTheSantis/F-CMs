@@ -5,6 +5,59 @@ from torch.utils.data import Dataset
 from src.data.utils import static_graph_collate
 import pickle
 import os
+import random
+
+def get_nodes_subgroups(graph, y_index, n_subgroups, modality= 'task_included'):
+    """
+    This function generates n_subgroups of nodes from the graph with the following properties:
+    - Each subgroup must have at least two nodes
+    - The union of all subgroups must be equal to the original graph
+    - if modality is 'task_included', the task node must be included in each subgroup
+    - if modality is 'task_excluded', the task node must be excluded from each subgroup
+    """
+    nodes_covered = set()
+    n_subgroups_generated = 0
+    subgroups = []
+
+    nodes_to_cover = list(range(len(graph)))
+    # eliminate y_index from nodes_to_cover
+    
+    nodes_to_cover.remove(y_index)
+
+
+    # Step 1: Generate enough subgroups to cover all nodes
+    while len(nodes_covered)< len(nodes_to_cover) or n_subgroups_generated < n_subgroups:
+        # Randomly select a subgroup of nodes
+        subgroup = random.sample(nodes_to_cover, random.randint(2, len(nodes_to_cover)))
+        # check if the subgroup has at least one node in common with another subgroup
+
+        subgroups = subgroups + [subgroup]
+        nodes_covered = nodes_covered.union(set(subgroup))
+        n_subgroups_generated += 1
+
+
+    # Step 2: Merge subgroups until reaching desired number
+    while len(subgroups) > n_subgroups:
+        # Sort by length so smaller ones are merged first
+        subgroups = sorted(subgroups, key=len)
+        # Merge the two smallest
+        first = subgroups.pop(0)
+        second = subgroups.pop(0)
+        merged = list(set(first + second))
+        subgroups.append(merged)
+
+    if modality == 'task_included':
+        # add the task node to each subgroup
+        for i in range(len(subgroups)):
+            if y_index not in subgroups[i]:
+                subgroups[i].append(y_index)
+
+    # return a dictionary with soubgroups as keys and the nodes as values
+    subgraphs = {f'subgraph_{i+1}': subgroup for i, subgroup in enumerate(subgroups)}
+    # return a dictionary with the subgroups as keys and the nodes names as values
+    subgraphs_concept_names = {f'subgraph_{i+1}':[graph.columns[node_idx] for node_idx in subgroup] for i, subgroup in enumerate(subgraphs.values())}
+
+    return subgraphs, subgraphs_concept_names
 
 def generate_split(cfg, dataset, graph):
     split_and_save(cfg, dataset, graph, 'train')
@@ -32,7 +85,10 @@ def split_and_save(cfg, data, graph, set):
         n = cfg.learning.n_clients
 
         # Get the disctionary containing the subgraphs given the dataset's name
-        subgraphs, _ = get_subgraph_dict(cfg)
+        #subgraphs, _ = get_subgraph_dict(cfg)
+        # Get the index of the y variable in the graph
+        y_index = graph.columns.get_loc(cfg.dataset.loader.task_name)
+        subgraphs, _ = get_nodes_subgroups(graph, y_index = y_index, n_subgroups =3, modality = 'task_excluded')
 
         # Ensure the tensors can be evenly split
         assert x.size(0) == c.size(0) == y.size(0), "Tensors must have the same number of rows"
