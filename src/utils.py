@@ -378,56 +378,6 @@ def get_split_paths(cfg, path, test=False):
         return test_path
 
 
-def get_single_partition(graph, task_index):
-    """
-    This function generate a partition of the graph.
-
-    """
-    torch_values_graph = torch.tensor(graph.values)
-    nodes = [task_index]
-    partition = [task_index]
-    while True:
-        # partition the graph starting from the task node
-        # get the parents of the nodes
-        parents = [get_parents(torch_values_graph, node) for node in nodes]
-        # eliminate empty tensors
-        parents = [t for t in parents if t.numel() > 0]
-        # if there are no parents, break the loop
-        if len(parents) == 0:
-            break
-        # Choose randomly between the two options for number_of_parents_to_keep
-        number_of_parents_to_keep = random.choices([
-            max((len(parents) + 1) // 2, 1),
-            max((len(parents) + 1) // 2, 2)],
-            weights= [0.6,0.4],
-            k=1
-        )[0]
-        # select, for each node, at least a random parent
-        parents = [list({random.choice(nodes) for _ in range(number_of_parents_to_keep)}) for nodes in parents]
-        # remove duplicates and flatten the list
-        parents = [int(item) for sublist in parents for item in sublist]
-        parents = list(set(parents))
-        partition.extend(parents)
-        nodes = parents
-    # flatten the list and obtain unique values
-    partition = sorted(list(set(partition)))
-
-    return partition
-
-def get_partitions(graph, task_index, n_clients):
-
-    max_attempts = 100
-    attempts = 0
-    generated_partitions = []
-    while len(generated_partitions)< n_clients and attempts < max_attempts:
-        partition = get_single_partition(graph, task_index)
-        if partition not in generated_partitions:
-            generated_partitions.append(partition)
-        attempts = attempts + 1
-
-    partitions = {i: list(partition) for i, partition in enumerate(generated_partitions)}
-    return partitions
-
 def get_split_paths_fl(cfg, path, client_id):
     for file in os.listdir(path):
         if extract_between(file, 'train') == str(client_id):
@@ -505,3 +455,43 @@ def create_folders():
     os.makedirs('results', exist_ok=True)
     os.makedirs('checkpoints', exist_ok=True)
     os.makedirs('histories', exist_ok=True)
+
+
+def maybe_freeze_parameters(c, model):
+    """
+    This function is used to freeze the parameters of the model
+    that are related to the concepts that are masked if learning = 'federated'
+    Args:
+        c (torch.Tensor): the concept labels
+        model (nn.Module): the model
+    Returns:
+        None
+    """
+    c_indices_to_freeze = torch.where(c[0] == -1)[0]
+
+    for param in model.parameters():
+        param.requires_grad = True
+
+    if model.__class__.__name__=="CBM":
+       c_keys = list(model.c_mlps.keys())
+       c_to_freeze = [c_keys[i] for i in c_indices_to_freeze]
+       for name, mlp in model.c_mlps.items():
+            if name in c_to_freeze:
+                for param in mlp.parameters():
+                    param.requires_grad = False
+
+    if model.__class__.__name__=="CEM":
+        c_to_freeze = model.concept_encoders.keys()[c_indices_to_freeze]
+        for name, concept_encoder in model.concept_encoders.items():
+            if name in c_to_freeze:
+                for param in concept_encoder.parameters():
+                    param.requires_grad = False
+    
+    if model.__class__.__name__=="C2BM":
+        c_to_freeze = model.concept_encoders.keys()[c_indices_to_freeze]
+        for name, concept_encoder in model.concept_encoders.items():
+            if name in c_to_freeze:
+                for param in concept_encoder.parameters():
+                    param.requires_grad = False
+
+    return None

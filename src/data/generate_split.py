@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 from env import CACHE
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
@@ -7,55 +8,157 @@ import pickle
 import os
 import random
 
-def get_nodes_subgroups(graph, y_index, n_subgroups, modality= 'task_included'):
+def get_connected_subgraph(graph, task_index):
+    from src.utils import get_parents
     """
-    This function generates n_subgroups of nodes from the graph with the following properties:
-    - Each subgroup must have at least two nodes
-    - The union of all subgroups must be equal to the original graph
-    - if modality is 'task_included', the task node must be included in each subgroup
-    - if modality is 'task_excluded', the task node must be excluded from each subgroup
+    This function generate a connected subgraph from the original graph.
+    Args:
+        graph: The original graph.
+        task_index: The index of the task for the subgraph.
+    Returns:
+        subgraph: A list of nodes in the subgraph.
     """
+    torch_values_graph = torch.tensor(graph.values)
+    nodes = [task_index]
+    subgraph = [task_index]
+    while True:
+        # partition the graph starting from the task node
+        # get the parents of the nodes
+        parents = [get_parents(torch_values_graph, node) for node in nodes]
+        # eliminate empty tensors
+        parents = [t for t in parents if t.numel() > 0]
+        # if there are no parents, break the loop
+        if len(parents) == 0:
+            break
+        # Choose randomly between the two options for number_of_parents_to_keep
+        number_of_parents_to_keep = random.choices([
+            max((len(parents) + 1) // 2, 1),
+            max((len(parents) + 1) // 2, 2)],
+            weights= [0.6,0.4],
+            k=1
+        )[0]
+        # select, for each node, at least a random parent
+        parents = [list({random.choice(nodes) for _ in range(number_of_parents_to_keep)}) for nodes in parents]
+        # remove duplicates and flatten the list
+        parents = [int(item) for sublist in parents for item in sublist]
+        parents = list(set(parents))
+        subgraph.extend(parents)
+        nodes = parents
+    # flatten the list and obtain unique values
+    subgraph = sorted(list(set(subgraph)))
+
+    return subgraph
+
+def get_subgraphs(graph, y_index, n_subgraphs, modality = 'random_nodes', concept_in_common = False, task_in_common= True):
+    """
+    This function generates n_subgraphs from the original graph.
+
+    If modality is 'random_nodes', the function generates subgraphs composed by random nodes in the graphs.
+    If modality is 'connected_nodes', the function generates subgraphs composed by connected nodes in the graphs (trees).
+
+    The following conditions must be satisfied:
+    - Each subgraph have at least two nodes
+    - If task_in_common is False, the union of all the subgraphs must cover all the nodes in the original graph
+    - If task_in_common is True, the union of all the subgraphs must cover all the nodes in the graph starting from y_index
+    - If concept_in_common is True and modality is 'connected_nodes', the subgraphs must have at least one node in common with another subgraph generated before.
+
+    Args:
+        graph: The original graph.
+        y_index: The index of the task node in the original graph.
+        n_subgraphs: The number of subgraphs to generate.
+        modality: The modality to use for generating the subgraphs. It can be 'random_nodes' or 'connected_nodes'.
+        concept_in_common: If True, the subgraphs must have at least one node in common with another subgraph generated before.
+        task_in_common: If True, the subgraphs must cover all the nodes in the graph starting from y_index.
+        
+    Returns:
+        subgraphs: A dictionary with indices as keys and lists of nodes for each subgraph as values
+        subgraphs_concept_names: A dictionary with indices as keys and the names of the nodes of each subgraph as values
+    """
+    from src.utils import get_roots, get_task_graph
     nodes_covered = set()
-    n_subgroups_generated = 0
-    subgroups = []
+    n_subgraphs_generated = 0
+    subgraphs = []
 
-    nodes_to_cover = list(range(len(graph)))
-    # eliminate y_index from nodes_to_cover
+    if task_in_common:
+        nodes_to_cover = get_task_graph(torch.tensor(graph.values), task_node = y_index)
+        # get nodes in a single list
+        nodes_to_cover = [int(item) for sublist in nodes_to_cover for item in sublist]
+    else:
+        nodes_to_cover = list(range(len(graph)))
     
+    
+    # eliminate y_index from nodes_to_cover
     nodes_to_cover.remove(y_index)
+   
+
+    # Step 1: Generate enough subgraphs to cover all nodes
+    while len(nodes_covered)< len(nodes_to_cover) or n_subgraphs_generated < n_subgraphs:
+
+        if modality == 'random_nodes':
+            # Randomly select a subgroup of nodes
+            subgraph = random.sample(nodes_to_cover, random.randint(2, len(nodes_to_cover)))         
+        if modality == 'connected_nodes':
+            if not task_in_common:
+                # Randomly select a node that is not a root to start the subgraph
+                roots = get_roots(torch.tensor(graph.values))
+                task_index = random.choice([node for node in nodes_to_cover if node not in np.where(roots)[0]])
+            else:
+                task_index = y_index
+            subgraph = get_connected_subgraph(graph, task_index)
+            if y_index in subgraph:
+                # if y_index is in the subgraph, remove it
+                subgraph.remove(y_index)
+            # if concept_in_common, add the subgraph only if it has at least one node in common with another subgraph
+            if concept_in_common:
+                # If the subgraph has no nodes in common with any other subgraph, skip it
+                if n_subgraphs_generated!=0 and not any(set(subgraph).intersection(set(s)) for s in subgraphs):
+                    continue
+       
+        subgraphs = subgraphs + [subgraph]
+
+        nodes_covered = nodes_covered.union(set(subgraph))
+        n_subgraphs_generated += 1
 
 
-    # Step 1: Generate enough subgroups to cover all nodes
-    while len(nodes_covered)< len(nodes_to_cover) or n_subgroups_generated < n_subgroups:
-        # Randomly select a subgroup of nodes
-        subgroup = random.sample(nodes_to_cover, random.randint(2, len(nodes_to_cover)))
-        # check if the subgroup has at least one node in common with another subgroup
 
-        subgroups = subgroups + [subgroup]
-        nodes_covered = nodes_covered.union(set(subgroup))
-        n_subgroups_generated += 1
+    # Step 2: Merge subgraphs until reaching desired number
+    while len(subgraphs) > n_subgraphs:
 
+        if modality == 'random_nodes':
+            # Sort by length so smaller ones are merged first
+            subgraphs = sorted(subgraphs, key=len)
+            # Merge the two smallest
+            first = subgraphs.pop(0)
+            second = subgraphs.pop(0)
+            merged = list(set(first + second))
+            subgraphs.append(merged)
+            
+            
+        if modality == 'connected_nodes':
+            # Sort by length so smaller ones are merged first
+            subgraphs = sorted(subgraphs, key=len)
+            # Try to merge the ones that have at least a node in common
+            merged = False
+            for i in range(len(subgraphs)):
+                for j in range(i+1, len(subgraphs)):
+                    if len(set(subgraphs[i]).intersection(set(subgraphs[j]))) > 0:
+                        merged = True
+                        merged_subgraph = list(set(subgraphs[i] + subgraphs[j]))
+                        subgraphs.pop(j)
+                        subgraphs.pop(i)
+                        subgraphs.append(merged_subgraph)
+                        break
+                if merged:
+                    break
 
-    # Step 2: Merge subgroups until reaching desired number
-    while len(subgroups) > n_subgroups:
-        # Sort by length so smaller ones are merged first
-        subgroups = sorted(subgroups, key=len)
-        # Merge the two smallest
-        first = subgroups.pop(0)
-        second = subgroups.pop(0)
-        merged = list(set(first + second))
-        subgroups.append(merged)
-
-    if modality == 'task_included':
-        # add the task node to each subgroup
-        for i in range(len(subgroups)):
-            if y_index not in subgroups[i]:
-                subgroups[i].append(y_index)
+            # If no merge is possible, just eliminate the smallest subgraph
+            if not merged:
+                subgraphs.pop(0)
 
     # return a dictionary with soubgroups as keys and the nodes as values
-    subgraphs = {f'subgraph_{i+1}': subgroup for i, subgroup in enumerate(subgroups)}
+    subgraphs = {f'subgraph_{i+1}': s for i, s in enumerate(subgraphs)}
     # return a dictionary with the subgroups as keys and the nodes names as values
-    subgraphs_concept_names = {f'subgraph_{i+1}':[graph.columns[node_idx] for node_idx in subgroup] for i, subgroup in enumerate(subgraphs.values())}
+    subgraphs_concept_names = {f'subgraph_{i+1}':[graph.columns[node_idx] for node_idx in s] for i, s in enumerate(subgraphs.values())}
 
     return subgraphs, subgraphs_concept_names
 
@@ -85,10 +188,10 @@ def split_and_save(cfg, data, graph, set):
         n = cfg.learning.n_clients
 
         # Get the disctionary containing the subgraphs given the dataset's name
-        subgraphs, _ = get_subgraph_dict(cfg)
+        #subgraphs, _ = get_subgraph_dict(cfg)
         # Get the index of the y variable in the graph
-        #y_index = graph.columns.get_loc(cfg.dataset.loader.task_name)
-        #subgraphs, _ = get_nodes_subgroups(graph, y_index = y_index, n_subgroups =3, modality = 'task_excluded')
+        y_index = graph.columns.get_loc(cfg.dataset.loader.task_name)
+        subgraphs, _ = get_nodes_subgroups(graph, y_index = y_index, n_subgroups =3, modality = 'task_excluded')
 
         # Ensure the tensors can be evenly split
         assert x.size(0) == c.size(0) == y.size(0), "Tensors must have the same number of rows"
