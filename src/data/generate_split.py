@@ -11,20 +11,20 @@ import random
 def get_connected_subgraph(graph, task_index):
     from src.utils import get_parents
     """
-    This function generate a connected subgraph from the original graph.
+    This function generate a connected subgraph from a graph, which could be the original graph or a subgraph.
     Args:
-        graph: The original graph.
+        graph: The graph.
         task_index: The index of the task for the subgraph.
     Returns:
         subgraph: A list of nodes in the subgraph.
     """
-    torch_values_graph = torch.tensor(graph.values)
+    torch_graph = torch.tensor(graph.values)
     nodes = [task_index]
     subgraph = [task_index]
     while True:
         # partition the graph starting from the task node
         # get the parents of the nodes
-        parents = [get_parents(torch_values_graph, node) for node in nodes]
+        parents = [get_parents(torch_graph, node) for node in nodes]
         # eliminate empty tensors
         parents = [t for t in parents if t.numel() > 0]
         # if there are no parents, break the loop
@@ -49,7 +49,7 @@ def get_connected_subgraph(graph, task_index):
 
     return subgraph
 
-def get_subgraphs(graph, y_index, n_subgraphs, modality = 'random_nodes', concept_in_common = False, task_in_common= True):
+def get_subgraphs(graph, y_index, n_subgraphs, modality = 'random_nodes', concept_in_common = False, task_in_common= True, task_included= True):
     """
     This function generates n_subgraphs from the original graph.
 
@@ -104,6 +104,7 @@ def get_subgraphs(graph, y_index, n_subgraphs, modality = 'random_nodes', concep
                 task_index = random.choice([node for node in nodes_to_cover if node not in np.where(roots)[0]])
             else:
                 task_index = y_index
+                       
             subgraph = get_connected_subgraph(graph, task_index)
             if y_index in subgraph:
                 # if y_index is in the subgraph, remove it
@@ -160,6 +161,13 @@ def get_subgraphs(graph, y_index, n_subgraphs, modality = 'random_nodes', concep
     # return a dictionary with the subgroups as keys and the nodes names as values
     subgraphs_concept_names = {f'subgraph_{i+1}':[graph.columns[node_idx] for node_idx in s] for i, s in enumerate(subgraphs.values())}
 
+    if task_included:
+        # Ensure that the y_index is included in the subgraphs
+        for key in subgraphs.keys():
+            if y_index not in subgraphs[key]:
+                subgraphs[key].append(y_index)
+                subgraphs_concept_names[key].append(graph.columns[y_index])
+
     return subgraphs, subgraphs_concept_names
 
 def generate_split(cfg, dataset, graph):
@@ -188,10 +196,15 @@ def split_and_save(cfg, data, graph, set):
         n = cfg.learning.n_clients
 
         # Get the disctionary containing the subgraphs given the dataset's name
-        subgraphs, _ = get_subgraph_dict(cfg)
+        #subgraphs, _ = get_subgraph_dict(cfg)
         # Get the index of the y variable in the graph
         y_index = graph.columns.get_loc(cfg.dataset.loader.task_name)
-        #subgraphs, _ = get_nodes_subgroups(graph, y_index = y_index, n_subgroups =3, modality = 'task_excluded')
+        # Get the subgraphs based on the graph and y_index
+        subgraphs, _ = get_subgraphs(graph, y_index, round(n/2)+1, 
+                                     modality=cfg.learning.subgraphs.modality,
+                                     concept_in_common=cfg.learning.subgraphs.concept_in_common,
+                                     task_in_common=cfg.learning.subgraphs.task_in_common,
+                                     task_included=cfg.learning.subgraphs.task_included)
 
         # Ensure the tensors can be evenly split
         assert x.size(0) == c.size(0) == y.size(0), "Tensors must have the same number of rows"

@@ -66,9 +66,10 @@ class FlowerClient(fl.client.NumPyClient):
         self.set_parameters(parameters)
 
         # Local training
-        maybe_freeze_parameters(self.train_dataloader.dataset.c, 
-                                self.engine.model, 
-                                freezing = self.cfg.learning.freezing)
+        maybe_freeze_parameters(c = self.train_dataloader.dataset.c, 
+                                model = self.engine.model, 
+                                learning = self.cfg.learning.mode,
+                                freezing = self.cfg.learning.settings.freezing)
 
         # check freezing
         #print("c_to_freeze",self.train_dataloader.dataset.c[0])

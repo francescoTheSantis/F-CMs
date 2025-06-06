@@ -15,7 +15,7 @@ hydra:
       dataset: asia #, sachs, alarm
       # possible models are:
       # blackbox, blackbox_multi, cbm_linear, cbm_mlp, cem, c2bm
-      model: c2bm #, cbm_linear, cbm_mlp, cem, c2bm
+      model: cem #, cbm_linear, cbm_mlp, cem, c2bm
       learning: federated # localized, federated, centralized
       
       

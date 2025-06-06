@@ -1,3 +1,7 @@
 n_clients: 4
 annotation_assumption: 'task_included'
-freezing : true
+subgraphs:
+  modality: 'connected_nodes'
+  concept_in_common: false
+  task_in_common: true
+  task_included: false # TO CHANGE

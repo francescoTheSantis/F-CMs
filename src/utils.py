@@ -457,54 +457,61 @@ def create_folders():
     os.makedirs('histories', exist_ok=True)
 
 
-def maybe_freeze_parameters(c, model, freezing = True):
+def maybe_freeze_parameters(c, model, learning, freezing = True):
     """
-    This function is used to freeze the parameters of the model
-    that are related to the concepts that are masked if learning = 'federated'
+    This function freezes the model parameters related to the concepts masked for the client when learning = 'federated'
     Args:
-        c (torch.Tensor): the concept labels
+        c (torch.Tensor): concept labels
         model (nn.Module): the model
+        learning (str): the learning mode
+        freezing (bool): whether to freeze the parameters or not     
     Returns:
         None
     """
-    c_indices_to_freeze = torch.where(c[0] == -1)[0]
+    if learning == "federated" and freezing:
 
-    for param in model.parameters():
-        param.requires_grad = True
+        c_indices_to_freeze = torch.where(c[0] == -1)[0]
 
-    if model.__class__.__name__=="CBM":
-       c_keys = list(model.c_mlp.keys())
-       c_to_freeze = [c_keys[i] for i in c_indices_to_freeze]
-       for name, mlp in model.c_mlp.items():
-            if name in c_to_freeze:
-                for param in mlp.parameters():
-                    param.requires_grad = False
+        for param in model.parameters():
+            param.requires_grad = True
 
-    if model.__class__.__name__=="CEM":
-        c_keys = list(model.concept_encoders.keys())
-        c_to_freeze = [c_keys[i] for i in c_indices_to_freeze]
-        for name, concept_encoder in model.concept_encoders.items():
-            if name in c_to_freeze:
-                for param in concept_encoder.parameters():
-                    param.requires_grad = False
-    
-    if model.__class__.__name__=="C2BM":
-        c_keys = list(model.concept_encoders.keys())
-        c_to_freeze = [c_keys[i] for i in c_indices_to_freeze]
+        if model.__class__.__name__=="CBM":
+            c_keys = list(model.c_mlp.keys())
+            c_to_freeze = [c_keys[i] for i in c_indices_to_freeze]
+            for name, mlp in model.c_mlp.items():
+                    if name in c_to_freeze:
+                        for param in mlp.parameters():
+                            param.requires_grad = False
+            print("Parameters frozen for concepts:", c_to_freeze)
 
-        for name, concept_encoder in model.concept_encoders.items():
-            if name in c_to_freeze:
-                for param in concept_encoder.parameters():
-                    param.requires_grad = False
+        if model.__class__.__name__=="CEM":
+            c_keys = list(model.concept_encoders.keys())
+            c_to_freeze = [c_keys[i] for i in c_indices_to_freeze]
+            for name, concept_encoder in model.concept_encoders.items():
+                if name in c_to_freeze:
+                    for param in concept_encoder.parameters():
+                        param.requires_grad = False
+            print("Parameters frozen for concepts:", c_to_freeze)
+        
+        if model.__class__.__name__=="C2BM":
+            c_keys = list(model.concept_encoders.keys())
+            c_to_freeze = [c_keys[i] for i in c_indices_to_freeze]
 
-        for _, level in model.propagators.items(): 
-            for c_name, propagator in level.items():
-                if c_name in c_to_freeze:
-                    for param in propagator.parameters():
+            for name, concept_encoder in model.concept_encoders.items():
+                if name in c_to_freeze:
+                    for param in concept_encoder.parameters():
                         param.requires_grad = False
 
-        # check
-        #for name, param in model.named_parameters():
-        #    print(f"{name}: requires_grad = {param.requires_grad}")
+            for _, level in model.propagators.items(): 
+                for c_name, propagator in level.items():
+                    if c_name in c_to_freeze:
+                        for param in propagator.parameters():
+                            param.requires_grad = False
+
+            print("Parameters frozen for concepts:", c_to_freeze)
+
+            # check
+            #for name, param in model.named_parameters():
+            #    print(f"{name}: requires_grad = {param.requires_grad}")
 
     return None
