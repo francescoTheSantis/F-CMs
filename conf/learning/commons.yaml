@@ -1,2 +1,3 @@
-n_clients: 10
+n_clients: 4
 annotation_assumption: 'task_included'
+freezing : true

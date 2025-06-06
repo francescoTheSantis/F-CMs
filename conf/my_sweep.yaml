@@ -20,13 +20,13 @@ hydra:
       
       
 model:
-  hidden_size: 64
+  hidden_size: 128
 
 dataset:
   load_embeddings: false # disable when sweeping over different seeds
   load_graph: false
   load_true_graph: true
-  batch_size: 500
+  batch_size: 128
   #autoencoder:
   #  noise: 0.5  # for bndatasets only
 

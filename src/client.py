@@ -65,10 +65,12 @@ class FlowerClient(fl.client.NumPyClient):
     def fit(self, parameters, config):
         self.set_parameters(parameters)
 
-        # Local training 
-        maybe_freeze_parameters(self.train_dataloader.dataset.c, self.engine.model)
+        # Local training
+        maybe_freeze_parameters(self.train_dataloader.dataset.c, 
+                                self.engine.model, 
+                                freezing = self.cfg.learning.freezing)
 
-        # check
+        # check freezing
         #print("c_to_freeze",self.train_dataloader.dataset.c[0])
         #for name, param in self.engine.model.named_parameters():
         #    print(f"{name}: requires_grad = {param.requires_grad}")

@@ -457,7 +457,7 @@ def create_folders():
     os.makedirs('histories', exist_ok=True)
 
 
-def maybe_freeze_parameters(c, model):
+def maybe_freeze_parameters(c, model, freezing = True):
     """
     This function is used to freeze the parameters of the model
     that are related to the concepts that are masked if learning = 'federated'
