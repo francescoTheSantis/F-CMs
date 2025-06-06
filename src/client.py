@@ -29,7 +29,7 @@ parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
 from src.utils import get_split_paths_fl
 from src.my_hydra import parse_hyperparams
-from src.utils import seed_everything
+from src.utils import seed_everything, maybe_freeze_parameters
 from src.trainer import Trainer
 from env import CACHE
 import argparse
@@ -66,6 +66,14 @@ class FlowerClient(fl.client.NumPyClient):
         self.set_parameters(parameters)
 
         # Local training 
+        maybe_freeze_parameters(self.train_dataloader.dataset.c, self.engine.model)
+
+        # check
+        #print("c_to_freeze",self.train_dataloader.dataset.c[0])
+        #for name, param in self.engine.model.named_parameters():
+        #    print(f"{name}: requires_grad = {param.requires_grad}")
+        #assert 0
+
         self.trainer = Trainer(self.cfg, client_id=self.client_id)
         self.trainer.logger.log_hyperparams(parse_hyperparams(self.cfg)) 
         self.trainer.fit(self.engine, self.train_dataloader)

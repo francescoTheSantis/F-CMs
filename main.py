@@ -26,7 +26,7 @@ from src.utils import seed_everything
 #from src.strategy import CustomFedAvgWithModelSaving
 from src.utils import clean_empty_configs
 from src.data.dataset_block import get_dataset
-from src.utils import get_intervention_policy, remove_cycles, remove_problematic_edges, get_split_paths, get_partitions
+from src.utils import get_intervention_policy, remove_cycles, remove_problematic_edges, get_split_paths
 from src.utils import clean_empty_configs, update_config_from_data, maybe_update_config_with_graph, update_intervention_policy_and_graph
 from src.plots import maybe_plot_graph
 from src.my_hydra import parse_hyperparams

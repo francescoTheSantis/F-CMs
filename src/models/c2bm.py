@@ -210,7 +210,7 @@ class C2BM(nn.Module):
         # -- concepts loss
         concept_loss = 0
         for name, c_hat in c_hat_dict.items():
-            c_hat = torch.log(c_hat + 1e-6)
-            concept_loss += loss_form(c_hat, c[:,self.c_names.index(name)].long())
-
+            if not (c[:,self.c_name_index[name]].long()!=-1).sum()==0:
+                c_hat = torch.log(c_hat + 1e-6)
+                concept_loss += loss_form(c_hat, c[:,self.c_name_index[name]].long()) 
         return self.concept_loss_weight * concept_loss + (1-self.concept_loss_weight) * task_loss

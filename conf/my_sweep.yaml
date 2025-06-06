@@ -15,7 +15,7 @@ hydra:
       dataset: asia #, sachs, alarm
       # possible models are:
       # blackbox, blackbox_multi, cbm_linear, cbm_mlp, cem, c2bm
-      model: blackbox_multi #, cbm_linear, cbm_mlp, cem, c2bm
+      model: c2bm #, cbm_linear, cbm_mlp, cem, c2bm
       learning: federated # localized, federated, centralized
       
       
@@ -26,7 +26,7 @@ dataset:
   load_embeddings: false # disable when sweeping over different seeds
   load_graph: false
   load_true_graph: true
-  batch_size: 128
+  batch_size: 500
   #autoencoder:
   #  noise: 0.5  # for bndatasets only
 
@@ -39,7 +39,7 @@ engine:
 trainer:
   # logger: wandb
   devices: [0]
-  max_epochs: 50
+  max_epochs: 1
   patience: 30
 
 rag:

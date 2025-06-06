@@ -473,25 +473,38 @@ def maybe_freeze_parameters(c, model):
         param.requires_grad = True
 
     if model.__class__.__name__=="CBM":
-       c_keys = list(model.c_mlps.keys())
+       c_keys = list(model.c_mlp.keys())
        c_to_freeze = [c_keys[i] for i in c_indices_to_freeze]
-       for name, mlp in model.c_mlps.items():
+       for name, mlp in model.c_mlp.items():
             if name in c_to_freeze:
                 for param in mlp.parameters():
                     param.requires_grad = False
 
     if model.__class__.__name__=="CEM":
-        c_to_freeze = model.concept_encoders.keys()[c_indices_to_freeze]
+        c_keys = list(model.concept_encoders.keys())
+        c_to_freeze = [c_keys[i] for i in c_indices_to_freeze]
         for name, concept_encoder in model.concept_encoders.items():
             if name in c_to_freeze:
                 for param in concept_encoder.parameters():
                     param.requires_grad = False
     
     if model.__class__.__name__=="C2BM":
-        c_to_freeze = model.concept_encoders.keys()[c_indices_to_freeze]
+        c_keys = list(model.concept_encoders.keys())
+        c_to_freeze = [c_keys[i] for i in c_indices_to_freeze]
+
         for name, concept_encoder in model.concept_encoders.items():
             if name in c_to_freeze:
                 for param in concept_encoder.parameters():
                     param.requires_grad = False
+
+        for _, level in model.propagators.items(): 
+            for c_name, propagator in level.items():
+                if c_name in c_to_freeze:
+                    for param in propagator.parameters():
+                        param.requires_grad = False
+
+        # check
+        #for name, param in model.named_parameters():
+        #    print(f"{name}: requires_grad = {param.requires_grad}")
 
     return None

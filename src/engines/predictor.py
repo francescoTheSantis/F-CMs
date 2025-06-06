@@ -307,6 +307,12 @@ class Predictor(pl.LightningModule):
         y_hat, c_hat = self.model.filter_output_for_metric(y_output, c_output)
         self.update_and_log_metrics("train", y_hat, y, c_hat, c, batch)
         self.log_loss("train", loss, batch_size=batch['batch_size'])
+
+        # check parameter freezing
+        #print("c", c[0])
+        #for name, param in self.model.named_parameters():
+        #    print(f"{name}: requires_grad = {param.requires_grad}") 
+        
         return loss
     
     def on_train_epoch_end(self):
