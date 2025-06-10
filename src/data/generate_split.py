@@ -49,7 +49,7 @@ def get_connected_subgraph(graph, task_index):
 
     return subgraph
 
-def get_subgraphs(graph, y_index, n_subgraphs, modality = 'random_nodes', concept_in_common = False, task_in_common= True, task_included= True):
+def get_subgraphs(graph, y_index, n_subgraphs, modality = 'random_nodes', concept_in_common = False, task_in_common= True):
     """
     This function generates n_subgraphs from the original graph.
 
@@ -68,7 +68,6 @@ def get_subgraphs(graph, y_index, n_subgraphs, modality = 'random_nodes', concep
         n_subgraphs: The number of subgraphs to generate.
         modality: The modality to use for generating the subgraphs. It can be 'random_nodes' or 'connected_nodes'.
         concept_in_common: If True, the subgraphs must have at least one node in common with another subgraph generated before.
-        task_in_common: If True, the subgraphs must cover all the nodes in the graph starting from y_index.
         
     Returns:
         subgraphs: A dictionary with indices as keys and lists of nodes for each subgraph as values
@@ -161,12 +160,6 @@ def get_subgraphs(graph, y_index, n_subgraphs, modality = 'random_nodes', concep
     # return a dictionary with the subgroups as keys and the nodes names as values
     subgraphs_concept_names = {f'subgraph_{i+1}':[graph.columns[node_idx] for node_idx in s] for i, s in enumerate(subgraphs.values())}
 
-    if task_included:
-        # Ensure that the y_index is included in the subgraphs
-        for key in subgraphs.keys():
-            if y_index not in subgraphs[key]:
-                subgraphs[key].append(y_index)
-                subgraphs_concept_names[key].append(graph.columns[y_index])
 
     return subgraphs, subgraphs_concept_names
 
@@ -203,8 +196,7 @@ def split_and_save(cfg, data, graph, set):
         subgraphs, _ = get_subgraphs(graph, y_index, round(n/2)+1, 
                                      modality=cfg.learning.subgraphs.modality,
                                      concept_in_common=cfg.learning.subgraphs.concept_in_common,
-                                     task_in_common=cfg.learning.subgraphs.task_in_common,
-                                     task_included=cfg.learning.subgraphs.task_included)
+                                     task_in_common=cfg.learning.subgraphs.task_in_common)
 
         # Ensure the tensors can be evenly split
         assert x.size(0) == c.size(0) == y.size(0), "Tensors must have the same number of rows"
@@ -229,8 +221,14 @@ def split_and_save(cfg, data, graph, set):
             j = i % len(subgraphs)
             masked_c_splits = apply_mask(c_splits[i], subgraphs[f'subgraph_{j+1}'])
 
+            if not cfg.learning.annotation_assumption =="task_included":
+                # If the task is not included, mask the y variable as well
+                masked_y_splits = -1 * torch.ones_like(y_splits[i])  # Mask y variable
+            else:
+                masked_y_splits = y_splits[i]
+        
             dataloader = DataLoader(
-                CustomDataset(x_splits[i], masked_c_splits, y_splits[i], graph),
+                CustomDataset(x_splits[i], masked_c_splits, masked_y_splits, graph),
                 batch_size=cfg.dataset.batch_size,
                 collate_fn=static_graph_collate
             )
