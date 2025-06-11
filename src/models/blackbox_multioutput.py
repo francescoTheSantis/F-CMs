@@ -77,13 +77,19 @@ class BlackBox_Multi(nn.Module):
 
         # -- task loss
         y_hat = torch.log(y_hat + 1e-6)
-        task_loss = loss_form(y_hat, y)
 
         # -- concepts loss
         concept_loss = 0
         for name, c_hat in c_hat_dict.items():
             if not (c[:,self.c_name_index[name]].long()!=-1).sum()==0:
                 c_hat = torch.log(c_hat + 1e-6)
-                concept_loss += loss_form(c_hat, c[:,self.c_name_index[name]].long())    
+                concept_loss += loss_form(c_hat, c[:,self.c_name_index[name]].long()) 
 
-        return self.concept_loss_weight * concept_loss + (1-self.concept_loss_weight) * task_loss
+        if y[y== -1].numel() != 0:
+            total_loss = concept_loss
+        else:
+            task_loss = loss_form(y_hat, y)
+            total_loss = self.concept_loss_weight * concept_loss + (1-self.concept_loss_weight) * task_loss
+
+
+        return total_loss

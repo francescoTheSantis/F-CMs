@@ -23,6 +23,7 @@ class Predictor(pl.LightningModule):
                 test_interv_policy: Optional[str] = None,
                 test_interv_noise: Optional[float] = 0.,
                 c_name_index: Optional[Mapping[str, int]] = None,
+                annotation_assumption: Optional[str] = None
                 ):
         super(Predictor, self).__init__()         
         self.model = model
@@ -42,6 +43,7 @@ class Predictor(pl.LightningModule):
         self.c_names = c_names
         self.n_concepts = len(c_names)
         self.c_name_index = c_name_index
+        self.annotation_assumption = annotation_assumption
 
         if metrics is None:
             metrics = dict()
@@ -86,12 +88,13 @@ class Predictor(pl.LightningModule):
         c_acc_metrics = {k: metrics.get('classification_acc') for k in self.c_names}
 
         # task accuracy metrics
-        self.train_y_metrics = MetricCollection(
-            metrics={k: self._check_metric(m) for k, m in y_acc_metrics.items()},
-            prefix="train/y/")
-        self.val_y_metrics = MetricCollection(
-            metrics={k: self._check_metric(m) for k, m in y_acc_metrics.items()},
-            prefix="val/y/")
+        if self.annotation_assumption == "task_included":
+            self.train_y_metrics = MetricCollection(
+                metrics={k: self._check_metric(m) for k, m in y_acc_metrics.items()},
+                prefix="train/y/")
+            self.val_y_metrics = MetricCollection(
+                metrics={k: self._check_metric(m) for k, m in y_acc_metrics.items()},
+                prefix="val/y/")
         self.test_y_metrics = MetricCollection(
             metrics={k: self._check_metric(m) for k, m in y_acc_metrics.items()},
             prefix="test/y/")
@@ -274,18 +277,20 @@ class Predictor(pl.LightningModule):
             self.log_metrics(self.cace, batch_size=batch['batch_size'])
 
 
-    def update_and_log_metrics(self, step, y_hat, y, c_hat, c, batch):
-        # update and log task metrics
-        y_collection = getattr(self, f"{step}_y_metrics")
-        y_collection.update(y_hat, y)
-        self.log_metrics(y_collection, batch_size=batch['batch_size'])
-        # update and log concept metrics
-        c_collection = getattr(self, f"{step}_c_metrics")
-        # log metrics for all predicted concepts 
-        # (not necessarily all concepts, some models predicts only a subset of concepts)
-        for k, v in c_hat.items():
-            c_collection[k].update(v, c[:,self.c_name_index[k]])
-        self.log_metrics(c_collection, batch_size=batch['batch_size'])
+    def update_and_log_metrics(self, step, y_hat, y, c_hat, c, batch, calculate_c_metrics= True, calculate_y_metrics= True):
+        if calculate_y_metrics:
+            # update and log task metrics
+            y_collection = getattr(self, f"{step}_y_metrics")
+            y_collection.update(y_hat, y)
+            self.log_metrics(y_collection, batch_size=batch['batch_size'])
+        if calculate_c_metrics:
+            # update and log concept metrics
+            c_collection = getattr(self, f"{step}_c_metrics")
+            # log metrics for all predicted concepts 
+            # (not necessarily all concepts, some models predicts only a subset of concepts)
+            for k, v in c_hat.items():
+                c_collection[k].update(v, c[:,self.c_name_index[k]])
+            self.log_metrics(c_collection, batch_size=batch['batch_size'])
 
     def shared_step(self, batch, step):
         x, c, y = self._unpack_batch(batch)
@@ -305,8 +310,13 @@ class Predictor(pl.LightningModule):
             print('Loss has nan')
         # Update metrics and log
         y_hat, c_hat = self.model.filter_output_for_metric(y_output, c_output)
-        self.update_and_log_metrics("train", y_hat, y, c_hat, c, batch)
+
+        if self.annotation_assumption=="task_included":
+            self.update_and_log_metrics("train", y_hat, y, c_hat, c, batch)
+        else:
+            self.update_and_log_metrics("train", y_hat, y, c_hat, c, batch, calculate_c_metrics = True, calculate_y_metrics = False)
         self.log_loss("train", loss, batch_size=batch['batch_size'])
+        
 
         # check parameter freezing
         #print("c", c[0])
@@ -326,7 +336,12 @@ class Predictor(pl.LightningModule):
         val_loss, y_output, c_output, y, c = self.shared_step(batch, step='val')
         # Update metrics and log
         y_hat, c_hat = self.model.filter_output_for_metric(y_output, c_output)
-        self.update_and_log_metrics("val", y_hat, y, c_hat, c, batch)
+        if self.annotation_assumption=="task_included":
+            self.update_and_log_metrics("val", y_hat, y, c_hat, c, batch)
+        else:
+            self.update_and_log_metrics("val", y_hat, y, c_hat, c, batch, calculate_c_metrics = True, calculate_y_metrics = False)
+ 
+        #self.update_and_log_metrics("val", y_hat, y, c_hat, c, batch)
         self.log_loss("val", val_loss, batch_size=batch['batch_size'])
         return val_loss
     

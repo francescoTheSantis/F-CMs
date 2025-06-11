@@ -1,8 +1,8 @@
 defaults:
   - dataset: asia
   - model: c2bm
-  - engine: predictor
   - learning: centralized
+  - engine: predictor
   - _self_
 
 hydra:

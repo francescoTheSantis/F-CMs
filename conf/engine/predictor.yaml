@@ -14,3 +14,4 @@ optim_kwargs:
 #   _target_: "tsl.metrics.torch.MaskedMAE"
 intervention_prob: 0.1
 test_interv_noise: 0.
+annotation_assumption: "${learning.annotation_assumption}"
