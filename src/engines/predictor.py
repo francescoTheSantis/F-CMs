@@ -7,6 +7,9 @@ from torch import nn
 from torchmetrics import Metric, MetricCollection
 from torchmetrics.collections import _remove_prefix
 import pytorch_lightning as pl
+from src.utils import identify_subgraph
+from src.data.generate_split import get_subgraph_dict
+from env import CACHE
 
 from src.models.layers.intervention import get_test_intervention_index
 
@@ -23,6 +26,7 @@ class Predictor(pl.LightningModule):
                 test_interv_policy: Optional[str] = None,
                 test_interv_noise: Optional[float] = 0.,
                 c_name_index: Optional[Mapping[str, int]] = None,
+                c_names_ood: Optional[list] = None,
                 annotation_assumption: Optional[str] = None
                 ):
         super(Predictor, self).__init__()         
@@ -33,6 +37,7 @@ class Predictor(pl.LightningModule):
         self.optim_kwargs = optim_kwargs or dict()
         self.scheduler_class = scheduler_class
         self.scheduler_kwargs = scheduler_kwargs or dict()
+        self.annotation_assumption = annotation_assumption
 
         # for regularization
         self.intervention_prob = intervention_prob
@@ -43,13 +48,17 @@ class Predictor(pl.LightningModule):
         self.c_names = c_names
         self.n_concepts = len(c_names)
         self.c_name_index = c_name_index
-        self.annotation_assumption = annotation_assumption
+
+        # create an index to name mapping for concepts
+        self.c_index_to_name_map = {i: name for i, name in zip(c_name_index.values(), c_name_index.keys())}
+        self.id_c_idxes = list({k:v for k,v in self.c_index_to_name_map.items() if v in self.c_names}.keys())
+
+        self.c_names_ood = c_names_ood if c_names_ood is not None else []
+        self.c_names_all = c_names + self.c_names_ood # equal to self.c_names if c_names_ood is None or empty
 
         if metrics is None:
             metrics = dict()
         self._set_metrics(metrics)
-
-        self.ood_interventions = None
 
     def forward(self, *args, **kwargs):
         return self.model(*args, **kwargs)
@@ -63,7 +72,8 @@ class Predictor(pl.LightningModule):
         metric.reset()
         return metric
     
-    def set_id_ood_interventions(self, id_concepts):
+    def set_id_ood_interventions(self):
+        id_concepts = self.c_index_id
         id_interventions = []
         self.ood_interventions = []
         for level in self.test_interv_policy:
@@ -85,7 +95,8 @@ class Predictor(pl.LightningModule):
     def _set_metrics(self, metrics):
         # --- accuracy metrics ---
         y_acc_metrics = {'y_accuracy': metrics.get('classification_acc')}
-        c_acc_metrics = {k: metrics.get('classification_acc') for k in self.c_names}
+        # we want to compute the accuracy on both ID and OOD concepts (if any)
+        c_acc_metrics = {k: metrics.get('classification_acc') for k in self.c_names+self.c_names_ood}
 
         # task accuracy metrics
         if self.annotation_assumption == "task_included":
@@ -109,7 +120,7 @@ class Predictor(pl.LightningModule):
         self.test_c_metrics = MetricCollection(
             metrics={k: self._check_metric(m) for k, m in c_acc_metrics.items()},
             prefix="test/c/")      
-          
+            
         if self.model.has_concepts:
             # --- ground truth intervention metrics ---
             c_acc_metrics['_baseline'] = metrics.get('classification_acc')
@@ -133,7 +144,7 @@ class Predictor(pl.LightningModule):
             for l in range(0, len(self.test_interv_policy)+1):
                 childs = list(itertools.chain(*self.test_interv_policy[l:]))
                 for child in childs:
-                    child_name = self.c_names[child]
+                    child_name = self.c_names_all[child]
                     childs_per_level[f'level {l}/child {child_name}'] = metrics.get('classification_acc')
             self.test_intervention_level_c = MetricCollection(
                 metrics={k: self._check_metric(m) for k, m in childs_per_level.items()},
@@ -191,6 +202,13 @@ class Predictor(pl.LightningModule):
             intervention_index = torch.zeros(c_shape)
         return intervention_index.to("cuda" if torch.cuda.is_available() else "cpu")
     
+    def _remove_node_id_ood(self, nodes):
+        for node in nodes:
+            if node not in self.id_c_idxes:
+                # the node is an OOD concept, we remove it from the list of nodes
+                nodes.remove(node)
+        return nodes
+
     def test_intervention(self, batch):
         if self.model.has_concepts:
             x, c, y = self._unpack_batch(batch)
@@ -210,10 +228,17 @@ class Predictor(pl.LightningModule):
             self.test_intervention_single_y['_baseline'].update(y_hat, y)            
 
             # interventions on individual concepts
-            for i, c_name_i in [(i, name) for name, i in self.c_name_index.items() if name in self.c_names]:
+            for i, c_name_i in [(i, name) for name, i in self.c_name_index.items() if name in self.c_names_all]:
                 if c_name_i in self.model.virtual_roots: continue
-                # intervene on concept c_name_i
-                intervention_index = get_test_intervention_index(c.shape, i)
+
+                if c_name_i not in self.c_names:
+                    # The concept is not in the ID concepts, therefore interveaning on this concept
+                    # does not have any effect on the task. 
+                    # By the way, we just avoid to compute the intervention index but we still perform the forward pass
+                    intervention_index = torch.zeros(c.shape, dtype=c.dtype, device=c.device)
+                else:
+                    # intervene on concept c_name_i
+                    intervention_index = get_test_intervention_index(c.shape, i)
                 inputs = {'x':x, 'c':c, 'intervention_index':intervention_index}
                 # forward pass with intervention at test time
                 y_output, c_output = self.forward(**inputs)
@@ -225,6 +250,8 @@ class Predictor(pl.LightningModule):
             # level intervention
             for l in range(0, len(self.test_interv_policy)+1):
                 nodes = list(itertools.chain(*self.test_interv_policy[:l]))
+                # If some nodes are OOD concepts, we remove them from the nodes list in order to not intervene on them
+                nodes = self._remove_node_id_ood(nodes)
                 intervention_index = get_test_intervention_index(c.shape, nodes)
                 inputs = {'x':x, 'c':c, 'intervention_index':intervention_index}
                 # forward pass with intervention at test time
@@ -237,8 +264,14 @@ class Predictor(pl.LightningModule):
                 # after interveening on a level of the graph, how well can we predict each child concept
                 childs = list(itertools.chain(*self.test_interv_policy[l:]))
                 for child_index in childs:
-                    c_name = self.c_names[child_index]
-                    self.test_intervention_level_c[f'level {l}/child {c_name}'].update(c_hat[c_name], c[:,child_index])
+                    c_name = self.c_names_all[child_index]
+                    if c_name in self.c_names:
+                        self.test_intervention_level_c[f'level {l}/child {c_name}'].update(c_hat[c_name], c[:,child_index])
+                    else:
+                        # There is no improvement on the concept accuracy for OOD concepts
+                        self.test_intervention_level_c[f'level {l}/child {c_name}'].update(torch.Tensor([float('nan')]), 
+                                                                                           torch.Tensor([float('nan')]))
+
 
     def test_intervention_fairness(self, batch):
         if self.model.has_concepts:
@@ -317,7 +350,6 @@ class Predictor(pl.LightningModule):
             self.update_and_log_metrics("train", y_hat, y, c_hat, c, batch, calculate_c_metrics = True, calculate_y_metrics = False)
         self.log_loss("train", loss, batch_size=batch['batch_size'])
         
-
         # check parameter freezing
         #print("c", c[0])
         #for name, param in self.model.named_parameters():
@@ -353,6 +385,7 @@ class Predictor(pl.LightningModule):
         self.log_loss("test", test_loss, batch_size=batch['batch_size'])
         # test-time interventions
         self.test_intervention(batch)
+            
         if 'Qualified' in self.c_names:
             self.test_intervention_fairness(batch)
         return test_loss
@@ -414,4 +447,27 @@ class Predictor(pl.LightningModule):
                 cfg["monitor"] = metric
         return cfg
 
- 
+    def prepare_for_test(self, cfg):
+        """
+        Prepare the model for test time. This is called before the test step.
+        """
+        self.model.eval()
+
+        # Get the subgraph for the client
+        concept_ids, concept_names = get_subgraph_dict(cfg)
+        path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
+        concept_id_list = concept_ids['subgraph_'+identify_subgraph(path, cfg.client_id)]
+        concept_name_list = concept_names['subgraph_'+identify_subgraph(path, cfg.client_id)]
+
+        # Store the ids and names of the ID concepts
+        self.c_index_id = concept_id_list
+        self.c_name_id = [name for name in self.c_names if name in concept_name_list]
+
+        # Store the ids and names of the OOD concepts
+        self.c_index_ood = [id for id in range(self.n_concepts) if id not in concept_id_list]
+        self.c_name_ood = [name for name in self.c_names if name not in concept_name_list]
+
+        # Update the ID & OOD interventions
+        self.set_id_ood_interventions()
+
+

@@ -69,12 +69,15 @@ def update_config_from_data(cfg: DictConfig, dataset) -> DictConfig:
         if cfg.learning.mode=='localized':
             path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
             # Get the subgraph giventhe client id
-            subgraph_id = identify_subgraph(path, cfg.client_id)#file.split('subgraph_')[1].split('.')[0]
+            subgraph_id = identify_subgraph(path, cfg.client_id) #file.split('subgraph_')[1].split('.')[0]
             _, updated_c_names = get_subgraph_dict(cfg)  
             updated_c_names = updated_c_names['subgraph_'+subgraph_id]       
             c_names = [name for name in dataset.c_info['names'] if name in updated_c_names]
             c_cardinality = [card for card, name in zip(dataset.c_info['cardinality'], dataset.c_info['names']) if name in c_names]
-            c_info = {'names': c_names, 'cardinality': c_cardinality}
+            
+            # The list of names for out-of-distribution concepts (concepts that the client has never seen before)
+            c_names_ood = [name for name in dataset.c_info['names'] if name not in updated_c_names]
+            c_info = {'names': c_names, 'cardinality': c_cardinality, 'c_names_ood': c_names_ood}
         else:
             c_info = dataset.c_info
             c_names = original_c_names
@@ -88,6 +91,7 @@ def update_config_from_data(cfg: DictConfig, dataset) -> DictConfig:
         )
         cfg.engine.update(
             c_names = c_names,
+            c_names_ood = c_info.get('c_names_ood', []),
             c_name_index = {name: i for i, name in enumerate(original_c_names)}
         )
     return cfg
@@ -110,6 +114,7 @@ def maybe_update_config_with_graph(cfg: DictConfig, graph, interv_policy) -> Dic
 
 def update_intervention_policy_and_graph(cfg: DictConfig, interv_policy, graph):
     path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
+
     # Get the subgraph giventhe client id
     for file in os.listdir(path):
         if ('trainset_'+str(cfg.client_id)) in file:

@@ -15,15 +15,20 @@ class ClassificationAccuracy(Metric):
     def update(self, 
                preds: torch.Tensor, 
                target: torch.Tensor):
-        # Manage Monte Carlo approximation tensor
-        if len(preds.shape)>2:
-            preds = preds.mean(dim=-1)
-        preds = preds.argmax(dim=-1)
-        target = target.flatten().long()
-        _check_same_shape(preds, target)
-        correct = preds.eq(target).sum()
-        self.correct += correct
-        self.total += target.numel()
+        # check if both preds and target are not nan
+        if torch.isnan(preds).any() or torch.isnan(target).any():
+            self.correct += 0
+            self.total += 1
+        else:
+            # Manage Monte Carlo approximation tensor
+            if len(preds.shape)>2:
+                preds = preds.mean(dim=-1)
+            preds = preds.argmax(dim=-1)
+            target = target.flatten().long()
+            _check_same_shape(preds, target)
+            correct = preds.eq(target).sum()
+            self.correct += correct
+            self.total += target.numel()
 
     def compute(self):
         return self.correct.float() / self.total

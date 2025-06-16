@@ -84,7 +84,7 @@ def main(cfg: DictConfig) -> None:
     # e.g., set input and output size of the model
     cfg = update_config_from_data(cfg, dataset)
     if cfg.learning.mode == 'localized':
-        interv_policy, graph = update_intervention_policy_and_graph(cfg, interv_policy, graph)  
+        _, graph = update_intervention_policy_and_graph(cfg, interv_policy, graph)  
     cfg = maybe_update_config_with_graph(cfg, graph, interv_policy)
 
     ############ data block ########################################################################################
