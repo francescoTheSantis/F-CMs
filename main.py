@@ -131,7 +131,7 @@ def main(cfg: DictConfig) -> None:
             # ---- train
             trainer.fit(engine, train_dataloader, val_dataloader)
             # ----- test
-            trainer.test(engine, test_dataloader)
+            trainer.test(engine, test_dataloader, ckpt_path='best')
             trainer.logger.finalize("success")
         finally:
             if isinstance(trainer.logger, WandbLogger):
