@@ -12,11 +12,11 @@ hydra:
       # colormnist, colormnist_ood, celeba, celeba_unfair, siim_pneumothorax
       # asia, sachs, alarm, hailfinder, insurance
       seed: 1 #, 2, 3, 4, 5
-      dataset: asia #, sachs, alarm
+      dataset: asia, sachs #, alarm
       # possible models are:
       # blackbox, blackbox_multi, cbm_linear, cbm_mlp, cem, c2bm
-      model: cem #, cbm_linear, cbm_mlp, cem, c2bm
-      learning: federated # localized, federated, centralized
+      model: cbm_linear, cem, c2bm #, cbm_linear, cbm_mlp, cem, c2bm
+      learning: federated #localized , centralized
       
       
 model:
@@ -27,8 +27,8 @@ dataset:
   load_graph: false
   load_true_graph: true
   batch_size: 128
-  #autoencoder:
-  #  noise: 0.5  # for bndatasets only
+  autoencoder:
+   noise: 0.5  # for bndatasets only
 
 engine:
   intervention_prob: 0.8
@@ -38,8 +38,8 @@ engine:
 
 trainer:
   # logger: wandb
-  devices: [0]
-  max_epochs: 1
+  devices: [1]
+  max_epochs: 100
   patience: 30
 
 rag:
