@@ -12,12 +12,14 @@ class BlackBox(nn.Module):
                  n_layers_decoder=1,
                  activation='leaky_relu',
                  c_info={},
-                 y_info={}):
+                 y_info={},
+                 name: str = 'BlackBox'):
         super(BlackBox, self).__init__()
         
         # to be stored for every model
         self.has_concepts = False
         self.is_causal = False
+        self.name = name
         
         self.encoder = MLP(input_size=input_size,
                            hidden_size=hidden_size,

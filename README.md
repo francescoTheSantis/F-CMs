@@ -1,10 +1,18 @@
 # Federated-C2BM
 
-Esperimenti iniziali:
+## Reproducing the Experiments
 
-  - datasets -> BNlearn graphs (start from small ones)
-  - causal discovery -> up to now just take the true graph and leave the discovery for the future
-  - baseline -> blackbox (federata), cbm (linear , mlp) (federati & non)
-  - metriche -> concept accuracy su nodi locali, concept accuracy su nodi globali, intervention accuracy su locali/globali
+To reproduce the experiments described in this repository, follow these steps:
 
-capire come suddividere i grafi (ed i samples) tra i client
+1. **Create the conda environment:**
+  ```bash
+  conda env create -f environment.yaml
+  ```
+2. **Activate the environment:**
+  ```bash
+  conda activate federated_c2bm
+  ```
+3. **Run the main experiment script:**
+  ```bash
+  python main.py
+  ```

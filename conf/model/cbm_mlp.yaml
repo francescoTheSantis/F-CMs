@@ -8,3 +8,4 @@ n_layers_decoder: 1
 activation: leaky_relu
 concept_loss_weight: 0.5
 decoder_type: mlp
+name: "cbm_mlp"

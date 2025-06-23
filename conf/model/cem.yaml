@@ -7,3 +7,4 @@ n_layers_concept_encoder: 2
 n_layers_decoder: 1
 activation: leaky_relu
 concept_loss_weight: 0.5
+name: "cem"

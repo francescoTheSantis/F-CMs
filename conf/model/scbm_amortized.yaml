@@ -14,3 +14,4 @@ max_epochs: ${trainer.max_epochs}
 reg_precision: "l1"
 concept_loss_weight: 0.5
 decoder_type: mlp
+name: "scbm_amortized"

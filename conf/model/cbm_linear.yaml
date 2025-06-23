@@ -7,3 +7,4 @@ n_layers_concept_encoder: 2
 activation: leaky_relu
 concept_loss_weight: 0.5
 decoder_type: linear
+name: "cbm_linear"

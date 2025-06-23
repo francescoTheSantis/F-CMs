@@ -2,3 +2,4 @@ __pycache__
 outputs
 OLD
 *.ckpt
+plots_DEF_cumulative

@@ -20,13 +20,15 @@ class CEM(nn.Module):
                  concept_loss_weight=0.5,
                  c_info={},
                  y_info={},
-                 c_name_index=None):
+                 c_name_index=None,
+                 name: str = 'CEM'):
         super(CEM, self).__init__()
 
         # to be stored for every model
         self.has_concepts = True
         self.is_causal = False
         self.c_name_index = c_name_index
+        self.name = name
 
         # concepts info
         self.concept_names = c_info['names']

@@ -24,7 +24,7 @@ autoencoder:
   noise: 0.
   latent_dim: 32
   lr: 0.0005
-  epochs: 2000
+  epochs: 20
   batch_size: 512
   patience: 50
 

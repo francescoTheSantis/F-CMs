@@ -30,7 +30,8 @@ class SCBM(nn.Module):
                  reg_weight=1,
                  reg_precision="l1",
                  c_info={},
-                 y_info={}):
+                 y_info={},
+                 name: str = 'SCBM'):
         super(SCBM, self).__init__()
         
         # to be stored for every model
@@ -38,6 +39,7 @@ class SCBM(nn.Module):
         self.is_causal = False
         self.max_epochs = max_epochs
         self.output_size = output_size
+        self.name = name
 
         # model specific
         self.cov_type = cov_type

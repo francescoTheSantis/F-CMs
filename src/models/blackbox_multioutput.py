@@ -17,13 +17,15 @@ class BlackBox_Multi(nn.Module):
                  concept_loss_weight=0.5,
                  c_info={},
                  y_info={},
-                 c_name_index=None):
+                 c_name_index=None,
+                 name: str = 'BlackBox_Multi'):
         super(BlackBox_Multi, self).__init__()
         
         # to be stored for every model
         self.has_concepts = False
         self.is_causal = False
         self.c_name_index = c_name_index
+        self.name = name
 
         self.concept_names = c_info['names']
         self.concept_cardinality = c_info['cardinality']

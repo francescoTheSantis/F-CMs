@@ -8,3 +8,4 @@ activation: leaky_relu
 concept_loss_weight: 0.5
 prop_type: 'equations'
 cat_latent: false
+name: "c2bm"

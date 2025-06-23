@@ -20,13 +20,15 @@ class CBM(nn.Module):
                  decoder_type='mlp',
                  c_info={},
                  y_info={},
-                 c_name_index=None):
+                 c_name_index=None,
+                 name: str = 'CBM'):
         super(CBM, self).__init__()
 
         # to be stored for every model
         self.has_concepts = True
         self.is_causal = False
         self.c_name_index = c_name_index
+        self.name = name
 
         # concepts info
         self.concept_names = c_info['names']
