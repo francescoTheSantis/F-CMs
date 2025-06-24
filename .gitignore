@@ -3,3 +3,11 @@ outputs
 OLD
 *.ckpt
 plots_DEF_cumulative
+
+*.pth
+*.png
+*.log
+*.pkl
+
+# ignore all the folders that start with outputs
+outputs*
