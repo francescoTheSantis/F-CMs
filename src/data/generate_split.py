@@ -85,10 +85,8 @@ def get_subgraphs(graph, y_index, n_subgraphs, modality = 'random_nodes', concep
     else:
         nodes_to_cover = list(range(len(graph)))
     
-    
     # eliminate y_index from nodes_to_cover
     nodes_to_cover.remove(y_index)
-   
 
     # Step 1: Generate enough subgraphs to cover all nodes
     while len(nodes_covered)< len(nodes_to_cover) or n_subgraphs_generated < n_subgraphs:

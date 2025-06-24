@@ -1,5 +1,5 @@
 n_clients: 4
-annotation_assumption: 'task_excluded'
+annotation_assumption: 'task_included'
 subgraphs:
   modality: 'connected_nodes'
   concept_in_common: false
