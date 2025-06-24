@@ -20,22 +20,25 @@ from plotly.subplots import make_subplots
 # colors in rgb format
 # 'cem' is red, 'blackbox' is grey, 'crm' is green, 'cbm_linear' is light_blue, 'cbm_mlp' is darker_blue
 colors = {'cem': '255, 0, 0', 
-          'blackbox': '128, 128, 128', 
+          'blackbox_multi': '128, 128, 128',
+          'blackbox': '128, 128, 128',
           'cbm_linear': '64, 224, 208',
           'cbm_mlp': '0, 150, 255',
-          'crm': '0, 128, 0'}
+          'c2bm': '0, 128, 0'}
 
-legend = {'blackbox': 'OpaqNN',
+legend = {'blackbox_multi': 'OpaqNN',
+          'blackbox': 'OpaqNN (task)',
           'cem': 'CEM',
           'cbm_linear': 'CBM₊ₗᵢₙ',
           'cbm_mlp': 'CBM₊ₘₗₚ',
-          'crm': 'C²BM'
+          'c2bm': 'C²BM'
 }
-markers = {'blackbox': 'circle',
+markers = {'blackbox_multi': 'circle',
+            'blackbox': 'square',
            'cem': 'square',
            'cbm_linear': 'diamond',
            'cbm_mlp': 'cross',
-           'crm': 'triangle-up'
+           'c2bm': 'triangle-up'
     }
  
 title_font_size = 80 # 80

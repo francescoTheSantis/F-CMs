@@ -48,14 +48,15 @@ os.makedirs(folder, exist_ok=True)
 
 # List the paths containing the results
 paths = [
-    "/home/fdesantis/projects/Federated-C2BM/outputs/multirun/2025-06-23/09-26-22",
+    "/home/fdesantis/projects/Federated-C2BM/outputs/multirun/2025-06-24/11-02-38",
+    #"/home/fdesantis/projects/Federated-C2BM/outputs_dario/multirun/2025-06-24/00-14-38"
 ]
 
 ###### Collect results ######
 
 possible_datasets = title.keys()
-possible_learning_modes = ['localized', 'federated', 'centralized']
-possible_models = ['blackbox', 'cbm_linear', 'cbm_mlp', 'cem', 'crm']
+possible_learning_modes = ['localized', 'federated', 'centralized', 'local_federated']
+possible_models = ['blackbox_multi', 'cbm_linear', 'cbm_mlp', 'cem', 'c2bm']
 
 exps_path = []
 lmr_paths = []
@@ -77,11 +78,11 @@ for exp_path in exps_path:
     root_result_dir[conf_learning][conf_dataset][conf_model] += [exp_path]
 
 
+######## Make plots for each learning mode and dataset combination ########
+
 std_mean = True
 std_95 = True
 cumulative = True
-
-
 for learning_mode in possible_learning_modes:
     label_acc_results = pd.DataFrame(index=possible_models, 
                                 columns=possible_datasets)
@@ -96,25 +97,24 @@ for learning_mode in possible_learning_modes:
         # average accuracy
         # print('Average accuracy')
         for model in possible_models:
-            try:
-                # print(f'--{model}--')
-                average = []
-                average_noisy = []
-                average_task = []
-                for i, run in enumerate(root_result_dir_d[model]):
-                    single = []
-                    task_acc = pickle.load(open(run + '/results/y_accuracy.pkl', 'rb'))['_baseline']
-                    single.append(task_acc)
-                    # and all valid concepts
-                    c_accuracy = pickle.load(open(run + '/results/c_accuracy.pkl', 'rb'))
-                    valid_concepts = [k for k, v in pickle.load(open(root_result_dir_d['crm'][i] + '/results/c_accuracy.pkl', 'rb')).items() if not np.isnan(v)]
-                    for c in valid_concepts:
-                        single.append(c_accuracy[c])
-                    average.append(np.array(single).mean())
-                    average_task.append(task_acc)
+            # print(f'--{model}--')
+            average = []
+            average_noisy = []
+            average_task = []
+            for i, run in enumerate(root_result_dir_d[model]):
+                single = []
+                task_acc = pickle.load(open(run + '/results/y_accuracy.pkl', 'rb'))['_baseline']
+                single.append(task_acc)
+                # and all valid concepts
+                c_accuracy = pickle.load(open(run + '/results/c_accuracy.pkl', 'rb'))
+                valid_concepts = [k for k, v in pickle.load(open(root_result_dir_d['c2bm'][i] + '/results/c_accuracy.pkl', 'rb')).items() if not np.isnan(v)]
+                for c in valid_concepts:
+                    single.append(c_accuracy[c])
+                average.append(np.array(single).mean())
+                average_task.append(task_acc)
 
-                    # if model != 'blackbox':
-                    #     average_noisy.append(pickle.load(open(run + '/results/single_c_interventions_on_y.pkl', 'rb'))['_baseline'])
+                # if model != 'blackbox':
+                #     average_noisy.append(pickle.load(open(run + '/results/single_c_interventions_on_y.pkl', 'rb'))['_baseline'])
 
                 # compute the average
                 std = np.array(average).std(ddof=1)
@@ -133,8 +133,6 @@ for learning_mode in possible_learning_modes:
                     std = 1.96 * std
                 task_acc_results.loc[model, dataset] = f'{round(np.array(average_task).mean()*100,2)} ± {round(std*100,2)}'
                 # acc_results_noisy.loc[model, dataset] = f'{round(np.array(average_noisy).mean()*100,2)} ± {round(std_noisy*100,2)}'   
-            except:
-                print(f'Data for {model}, {dataset} not found.')
 
         res_to_plot = {model:{} for model in root_result_dir_d.keys()}
         std_to_plot = {model:{} for model in root_result_dir_d.keys()}
@@ -144,7 +142,7 @@ for learning_mode in possible_learning_modes:
             try:
                 # print(f'--{model}--')
                 average = []
-                if model != 'blackbox':
+                if model != 'blackbox_multi':
                     for i, run in enumerate(root_result_dir_d[model]):
                         y_baseline = pickle.load(open(run + '/results/y_accuracy.pkl', 'rb'))['_baseline']
                         # print(f"({dataset}) (run {i+1}) Baseline y test accuracy for {model}: {y_baseline}")
@@ -186,7 +184,7 @@ for learning_mode in possible_learning_modes:
             # print(f'--{model}--')
             average = []
             try:
-                if model != 'blackbox':
+                if model != 'blackbox_multi':
                     for i, run in enumerate(root_result_dir_d[model]):
                         file = pickle.load(open(run + '/graph.pkl', 'rb'))
                         policy = file['policy']
@@ -214,8 +212,8 @@ for learning_mode in possible_learning_modes:
             except:
                 print(f'Data for {model}, {dataset} not found.')
 
-        res_to_plot['blackbox'] = {key: 0 for key in res_to_plot['crm'].keys()}
-        std_to_plot['blackbox'] = {key: 0 for key in std_to_plot['crm'].keys()}
+        res_to_plot['blackbox'] = {key: 0 for key in res_to_plot['c2bm'].keys()}
+        std_to_plot['blackbox'] = {key: 0 for key in std_to_plot['c2bm'].keys()}
         # compute cumulative improvement
         if cumulative:
             res_to_plot, std_to_plot = cumulative_improvement(res_to_plot, std_to_plot)
@@ -224,12 +222,10 @@ for learning_mode in possible_learning_modes:
                                     'Cumul. improv. (%) on task acc.',
                                     f'{title[dataset]}')
         # write a random plot before the real one (to avoid weird box in the pdf)
-        pio.write_image(fig, f"{folder}/{dataset}_LI_on_y.pdf")
+        pio.write_image(fig, f"{folder}/{learning_mode}/{dataset}_LI_on_y.pdf")
         # wait 0.5 seconds
         time.sleep(1)   
-        pio.write_image(fig, f"{folder}/{dataset}_LI_on_y.pdf", width=2.0*600, height=2.0*600, scale=1)
-
-
+        pio.write_image(fig, f"{folder}/{learning_mode}/{dataset}_LI_on_y.pdf", width=2.0*600, height=2.0*600, scale=1)
 
         res_to_plot = {model:{} for model in root_result_dir_d.keys()}
         std_to_plot = {model:{} for model in root_result_dir_d.keys()}
@@ -239,7 +235,7 @@ for learning_mode in possible_learning_modes:
             try:
                 # print(f'--{model}--')
                 average = []
-                if model != 'blackbox':
+                if model != 'blackbox_multi':
                     for i, run in enumerate(root_result_dir_d[model]):
                         file = pickle.load(open(run + '/graph.pkl', 'rb'))
                         policy = file['policy']
@@ -268,8 +264,8 @@ for learning_mode in possible_learning_modes:
             except:
                 print(f'Data for {model}, {dataset} not found.')
 
-        res_to_plot['blackbox'] = {key: 0 for key in res_to_plot['crm'].keys()}
-        std_to_plot['blackbox'] = {key: 0 for key in std_to_plot['crm'].keys()}
+        res_to_plot['blackbox'] = {key: 0 for key in res_to_plot['c2bm'].keys()}
+        std_to_plot['blackbox'] = {key: 0 for key in std_to_plot['c2bm'].keys()}
         if cumulative:
             res_to_plot, std_to_plot = cumulative_improvement(res_to_plot, std_to_plot)
         fig = plot_level_intervention(res_to_plot, 
@@ -282,7 +278,6 @@ for learning_mode in possible_learning_modes:
         time.sleep(1)   
         pio.write_image(fig, f"{folder}/{dataset}_LI_on_c.pdf", width=2.0*600, height=2.0*600, scale=1)
 
-
         res_to_plot = {model:{} for model in root_result_dir_d.keys()}
         std_to_plot = {model:{} for model in root_result_dir_d.keys()}
         # level interventions on Y + concepts
@@ -290,7 +285,7 @@ for learning_mode in possible_learning_modes:
         for model in possible_models:
             average = []
             try:
-                if model != 'blackbox':
+                if model != 'blackbox_multi':
                     for i, run in enumerate(root_result_dir_d[model]):
                         file = pickle.load(open(run + '/graph.pkl', 'rb'))
                         policy = file['policy']
@@ -331,8 +326,8 @@ for learning_mode in possible_learning_modes:
             except:
                 print(f'Data for {model}, {dataset} not found.')
                 
-        res_to_plot['blackbox'] = {key: 0 for key in res_to_plot['crm'].keys()}
-        std_to_plot['blackbox'] = {key: 0 for key in std_to_plot['crm'].keys()}
+        res_to_plot['blackbox'] = {key: 0 for key in res_to_plot['c2bm'].keys()}
+        std_to_plot['blackbox'] = {key: 0 for key in std_to_plot['c2bm'].keys()}
         if cumulative:
             res_to_plot, std_to_plot = cumulative_improvement(res_to_plot, std_to_plot)
         fig = plot_level_intervention(res_to_plot, 
@@ -340,10 +335,10 @@ for learning_mode in possible_learning_modes:
                                     'Cumul. improv. (%) on label acc.',
                                     f'{title[dataset]}')
         # write a random plot before the real one (to avoid weird box in the pdf)
-        pio.write_image(fig, f"{folder}/{dataset}_LI_on_both.pdf")
+        pio.write_image(fig, f"{folder}/{learning_mode}/{dataset}_LI_on_both.pdf")
         # wait 0.5 seconds
         time.sleep(1)   
-        pio.write_image(fig, f"{folder}/{dataset}_LI_on_both.pdf", width=2.0*600, height=2.0*600, scale=1)
+        pio.write_image(fig, f"{folder}/{learning_mode}/{dataset}_LI_on_both.pdf", width=2.0*600, height=2.0*600, scale=1)
 
 print('-- Label accuracy (concepts + task) --')
 print(label_acc_results)
