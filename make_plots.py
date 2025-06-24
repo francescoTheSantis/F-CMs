@@ -43,19 +43,32 @@ def cumulative_improvement(means, stds):
             stds[model][level] = values_stds[:level+1].sum()
     return means, stds
 
+def is_empty_check(res_to_plot):
+    """
+    Check if the res_to_plot is empty (i.e. all values are 0)
+    Args:
+        res_to_plot: a dictionary of dictionaries
+    Returns:
+        True if the res_to_plot is empty, False otherwise
+    """
+    for model in res_to_plot.keys():
+        if len(res_to_plot[model]) > 0:
+            return False
+    return True
+
 folder = 'plots_DEF_cumulative'
 os.makedirs(folder, exist_ok=True)
 
 # List the paths containing the results
 paths = [
-    "/home/fdesantis/projects/Federated-C2BM/outputs/multirun/2025-06-24/11-02-38",
-    #"/home/fdesantis/projects/Federated-C2BM/outputs_dario/multirun/2025-06-24/00-14-38"
+    "/home/fdesantis/projects/Federated-C2BM/outputs/multirun/2025-06-24/16-12-02",
+    "/home/fdesantis/projects/Federated-C2BM/outputs/multirun/2025-06-24/16-22-46",
 ]
 
 ###### Collect results ######
 
 possible_datasets = title.keys()
-possible_learning_modes = ['localized', 'federated', 'centralized', 'local_federated']
+possible_learning_modes = ['localized', 'centralized', 'local_federated']
 possible_models = ['blackbox_multi', 'cbm_linear', 'cbm_mlp', 'cem', 'c2bm']
 
 exps_path = []
@@ -83,6 +96,10 @@ for exp_path in exps_path:
 std_mean = True
 std_95 = True
 cumulative = True
+
+label_acc_results_x_learning_mode = {}
+task_acc_results_x_learning_mode = {}
+
 for learning_mode in possible_learning_modes:
     label_acc_results = pd.DataFrame(index=possible_models, 
                                 columns=possible_datasets)
@@ -117,6 +134,7 @@ for learning_mode in possible_learning_modes:
                 #     average_noisy.append(pickle.load(open(run + '/results/single_c_interventions_on_y.pkl', 'rb'))['_baseline'])
 
                 # compute the average
+
                 std = np.array(average).std(ddof=1)
                 # std_noisy = np.array(average_noisy).std(ddof=1)
                 if std_mean:
@@ -164,17 +182,19 @@ for learning_mode in possible_learning_modes:
             except:
                 print(f'Data for {model}, {dataset} not found.')
 
-        fig = plot_intervention(res_to_plot, # accuracy delta after noise wrt to true baseline
+        # if the res_to_plot is not empty, save the figure
+        if not is_empty_check(res_to_plot):
+            fig = plot_intervention(res_to_plot, # accuracy delta after noise wrt to true baseline
                                 std_to_plot,
                                 f'{title[dataset]}')
-        # write a random plot before the real one (to avoid weird box in the pdf)
-        sub_folder = f'{folder}/{learning_mode}'
-        os.makedirs(sub_folder, exist_ok=True)
-        pio.write_image(fig, f"{folder}/{learning_mode}/{dataset}_SI_on_y.pdf")
-        # wait 0.5 seconds
-        time.sleep(1)
-        # save a figure of 600dpi, with 2.0 inches, and  height 0.75inches
-        pio.write_image(fig, f"{folder}/{learning_mode}/{dataset}_SI_on_y.pdf", width=2.6*600, height=1.5*600, scale=1)
+            # write a random plot before the real one (to avoid weird box in the pdf)
+            sub_folder = f'{folder}/{learning_mode}' 
+            os.makedirs(sub_folder, exist_ok=True)
+            pio.write_image(fig, f"{folder}/{learning_mode}/{dataset}_SI_on_y.pdf")
+            # wait 0.5 seconds
+            time.sleep(1)
+            # save a figure of 600dpi, with 2.0 inches, and  height 0.75inches
+            pio.write_image(fig, f"{folder}/{learning_mode}/{dataset}_SI_on_y.pdf", width=2.6*600, height=1.5*600, scale=1)
         
         res_to_plot = {model:{} for model in root_result_dir_d.keys()}
         std_to_plot = {model:{} for model in root_result_dir_d.keys()}
@@ -217,18 +237,21 @@ for learning_mode in possible_learning_modes:
         # compute cumulative improvement
         if cumulative:
             res_to_plot, std_to_plot = cumulative_improvement(res_to_plot, std_to_plot)
-        fig = plot_level_intervention(res_to_plot, 
+        
+        if not is_empty_check(res_to_plot):
+            fig = plot_level_intervention(res_to_plot, 
                                     std_to_plot,
                                     'Cumul. improv. (%) on task acc.',
                                     f'{title[dataset]}')
-        # write a random plot before the real one (to avoid weird box in the pdf)
-        pio.write_image(fig, f"{folder}/{learning_mode}/{dataset}_LI_on_y.pdf")
-        # wait 0.5 seconds
-        time.sleep(1)   
-        pio.write_image(fig, f"{folder}/{learning_mode}/{dataset}_LI_on_y.pdf", width=2.0*600, height=2.0*600, scale=1)
+            # write a random plot before the real one (to avoid weird box in the pdf)
+            pio.write_image(fig, f"{folder}/{learning_mode}/{dataset}_LI_on_y.pdf")
+            # wait 0.5 seconds
+            time.sleep(1)   
+            pio.write_image(fig, f"{folder}/{learning_mode}/{dataset}_LI_on_y.pdf", width=2.0*600, height=2.0*600, scale=1)
 
-        res_to_plot = {model:{} for model in root_result_dir_d.keys()}
-        std_to_plot = {model:{} for model in root_result_dir_d.keys()}
+            res_to_plot = {model:{} for model in root_result_dir_d.keys()}
+            std_to_plot = {model:{} for model in root_result_dir_d.keys()}
+
         # level interventions on concepts
         # print('Level interventions on concepts')
         for model in possible_models:
@@ -268,15 +291,17 @@ for learning_mode in possible_learning_modes:
         std_to_plot['blackbox'] = {key: 0 for key in std_to_plot['c2bm'].keys()}
         if cumulative:
             res_to_plot, std_to_plot = cumulative_improvement(res_to_plot, std_to_plot)
-        fig = plot_level_intervention(res_to_plot, 
-                                    std_to_plot,
-                                    'Cumul. improv. (%) on concept acc.',
-                                    f'{title[dataset]}')
-        # write a random plot before the real one (to avoid weird box in the pdf)
-        pio.write_image(fig, f"{folder}/{dataset}_LI_on_c.pdf")
-        # wait 0.5 seconds
-        time.sleep(1)   
-        pio.write_image(fig, f"{folder}/{dataset}_LI_on_c.pdf", width=2.0*600, height=2.0*600, scale=1)
+
+        if not is_empty_check(res_to_plot):
+            fig = plot_level_intervention(res_to_plot, 
+                                        std_to_plot,
+                                        'Cumul. improv. (%) on concept acc.',
+                                        f'{title[dataset]}')
+            # write a random plot before the real one (to avoid weird box in the pdf)
+            pio.write_image(fig, f"{folder}/{dataset}_LI_on_c.pdf")
+            # wait 0.5 seconds
+            time.sleep(1)   
+            pio.write_image(fig, f"{folder}/{dataset}_LI_on_c.pdf", width=2.0*600, height=2.0*600, scale=1)
 
         res_to_plot = {model:{} for model in root_result_dir_d.keys()}
         std_to_plot = {model:{} for model in root_result_dir_d.keys()}
@@ -330,21 +355,30 @@ for learning_mode in possible_learning_modes:
         std_to_plot['blackbox'] = {key: 0 for key in std_to_plot['c2bm'].keys()}
         if cumulative:
             res_to_plot, std_to_plot = cumulative_improvement(res_to_plot, std_to_plot)
-        fig = plot_level_intervention(res_to_plot, 
-                                    std_to_plot,
-                                    'Cumul. improv. (%) on label acc.',
-                                    f'{title[dataset]}')
-        # write a random plot before the real one (to avoid weird box in the pdf)
-        pio.write_image(fig, f"{folder}/{learning_mode}/{dataset}_LI_on_both.pdf")
-        # wait 0.5 seconds
-        time.sleep(1)   
-        pio.write_image(fig, f"{folder}/{learning_mode}/{dataset}_LI_on_both.pdf", width=2.0*600, height=2.0*600, scale=1)
+
+        if not is_empty_check(res_to_plot):
+            fig = plot_level_intervention(res_to_plot, 
+                                        std_to_plot,
+                                        'Cumul. improv. (%) on label acc.',
+                                        f'{title[dataset]}')
+            # write a random plot before the real one (to avoid weird box in the pdf)
+            pio.write_image(fig, f"{folder}/{learning_mode}/{dataset}_LI_on_both.pdf")
+            # wait 0.5 seconds
+            time.sleep(1)   
+            pio.write_image(fig, f"{folder}/{learning_mode}/{dataset}_LI_on_both.pdf", width=2.0*600, height=2.0*600, scale=1)
+    label_acc_results_x_learning_mode[learning_mode] = label_acc_results
+    task_acc_results_x_learning_mode[learning_mode] = task_acc_results
 
 print('-- Label accuracy (concepts + task) --')
-print(label_acc_results)
+for learning_mode, label_acc_results in label_acc_results_x_learning_mode.items():
+    print(f'-- {learning_mode} --')
+    print(label_acc_results)
+print('')
 print('')
 print('-- Task accuracy --')
-print(task_acc_results)
+for learning_mode, task_acc_results in task_acc_results_x_learning_mode.items():
+    print(f'-- {learning_mode} --')
+    print(task_acc_results)
 
 # print('-- after noise is injected at test time --')
 # print(acc_results_noisy)
