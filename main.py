@@ -16,23 +16,27 @@ from omegaconf import DictConfig, open_dict, OmegaConf
 import pickle
 from pathlib import Path
 import warnings
+import time
 
-import flwr as fl
 import hydra
 from hydra.core.hydra_config import HydraConfig
-from src.utils import seed_everything
+from src.utils import seed_everything, maybe_freeze_parameters, aggregate, get_parameters, set_parameters, remove_checkpoints, load_dataloaders
 
 #from src.server import get_evaluate_fn
 #from src.strategy import CustomFedAvgWithModelSaving
 from src.utils import clean_empty_configs
 from src.data.dataset_block import get_dataset
-from src.utils import get_intervention_policy, remove_cycles, remove_problematic_edges, get_split_paths
+from src.utils import get_intervention_policy, remove_cycles, remove_problematic_edges, get_split_paths, get_split_paths_fl
 from src.utils import clean_empty_configs, update_config_from_data, maybe_update_config_with_graph, update_intervention_policy_and_graph
 from src.plots import maybe_plot_graph
 from src.my_hydra import parse_hyperparams
 from src.data.generate_split import generate_split, get_subgraph_dict
+from collections import OrderedDict
+from typing import List, Dict, Tuple
+import copy
 
 from env import CACHE
+import shutil
 
 # Suppress specific warning
 warnings.filterwarnings("ignore", message="When grouping with a length-1 list-like")
@@ -137,6 +141,113 @@ def main(cfg: DictConfig) -> None:
         finally:
             if isinstance(trainer.logger, WandbLogger):
                 trainer.logger.experiment.finish()
+                
+                
+    elif cfg.learning.mode == 'local_federated':
+        
+        # hyperparameters   
+        n_rounds = cfg.learning.settings.n_rounds
+        n_clients = cfg.learning.n_clients 
+        cfg.trainer.max_epochs = cfg.learning.settings.local_epochs
+        cfg.trainer.patience = 0
+        path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
+        num_threads = cfg.learning.settings.num_threads
+        print(f"\033[93mLocal Federated training with {n_clients} clients\033[0m")
+        
+        # set seed for reproducibility
+        torch.set_num_threads(num_threads)
+        seed_everything(cfg.seed)
+        
+        # read client data
+        train_dataloaders, val_dataloaders = load_dataloaders(cfg, path, n_clients)
+        
+        # try with and without these two lines
+        engine = instantiate(cfg.engine)
+        engine.model.to(cfg.device)
+                
+        t0 = time.time()
+        history = {"round": [], "loss_val_avg": []}
+        global_params = get_parameters(instantiate(cfg.engine))
+        for rnd in range(1, n_rounds + 1):
+            print(f"\033[92m\n--> ROUND {rnd}/{n_rounds}\033[0m")
+            client_params: List[Tuple[List[torch.Tensor], int]] = []
+            val_losses, sizes = [], []
+            
+            # ------------------------------------------------------------
+            # local training (sequentially)
+            # ------------------------------------------------------------
+            print(f"\033[93mLocal training on {n_clients} clients\033[0m")
+            for cid in range(n_clients):
+                # clone global params → local model
+                local_engine = instantiate(cfg.engine)
+                set_parameters(local_engine, global_params)
+                local_engine.model.to(cfg.device)
+
+                # freeze if required
+                maybe_freeze_parameters(
+                    c=train_dataloaders[cid].dataset.c,
+                    model=local_engine.model,
+                    learning=cfg.learning.mode,
+                    freezing=cfg.learning.settings.freezing,
+                )
+
+                # local train
+                trainer = Trainer(cfg, client_id=cid)
+                trainer.logger.log_hyperparams(parse_hyperparams(cfg)) 
+                trainer.fit(local_engine, train_dataloaders[cid])
+                n_samples = len(train_dataloaders[cid].dataset)
+                sizes.append(n_samples)
+
+                # collect weights for aggregation
+                client_params.append((get_parameters(local_engine), n_samples))
+                
+            # ------------------------------------------------------------
+            # FedAvg aggregation
+            # ------------------------------------------------------------
+            print(f"\033[93mAggregating local models\033[0m")
+            global_params = aggregate(client_params)
+            print("Saving global model parameters")
+            params_dict = zip(local_engine.model.state_dict().keys(), global_params)
+            state_dict = OrderedDict({k: torch.tensor(v) for k, v in params_dict})
+            local_engine.model.load_state_dict(state_dict, strict=True)
+            # Save the model. TODO: save only best accuracy model and loss model
+            os.makedirs("checkpoints", exist_ok=True)
+            torch.save(local_engine.model.state_dict(), f"checkpoints/model_round_{rnd}.pth")
+            
+            # ------------------------------------------------------------
+            # FedAvg aggregation on client validation sets
+            # ------------------------------------------------------------
+            print(f"\033[93mEvaluating on client validation sets\033[0m")
+            local_engine = instantiate(cfg.engine)
+            set_parameters(local_engine, global_params)
+            local_engine.model.to(cfg.device)
+            for cid in range(n_clients):
+                val_metrics = trainer.validate(local_engine, val_dataloaders[cid])[0]  #{'val/c/asia': 0.0, 'val/c/bronc': 0.0, 'val/c/either': 0.0, 'val/c/lung': 0.0, 'val/c/smoke': 0.0, 'val/c/tub': 0.0, 'val/c/xray': 0.0, 'val_loss': nan}
+                val_losses.append(val_metrics['val_loss'])
+
+            # log aggregated val metrics (weighted)
+            w_loss = sum(l * s for l, s in zip(val_losses, sizes)) / sum(sizes)
+            history["round"].append(rnd)
+            history["loss_val_avg"].append(w_loss)
+            print(f"\033[92m✅ aggregated  val_loss={w_loss:.4f}\033[0m")
+
+        # ------------------------------------------------------------
+        # Final evaluation on the test set
+        # ------------------------------------------------------------
+        print(f"\033[93mFinal evaluation on the test set\033[0m")
+        # Load the best model
+        ind_min_loss = np.argmin(history["loss_val_avg"])
+        best_round = history["round"][ind_min_loss]
+        print(f"\033[92mBest round: {best_round} with loss {history['loss_val_avg'][ind_min_loss]:.4f}\033[0m")
+        local_engine = instantiate(cfg.engine)
+        local_engine.model.load_state_dict(torch.load(f"checkpoints/model_round_{best_round}.pth", weights_only=False))
+        remove_checkpoints(best_round)
+
+        # Evaluate the model on the client datasets    
+        trainer.test(engine, test_dataloader)
+        print(f"\033[90mFinished! Training time: {round((time.time() - t0)/60, 2)} minutes\033[0m")
+        
+        
     elif cfg.learning.mode == 'federated':
 
         # Add path to cfg
@@ -151,7 +262,11 @@ def main(cfg: DictConfig) -> None:
         print(f"Config file saved to {os.path.join(os.getcwd(),config_filepath)}")
 
         # Instantiate the FL training
+        print("\033[93mFederated training\033[0m")
+        # subprocess.Popen(["bash", "../../../../../src/fl_training.sh"])
         subprocess.run(["bash", "../../../../../src/fl_training.sh"])
+
+        print("\033[93mFederated training completed.\033[0m")
         
         # Delete the temporary config file
         os.remove(config_filepath)

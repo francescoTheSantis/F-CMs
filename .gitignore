@@ -3,4 +3,11 @@ outputs
 OLD
 *.ckpt
 plots_DEF_cumulative
-outputs_dario
+
+*.pth
+*.png
+*.log
+*.pkl
+
+# ignore all the folders that start with outputs
+outputs*

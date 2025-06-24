@@ -122,6 +122,7 @@ def main():
     port = cfg.learning.port
     cfg.trainer.max_epochs = cfg.learning.settings.local_epochs
     cfg.trainer.patience = 0
+    print(f"\033[94mClient {client_id} will run on {ip}:{port} with {cfg.learning.n_clients} clients.\033[0m")
     
     # various preliminaries, it set the seed for reproducibility
     torch.set_num_threads(num_threads)
@@ -156,10 +157,9 @@ def main():
     fl.client.start_client(server_address=f"{ip}:{port}", client=client) # local host
 
     # delete unecessary folders
-    if client_id == 1:
-        time.sleep(5)
-        shutil.rmtree("checkpoints/")
-        shutil.rmtree("results/")
+    # if client_id == 1:
+    #     shutil.rmtree("checkpoints/")
+    #     shutil.rmtree("results/")
         
 if __name__ == "__main__":
     main()
