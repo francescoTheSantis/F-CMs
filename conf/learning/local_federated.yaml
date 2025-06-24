@@ -2,10 +2,7 @@ defaults:
   - commons
   - _self_
   
-mode: federated
-
-port: '8018'
-ip: '0.0.0.0' # Local Host=0.0.0.0, or IP address of the server
+mode: local_federated
 
 settings:
   n_rounds: 200

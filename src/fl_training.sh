@@ -1,4 +1,10 @@
 #!/bin/bash
+USER_NAME=$(whoami)
+# pkill -u "$USER_NAME" -f client.py -9
+# pkill -u "$USER_NAME" -f server.py -9
+# sleep 2
+# pkill -u "$USER_NAME" -f client.py -9
+# pkill -u "$USER_NAME" -f server.py -9
 
 # Change directory to the script's directory
 cd ../../../../../src
@@ -21,9 +27,11 @@ trap "trap - SIGTERM && kill -- -$$" SIGINT SIGTERM
 # Wait for all background processes to complete
 wait
 
-# Clean up
-trap - SIGTERM 
+# # Kill all background processes
+# pkill -u "$USER_NAME" -f client.py -9
+# pkill -u "$USER_NAME" -f server.py -9
+# sleep 2
+# pkill -u "$USER_NAME" -f client.py -9
+# pkill -u "$USER_NAME" -f server.py -9
 
-# Kill all background processes
-pkill -f client.py -9
-pkill -f server.py -9
+

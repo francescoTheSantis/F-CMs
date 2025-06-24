@@ -10,8 +10,67 @@ import os
 import random
 from src.data.generate_split import get_subgraph_dict
 import matplotlib.pyplot as plt
-from typing import List
+from typing import List, Dict, Tuple
+
 import re
+from functools import reduce
+from flwr.common import NDArrays
+from collections import OrderedDict
+import shutil
+import pickle
+
+
+def load_dataloaders(cfg: DictConfig, path: str, n_clients: int):
+    train_dataloaders = []
+    val_dataloaders = []
+    for client_id in range(1,n_clients+1):
+        train_path, val_path = get_split_paths_fl(cfg, path, client_id)
+        # if the file is not found, raise an error
+        if not os.path.exists(train_path) or not os.path.exists(val_path):
+            raise FileNotFoundError(f"File {train_path} or {val_path} not found")
+        # Load the dataloaders
+        with open(train_path, 'rb') as f:
+            train_dataloader = pickle.load(f)
+        with open(val_path, 'rb') as f:
+            val_dataloader = pickle.load(f)
+            
+        train_dataloaders.append(train_dataloader)
+        val_dataloaders.append(val_dataloader)
+    return train_dataloaders, val_dataloaders
+            
+def remove_checkpoints(best_round: int):
+    for file in os.listdir("checkpoints"):
+        path = os.path.join("checkpoints", file)
+        if file != f"model_round_{best_round}.pth":
+            if os.path.isfile(path):
+                os.remove(path)
+            elif os.path.isdir(path):
+                shutil.rmtree(path)
+
+def aggregate(results: List[Tuple[NDArrays, int]]) -> NDArrays:
+    """Compute weighted average."""
+    # Calculate the total number of examples used during training
+    num_examples_total = sum([num_examples for _, num_examples in results])
+
+    # Create a list of weights, each multiplied by the related number of examples
+    weighted_weights = [
+        [layer * num_examples for layer in weights] for weights, num_examples in results
+    ]
+
+    # Compute average weights of each layer
+    weights_prime: NDArrays = [
+        reduce(np.add, layer_updates) / num_examples_total
+        for layer_updates in zip(*weighted_weights)
+    ]
+    return weights_prime
+
+def get_parameters(engine):
+    return [val.cpu().numpy() for _, val in engine.model.state_dict().items()]
+
+def set_parameters(engine, parameters):
+    params_dict = zip(engine.model.state_dict().keys(), parameters)
+    state_dict = OrderedDict({k: torch.tensor(v) for k, v in params_dict})
+    engine.model.load_state_dict(state_dict, strict=True)
 
 def model_has_concepts(model):
     if target_classname(model) in ['BlackBox_Multi', 'CBM', 'CEM', 'C2BM', 'SCBM']:

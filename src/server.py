@@ -48,6 +48,7 @@ from src.my_hydra import parse_hyperparams
 from src.utils import seed_everything, create_folders, plot_loss_and_accuracy, get_split_paths
 from src.trainer import Trainer
 from env import CACHE
+import subprocess
 
 
 
@@ -158,6 +159,7 @@ def main(cfg: DictConfig) -> None:
     n_clients = cfg.learning.n_clients
     ip = cfg.learning.ip 
     port = cfg.learning.port
+    print(f"\033[94mServer will run on {ip}:{port} with {n_clients} clients, {n_rounds} rounds and {local_epochs} local epochs.\033[0m")
     
     # various preliminaries, it set the seed for reproducibility
     torch.set_num_threads(num_threads)
@@ -236,6 +238,17 @@ def main(cfg: DictConfig) -> None:
     # Evaluate the model on the client datasets    
     trainer.test(engine, test_dataloader)
     print(f"\033[90mTraining time: {round((time.time() - start_time)/60, 2)} minutes\033[0m")
+    
+    # Optionally, send a signal to terminate all clients after training is done
+    def kill_clients():
+        try:
+            # This will kill all python processes running client.py
+            subprocess.run(["pkill", "-u", "dario", "-f", "client.py"])
+            print("All client.py processes have been terminated.")
+        except Exception as e:
+            print(f"Failed to kill client.py processes: {e}")
+            
+    # kill_clients()
     
     
 if __name__ == "__main__":

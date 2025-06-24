@@ -80,7 +80,7 @@ class Trainer(_Trainer_):
         
         # for federated 
         if client_id is not None:
-            print(f"\033[94mClient ID: {client_id} in trainer\033[0m")
+            # print(f"\033[94mClient ID: {client_id} in trainer\033[0m")
             ckpt_dir = os.path.join("checkpoints", f"client_{client_id}")
             callbacks.append(
                 ModelCheckpoint(
