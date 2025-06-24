@@ -78,13 +78,14 @@ def main(cfg: DictConfig) -> None:
     [dataset.data[split].register_graph(graph) for split in dataset.data]
                     
     # We split the data by selecting a sub-graph for each split
-    generate_split(cfg, dataset, graph)
+    subgraphs, subgraphs_concept_names = generate_split(cfg, dataset, graph)
 
     # update config based on the dataset
     # e.g., set input and output size of the model
-    cfg = update_config_from_data(cfg, dataset)
+    cfg = update_config_from_data(cfg, dataset, subgraphs, subgraphs_concept_names)
     if cfg.learning.mode == 'localized':
-        _, graph = update_intervention_policy_and_graph(cfg, interv_policy, graph)  
+        _, graph = update_intervention_policy_and_graph(cfg, interv_policy, graph, subgraphs, subgraphs_concept_names)  
+
     cfg = maybe_update_config_with_graph(cfg, graph, interv_policy)
 
     ############ data block ########################################################################################

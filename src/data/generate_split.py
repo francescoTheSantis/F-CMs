@@ -158,11 +158,10 @@ def get_subgraphs(graph, y_index, n_subgraphs, modality = 'random_nodes', concep
     # return a dictionary with the subgroups as keys and the nodes names as values
     subgraphs_concept_names = {f'subgraph_{i+1}':[graph.columns[node_idx] for node_idx in s] for i, s in enumerate(subgraphs.values())}
 
-
     return subgraphs, subgraphs_concept_names
 
 def generate_split(cfg, dataset, graph):
-    split_and_save(cfg, dataset, graph, 'train')
+    subgraphs, subgraphs_concept_names = split_and_save(cfg, dataset, graph, 'train', True)
     split_and_save(cfg, dataset, graph, 'val')
     split_and_save(cfg, dataset, graph, 'test')
     # Save the dataloader for the unique, real test-set
@@ -171,8 +170,9 @@ def generate_split(cfg, dataset, graph):
     path = os.path.join(root, f"test.pkl")
     with open(path, 'wb') as f:
         pickle.dump(test_dataloader, f)
+    return subgraphs, subgraphs_concept_names
 
-def split_and_save(cfg, data, graph, set):
+def split_and_save(cfg, data, graph, set, get_dict=False):
         # Create as many splits as the number of clients     
         x, c, y = [], [], []
         for row in data.data[set]:
@@ -191,10 +191,10 @@ def split_and_save(cfg, data, graph, set):
         # Get the index of the y variable in the graph
         y_index = graph.columns.get_loc(cfg.dataset.loader.task_name)
         # Get the subgraphs based on the graph and y_index
-        subgraphs, _ = get_subgraphs(graph, y_index, round(n/2)+1, 
-                                     modality=cfg.learning.subgraphs.modality,
-                                     concept_in_common=cfg.learning.subgraphs.concept_in_common,
-                                     task_in_common=cfg.learning.subgraphs.task_in_common)
+        subgraphs, subgraphs_concept_names = get_subgraphs(graph, y_index, round(n/2)+1, 
+                                                           modality=cfg.learning.subgraphs.modality,
+                                                           concept_in_common=cfg.learning.subgraphs.concept_in_common,
+                                                           task_in_common=cfg.learning.subgraphs.task_in_common)
 
         # Ensure the tensors can be evenly split
         assert x.size(0) == c.size(0) == y.size(0), "Tensors must have the same number of rows"
@@ -238,6 +238,10 @@ def split_and_save(cfg, data, graph, set):
             path = os.path.join(root, f"{set}set_{i+1}_subgraph_{j+1}.pkl") # Start to count from 1
             with open(path, 'wb') as f:
                 pickle.dump(dataloader, f)
+        
+        if get_dict:
+            # Return the subgraphs and their concept names
+            return subgraphs, subgraphs_concept_names
 
 def get_subgraph_dict(cfg):
     if cfg.dataset.name == 'asia':

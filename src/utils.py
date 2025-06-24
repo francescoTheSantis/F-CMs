@@ -62,7 +62,7 @@ def identify_subgraph(path, client_id):
             return subgraph_id
     return None
 
-def update_config_from_data(cfg: DictConfig, dataset) -> DictConfig:
+def update_config_from_data(cfg: DictConfig, dataset, subgraphs, subgraphs_concept_names) -> DictConfig:
     """ can be used to update the config based on the data, e.g., set input and output size """
     original_c_names = dataset.c_info['names']
     with open_dict(cfg):
@@ -70,8 +70,8 @@ def update_config_from_data(cfg: DictConfig, dataset) -> DictConfig:
             path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
             # Get the subgraph giventhe client id
             subgraph_id = identify_subgraph(path, cfg.client_id) #file.split('subgraph_')[1].split('.')[0]
-            _, updated_c_names = get_subgraph_dict(cfg)  
-            updated_c_names = updated_c_names['subgraph_'+subgraph_id]       
+            #_, updated_c_names = get_subgraph_dict(cfg)  
+            updated_c_names = subgraphs_concept_names['subgraph_'+subgraph_id]       
             c_names = [name for name in dataset.c_info['names'] if name in updated_c_names]
             c_cardinality = [card for card, name in zip(dataset.c_info['cardinality'], dataset.c_info['names']) if name in c_names]
             
@@ -112,17 +112,16 @@ def maybe_update_config_with_graph(cfg: DictConfig, graph, interv_policy) -> Dic
             )
     return cfg
 
-def update_intervention_policy_and_graph(cfg: DictConfig, interv_policy, graph):
+def update_intervention_policy_and_graph(cfg, interv_policy, graph, subgraphs, subgraphs_concept_names):
     path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
 
-    # Get the subgraph giventhe client id
+    # Get the subgraph given the client id
     for file in os.listdir(path):
         if ('trainset_'+str(cfg.client_id)) in file:
             # Get the substring between "subgraph_" and "."
             subgraph_id = file.split('subgraph_')[1].split('.')[0]
-    c_index, c_names = get_subgraph_dict(cfg) 
-    c_index = c_index['subgraph_'+subgraph_id]  
-    c_names = c_names['subgraph_'+subgraph_id] 
+    c_index = subgraphs['subgraph_'+subgraph_id]  
+    c_names = subgraphs_concept_names['subgraph_'+subgraph_id] 
 
     # Update policy
     updated_policy = []
