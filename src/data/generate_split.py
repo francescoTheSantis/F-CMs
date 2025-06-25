@@ -160,19 +160,38 @@ def get_subgraphs(graph, y_index, n_subgraphs, modality = 'random_nodes', concep
 
     return subgraphs, subgraphs_concept_names
 
-def generate_split(cfg, dataset, graph):
-    subgraphs, subgraphs_concept_names = split_and_save(cfg, dataset, graph, 'train', True)
-    split_and_save(cfg, dataset, graph, 'val')
-    split_and_save(cfg, dataset, graph, 'test')
+def generate_split(cfg, dataset, graph, y_index):
+
+    n = cfg.learning.n_clients
+    # Get the subgraph for each client
+    subgraphs, subgraphs_concept_names = get_subgraphs(graph, y_index, round(n/2)+1, 
+                                 modality=cfg.learning.subgraphs.modality,
+                                 concept_in_common=cfg.learning.subgraphs.concept_in_common,
+                                 task_in_common=cfg.learning.subgraphs.task_in_common)
+    # Check on the subgraphs
+    assert len(subgraphs) < n, "Number of subgraphs must be lower than n"
+
+    # If the task is not included, select some subgraphs to mask the y variable
+    if not cfg.learning.annotation_assumption == "task_included":
+        r = random.randint(1, (len(subgraphs)-1))  # Randomly select r subgraphs to mask y variable
+        subgraphs_task_excluded = random.sample(range(1, len(subgraphs) + 1), r)
+    else:
+        subgraphs_task_excluded = None
+    
+    split_and_save(cfg, dataset, graph, 'train', n, subgraphs, subgraphs_task_excluded)
+    split_and_save(cfg, dataset, graph, 'val',n, subgraphs, subgraphs_task_excluded)
+    split_and_save(cfg, dataset, graph, 'test', n, subgraphs, subgraphs_task_excluded)
     # Save the dataloader for the unique, real test-set
     test_dataloader = DataLoader(dataset.data['test'], batch_size=cfg.dataset.batch_size, collate_fn=static_graph_collate)
     root = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
     path = os.path.join(root, f"test.pkl")
     with open(path, 'wb') as f:
         pickle.dump(test_dataloader, f)
+
     return subgraphs, subgraphs_concept_names
 
-def split_and_save(cfg, data, graph, set, get_dict=False):
+def split_and_save(cfg, data, graph, set,n, subgraphs = None, subgraphs_task_excluded = None):
+        
         # Create as many splits as the number of clients     
         x, c, y = [], [], []
         for row in data.data[set]:
@@ -183,22 +202,14 @@ def split_and_save(cfg, data, graph, set, get_dict=False):
         c = torch.cat(c, dim=0)
         y = torch.cat(y, dim=0)
 
-        # create n random splits from the preivous tensors
-        n = cfg.learning.n_clients
+        # Ensure the tensors can be evenly split
+        assert x.size(0) == c.size(0) == y.size(0), "Tensors must have the same number of rows"
 
         # Get the disctionary containing the subgraphs given the dataset's name
         #subgraphs, _ = get_subgraph_dict(cfg)
         # Get the index of the y variable in the graph
-        y_index = graph.columns.get_loc(cfg.dataset.loader.task_name)
+        #y_index = graph.columns.get_loc(cfg.dataset.loader.task_name)
         # Get the subgraphs based on the graph and y_index
-        subgraphs, subgraphs_concept_names = get_subgraphs(graph, y_index, round(n/2)+1, 
-                                                           modality=cfg.learning.subgraphs.modality,
-                                                           concept_in_common=cfg.learning.subgraphs.concept_in_common,
-                                                           task_in_common=cfg.learning.subgraphs.task_in_common)
-
-        # Ensure the tensors can be evenly split
-        assert x.size(0) == c.size(0) == y.size(0), "Tensors must have the same number of rows"
-        assert len(subgraphs) < n, "Number of subgraphs must be lower than n"
 
         # Generate indices for splitting
         indices = torch.arange(x.size(0))
@@ -214,12 +225,15 @@ def split_and_save(cfg, data, graph, set, get_dict=False):
         c_splits = [c[idx] for idx in split_indices]
         y_splits = [y[idx] for idx in split_indices]
 
+        if subgraphs is None:
+            raise ValueError("`subgraphs` cannot be None.")
+
         # For each split, create a dataloader containing x, c, y 
         for i in range(n):
             j = i % len(subgraphs)
             masked_c_splits = apply_mask(c_splits[i], subgraphs[f'subgraph_{j+1}'])
 
-            if not cfg.learning.annotation_assumption =="task_included":
+            if subgraphs_task_excluded is not None and ((j+1) in subgraphs_task_excluded):
                 # If the task is not included, mask the y variable as well
                 masked_y_splits = -1 * torch.ones_like(y_splits[i])  # Mask y variable
             else:
@@ -231,6 +245,7 @@ def split_and_save(cfg, data, graph, set, get_dict=False):
                 collate_fn=static_graph_collate
             )
 
+
             # Create directory if it doesn't exist
             root = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
             os.makedirs(os.path.join(root), exist_ok=True)
@@ -238,10 +253,6 @@ def split_and_save(cfg, data, graph, set, get_dict=False):
             path = os.path.join(root, f"{set}set_{i+1}_subgraph_{j+1}.pkl") # Start to count from 1
             with open(path, 'wb') as f:
                 pickle.dump(dataloader, f)
-        
-        if get_dict:
-            # Return the subgraphs and their concept names
-            return subgraphs, subgraphs_concept_names
 
 def get_subgraph_dict(cfg):
     if cfg.dataset.name == 'asia':

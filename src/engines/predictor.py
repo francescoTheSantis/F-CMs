@@ -99,13 +99,12 @@ class Predictor(pl.LightningModule):
         c_acc_metrics = {k: metrics.get('classification_acc') for k in self.c_names+self.c_names_ood}
 
         # task accuracy metrics
-        if self.annotation_assumption == "task_included":
-            self.train_y_metrics = MetricCollection(
-                metrics={k: self._check_metric(m) for k, m in y_acc_metrics.items()},
-                prefix="train/y/")
-            self.val_y_metrics = MetricCollection(
-                metrics={k: self._check_metric(m) for k, m in y_acc_metrics.items()},
-                prefix="val/y/")
+        self.train_y_metrics = MetricCollection(
+            metrics={k: self._check_metric(m) for k, m in y_acc_metrics.items()},
+            prefix="train/y/")
+        self.val_y_metrics = MetricCollection(
+            metrics={k: self._check_metric(m) for k, m in y_acc_metrics.items()},
+            prefix="val/y/")
         self.test_y_metrics = MetricCollection(
             metrics={k: self._check_metric(m) for k, m in y_acc_metrics.items()},
             prefix="test/y/")
@@ -344,10 +343,10 @@ class Predictor(pl.LightningModule):
         # Update metrics and log
         y_hat, c_hat = self.model.filter_output_for_metric(y_output, c_output)
 
-        if self.annotation_assumption=="task_included":
-            self.update_and_log_metrics("train", y_hat, y, c_hat, c, batch)
-        else:
+        if y[y== -1].numel() != 0:
             self.update_and_log_metrics("train", y_hat, y, c_hat, c, batch, calculate_c_metrics = True, calculate_y_metrics = False)
+        else:
+            self.update_and_log_metrics("train", y_hat, y, c_hat, c, batch)          
         self.log_loss("train", loss, batch_size=batch['batch_size'])
         
         # check parameter freezing
@@ -368,13 +367,14 @@ class Predictor(pl.LightningModule):
         val_loss, y_output, c_output, y, c = self.shared_step(batch, step='val')
         # Update metrics and log
         y_hat, c_hat = self.model.filter_output_for_metric(y_output, c_output)
-        if self.annotation_assumption=="task_included":
-            self.update_and_log_metrics("val", y_hat, y, c_hat, c, batch)
-        else:
+
+        if y[y== -1].numel() != 0:
             self.update_and_log_metrics("val", y_hat, y, c_hat, c, batch, calculate_c_metrics = True, calculate_y_metrics = False)
- 
+        else:
+            self.update_and_log_metrics("val", y_hat, y, c_hat, c, batch) 
         #self.update_and_log_metrics("val", y_hat, y, c_hat, c, batch)
         self.log_loss("val", val_loss, batch_size=batch['batch_size'])
+
         return val_loss
     
     def test_step(self, batch, batch_idx):

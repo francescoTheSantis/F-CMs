@@ -5,7 +5,7 @@ defaults:
 mode: local_federated
 
 settings:
-  n_rounds: 200
+  n_rounds: 2
   local_epochs: 2
   num_threads: 1
   freezing: true

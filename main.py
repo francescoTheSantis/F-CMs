@@ -82,7 +82,7 @@ def main(cfg: DictConfig) -> None:
     [dataset.data[split].register_graph(graph) for split in dataset.data]
                     
     # We split the data by selecting a sub-graph for each split
-    subgraphs, subgraphs_concept_names = generate_split(cfg, dataset, graph)
+    subgraphs, subgraphs_concept_names = generate_split(cfg, dataset, graph, y_index)
 
     # update config based on the dataset
     # e.g., set input and output size of the model

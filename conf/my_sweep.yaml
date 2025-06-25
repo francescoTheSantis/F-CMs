@@ -15,8 +15,8 @@ hydra:
       dataset: asia #, asia # asia, sachs, alarm
       # possible models are:
       # blackbox, blackbox_multi, cbm_linear, cbm_mlp, cem, c2bm
-      model: blackbox_multi #, cbm_linear, cbm_mlp, cem, c2bm #, cem, c2bm #, cbm_linear, cbm_mlp, cem, c2bm
-      learning: local_federated #, centralized #, centralized, local_federated, federated
+      model: blackbox_multi, c2bm #, cbm_linear, cbm_mlp, cem, c2bm #, cem, c2bm #, cbm_linear, cbm_mlp, cem, c2bm
+      learning: localized, centralized, local_federated #, centralized #, centralized, local_federated, federated
       
 model:
   hidden_size: 128
@@ -37,7 +37,7 @@ engine:
 
 trainer:
   # logger: wandb
-  devices: [2]
+  devices: [0]
   max_epochs: 10
   patience: 30
 
