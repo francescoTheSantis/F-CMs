@@ -16,7 +16,7 @@ hydra:
       # possible models are:
       # blackbox, blackbox_multi, cbm_linear, cbm_mlp, cem, c2bm
       model: blackbox_multi #, cbm_linear, cbm_mlp, cem, c2bm #, cem, c2bm #, cbm_linear, cbm_mlp, cem, c2bm
-      learning: localized #, centralized #, centralized
+      learning: local_federated #, centralized #, centralized, local_federated, federated
       
 model:
   hidden_size: 128
@@ -37,7 +37,7 @@ engine:
 
 trainer:
   # logger: wandb
-  devices: [1]
+  devices: [2]
   max_epochs: 10
   patience: 30
 

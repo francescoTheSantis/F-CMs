@@ -148,6 +148,7 @@ def main(cfg: DictConfig) -> None:
         # hyperparameters   
         n_rounds = cfg.learning.settings.n_rounds
         n_clients = cfg.learning.n_clients 
+        patience = cfg.learning.settings.patience
         cfg.trainer.max_epochs = cfg.learning.settings.local_epochs
         cfg.trainer.patience = 0
         path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
@@ -166,6 +167,9 @@ def main(cfg: DictConfig) -> None:
         engine.model.to(cfg.device)
                 
         t0 = time.time()
+        best_loss = float('inf')
+        best_round = 0
+        no_improvement_count = 0
         history = {"round": [], "loss_val_avg": []}
         global_params = get_parameters(instantiate(cfg.engine))
         for rnd in range(1, n_rounds + 1):
@@ -196,7 +200,6 @@ def main(cfg: DictConfig) -> None:
                 trainer.logger.log_hyperparams(parse_hyperparams(cfg)) 
                 trainer.fit(local_engine, train_dataloaders[cid])
                 n_samples = len(train_dataloaders[cid].dataset)
-                sizes.append(n_samples)
 
                 # collect weights for aggregation
                 client_params.append((get_parameters(local_engine), n_samples))
@@ -210,9 +213,6 @@ def main(cfg: DictConfig) -> None:
             params_dict = zip(local_engine.model.state_dict().keys(), global_params)
             state_dict = OrderedDict({k: torch.tensor(v) for k, v in params_dict})
             local_engine.model.load_state_dict(state_dict, strict=True)
-            # Save the model. TODO: save only best accuracy model and loss model
-            os.makedirs("checkpoints", exist_ok=True)
-            torch.save(local_engine.model.state_dict(), f"checkpoints/model_round_{rnd}.pth")
             
             # ------------------------------------------------------------
             # FedAvg aggregation on client validation sets
@@ -224,6 +224,7 @@ def main(cfg: DictConfig) -> None:
             for cid in range(n_clients):
                 val_metrics = trainer.validate(local_engine, val_dataloaders[cid])[0]  #{'val/c/asia': 0.0, 'val/c/bronc': 0.0, 'val/c/either': 0.0, 'val/c/lung': 0.0, 'val/c/smoke': 0.0, 'val/c/tub': 0.0, 'val/c/xray': 0.0, 'val_loss': nan}
                 val_losses.append(val_metrics['val_loss'])
+                sizes.append(len(val_dataloaders[cid].dataset))
 
             # log aggregated val metrics (weighted)
             w_loss = sum(l * s for l, s in zip(val_losses, sizes)) / sum(sizes)
@@ -231,17 +232,31 @@ def main(cfg: DictConfig) -> None:
             history["loss_val_avg"].append(w_loss)
             print(f"\033[92m✅ aggregated  val_loss={w_loss:.4f}\033[0m")
 
+            # check improvement
+            if w_loss < best_loss:
+                best_loss = w_loss
+                best_round = rnd
+                no_improvement_count = 0
+                os.makedirs("checkpoints", exist_ok=True)
+                torch.save(local_engine.model.state_dict(), f"checkpoints/model_round_{rnd}.pth")
+            else:
+                no_improvement_count += 1
+
+            # early stopping if no improvement after 'patience' rounds
+            if no_improvement_count >= patience:
+                print(f"\033[91mEarly stopping triggered at round {rnd}.\033[0m")
+                break
+
         # ------------------------------------------------------------
         # Final evaluation on the test set
         # ------------------------------------------------------------
         print(f"\033[93mFinal evaluation on the test set\033[0m")
         # Load the best model
         ind_min_loss = np.argmin(history["loss_val_avg"])
-        best_round = history["round"][ind_min_loss]
+        # best_round = history["round"][ind_min_loss]
         print(f"\033[92mBest round: {best_round} with loss {history['loss_val_avg'][ind_min_loss]:.4f}\033[0m")
         local_engine = instantiate(cfg.engine)
         local_engine.model.load_state_dict(torch.load(f"checkpoints/model_round_{best_round}.pth", weights_only=False))
-        remove_checkpoints(best_round)
 
         # Evaluate the model on the client datasets    
         trainer.test(engine, test_dataloader)

@@ -9,3 +9,4 @@ settings:
   local_epochs: 2
   num_threads: 1
   freezing: true
+  patience: 30
