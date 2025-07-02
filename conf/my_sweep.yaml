@@ -11,12 +11,12 @@ hydra:
       # possible datsets are:
       # colormnist, colormnist_ood, celeba, celeba_unfair, siim_pneumothorax
       # asia, sachs, alarm, hailfinder, insurance
-      seed: 1 #, 2, 3, 4, 5
-      dataset: asia #, asia # asia, sachs, alarm
+      seed: 1, 2 #, 3, 4, 5
+      dataset: asia, sachs #, asia # asia, sachs, alarm
       # possible models are:
       # blackbox, blackbox_multi, cbm_linear, cbm_mlp, cem, c2bm
-      model: blackbox_multi, c2bm #, cbm_linear, cbm_mlp, cem, c2bm #, cem, c2bm #, cbm_linear, cbm_mlp, cem, c2bm
-      learning: localized, centralized, local_federated #, centralized #, centralized, local_federated, federated
+      model: blackbox_multi, cbm_linear, c2bm #cbm_linear, cem, c2bm  #, cbm_linear, cbm_mlp, cem, c2bm #, cem, c2bm #, cbm_linear, cbm_mlp, cem, c2bm
+      learning: localized, centralized, local_federated #, centralized
       
 model:
   hidden_size: 128
@@ -37,8 +37,8 @@ engine:
 
 trainer:
   # logger: wandb
-  devices: [0]
-  max_epochs: 10
+  devices: [1]
+  max_epochs: 100
   patience: 30
 
 rag:
