@@ -61,8 +61,7 @@ os.makedirs(folder, exist_ok=True)
 
 # List the paths containing the results
 paths = [
-    "/home/fdesantis/projects/Federated-C2BM/outputs/multirun/2025-06-24/16-12-02",
-    "/home/fdesantis/projects/Federated-C2BM/outputs/multirun/2025-06-24/16-22-46",
+    "/home/fdesantis/projects/Federated-C2BM/outputs/multirun/2025-07-02/09-52-01",
 ]
 
 ###### Collect results ######
