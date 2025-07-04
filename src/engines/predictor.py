@@ -22,12 +22,15 @@ class Predictor(pl.LightningModule):
                 scheduler_class: Optional[Type] = None,
                 scheduler_kwargs: Optional[Mapping] = None,
                 intervention_prob: Optional[float] = 0.2,
-                c_names: Optional[list] = None,
+                #c_names: Optional[list] = None,
                 test_interv_policy: Optional[str] = None,
                 test_interv_noise: Optional[float] = 0.,
                 c_name_index: Optional[Mapping[str, int]] = None,
-                c_names_ood: Optional[list] = None,
-                annotation_assumption: Optional[str] = None
+                c_names_id: Optional[Mapping[str, str]] = None,
+                c_names_ood: Optional[Mapping[str, str]] = None,
+                c_names_all: Optional[list] = None,
+                annotation_assumption: Optional[str] = None,
+                learning_modality: Optional[str] = 'localized'
                 ):
         super(Predictor, self).__init__()         
         self.model = model
@@ -45,17 +48,19 @@ class Predictor(pl.LightningModule):
         self.test_interv_policy = test_interv_policy
         self.test_interv_noise = test_interv_noise  
 
-        self.c_names = c_names
-        self.n_concepts = len(c_names)
+        #self.c_names = c_names
+        self.n_concepts = len(c_names_all)
         self.c_name_index = c_name_index
 
         # create an index to name mapping for concepts
-        self.c_index_to_name_map = {i: name for i, name in zip(c_name_index.values(), c_name_index.keys())}
-        self.id_c_idxes = list({k:v for k,v in self.c_index_to_name_map.items() if v in self.c_names}.keys())
+        #self.c_index_to_name_map = {i: name for i, name in zip(c_name_index.values(), c_name_index.keys())}
+        #self.id_c_idxes = list({k:v for k,v in self.c_index_to_name_map.items() if v in self.c_names_all}.keys())
 
-        self.c_names_ood = c_names_ood if c_names_ood is not None else []
-        self.c_names_all = c_names + self.c_names_ood # equal to self.c_names if c_names_ood is None or empty
+        self.c_names_id = c_names_id 
+        self.c_names_ood = c_names_ood 
+        self.c_names_all = c_names_all
 
+        self.learning_modality = learning_modality
         if metrics is None:
             metrics = dict()
         self._set_metrics(metrics)
@@ -96,7 +101,7 @@ class Predictor(pl.LightningModule):
         # --- accuracy metrics ---
         y_acc_metrics = {'y_accuracy': metrics.get('classification_acc')}
         # we want to compute the accuracy on both ID and OOD concepts (if any)
-        c_acc_metrics = {k: metrics.get('classification_acc') for k in self.c_names+self.c_names_ood}
+        c_acc_metrics = {k: metrics.get('classification_acc') for k in self.c_names_all}
 
         # task accuracy metrics
         self.train_y_metrics = MetricCollection(
@@ -131,7 +136,7 @@ class Predictor(pl.LightningModule):
             self.test_intervention_single_y = MetricCollection(
                 metrics={k: self._check_metric(m) for k, m in c_acc_metrics.items()},
                 prefix="test_intervention/single/y/")
-            
+          
             # task accuracy after intervention of each graph level
             self.test_intervention_level_y = MetricCollection(
                 metrics={k: self._check_metric(m) for k, m in c_acc_levels_metrics.items()},
@@ -148,7 +153,7 @@ class Predictor(pl.LightningModule):
             self.test_intervention_level_c = MetricCollection(
                 metrics={k: self._check_metric(m) for k, m in childs_per_level.items()},
                 prefix="test_intervention/level/c/")
-
+ 
             # --- fairness metrics ---
             self.cace = MetricCollection(
                 metrics = {'before': self._check_metric(metrics.get('cace')),
@@ -201,12 +206,12 @@ class Predictor(pl.LightningModule):
             intervention_index = torch.zeros(c_shape)
         return intervention_index.to("cuda" if torch.cuda.is_available() else "cpu")
     
-    def _remove_node_id_ood(self, nodes):
-        for node in nodes:
-            if node not in self.id_c_idxes:
-                # the node is an OOD concept, we remove it from the list of nodes
-                nodes.remove(node)
-        return nodes
+    #def _remove_node_id_ood(self, nodes):
+    #    for node in nodes:
+    #        if node not in self.id_c_idxes:
+    #            # the node is an OOD concept, we remove it from the list of nodes
+    #            nodes.remove(node)
+    #    return nodes
 
     def test_intervention(self, batch):
         if self.model.has_concepts:
@@ -230,10 +235,11 @@ class Predictor(pl.LightningModule):
             for i, c_name_i in [(i, name) for name, i in self.c_name_index.items() if name in self.c_names_all]:
                 if c_name_i in self.model.virtual_roots: continue
 
-                if c_name_i not in self.c_names:
+                if self.learning_modality == 'localized' and c_name_i not in self.c_names_id[1]:
                     # The concept is not in the ID concepts, therefore interveaning on this concept
                     # does not have any effect on the task. 
                     # By the way, we just avoid to compute the intervention index but we still perform the forward pass
+                    print(f"Skipping intervention on {c_name_i} as it is not in the ID concepts")
                     intervention_index = torch.zeros(c.shape, dtype=c.dtype, device=c.device)
                 else:
                     # intervene on concept c_name_i
@@ -246,15 +252,20 @@ class Predictor(pl.LightningModule):
                 # after interveening on concept c_name_i, how well can we predict y
                 self.test_intervention_single_y[c_name_i].update(y_hat, y)
 
+
+                
             # level intervention
+            # NOTICE: if self.learning_modality== "localized", self.interv_policy has been updated to the subgraph
             for l in range(0, len(self.test_interv_policy)+1):
-                nodes = list(itertools.chain(*self.test_interv_policy[:l]))
-                # If some nodes are OOD concepts, we remove them from the nodes list in order to not intervene on them
-                nodes = self._remove_node_id_ood(nodes)
+                nodes = list(itertools.chain(*self.test_interv_policy[:l]))               
+                #nodes = self._remove_node_id_ood(nodes)
                 intervention_index = get_test_intervention_index(c.shape, nodes)
                 inputs = {'x':x, 'c':c, 'intervention_index':intervention_index}
                 # forward pass with intervention at test time
+                #print("intervention_index", intervention_index[0])
+                #print("c_output",c_output["bronc"][0:5])
                 y_output, c_output = self.forward(**inputs)
+                #print("c_output", c_output[0])
                 y_hat, c_hat = self.model.filter_output_for_metric(y_output, c_output)
                 # update metric after intervention:
                 # after interveening on a level of the graph, how well can we predict y
@@ -264,14 +275,17 @@ class Predictor(pl.LightningModule):
                 childs = list(itertools.chain(*self.test_interv_policy[l:]))
                 for child_index in childs:
                     c_name = self.c_names_all[child_index]
-                    if c_name in self.c_names:
-                        self.test_intervention_level_c[f'level {l}/child {c_name}'].update(c_hat[c_name], c[:,child_index])
-                    else:
-                        # There is no improvement on the concept accuracy for OOD concepts
-                        self.test_intervention_level_c[f'level {l}/child {c_name}'].update(torch.Tensor([float('nan')]), 
-                                                                                           torch.Tensor([float('nan')]))
+                    self.test_intervention_level_c[f'level {l}/child {c_name}'].update(c_hat[c_name], c[:,child_index])
+                    #if c_name in self.c_names_id[1]:
+                    #    self.test_intervention_level_c[f'level {l}/child {c_name}'].update(c_hat[c_name], c[:,child_index])
+                    #else:
+                    #    # There is no improvement on the concept accuracy for OOD concepts
+                    #    self.test_intervention_level_c[f'level {l}/child {c_name}'].update(torch.Tensor([float('nan')]), 
+                    #                                                                       torch.Tensor([float('nan')]))
+                
+                # level intervention for all clients on iid and ood concepts separately
 
-
+    # DA RIVEDERE
     def test_intervention_fairness(self, batch):
         if self.model.has_concepts:
             x, c, y = self._unpack_batch(batch)
@@ -381,16 +395,18 @@ class Predictor(pl.LightningModule):
         test_loss, y_output, c_output, y, c = self.shared_step(batch, step='test')
         # Update metrics and log
         y_hat, c_hat = self.model.filter_output_for_metric(y_output, c_output)
+        #print("c_hat_bronc", c_hat["bronc"][0:5])
         self.update_and_log_metrics("test", y_hat, y, c_hat, c, batch)
         self.log_loss("test", test_loss, batch_size=batch['batch_size'])
         # test-time interventions
         self.test_intervention(batch)
             
-        if 'Qualified' in self.c_names:
-            self.test_intervention_fairness(batch)
+        # DA RIVEDERE
+        #if 'Qualified' in self.c_names:
+        #    self.test_intervention_fairness(batch)
         return test_loss
 
-    def on_test_epoch_end(self):
+    def on_test_epoch_end(self): #***reset metrics???
         # baseline task accuracy
         y_baseline = self.test_y_metrics['y_accuracy'].compute().item()
         print(f"Baseline task accuracy: {y_baseline}")
@@ -410,8 +426,30 @@ class Predictor(pl.LightningModule):
             for k, metric in self.test_intervention_single_y.items():
                 c_name = _remove_prefix(k, self.test_intervention_single_y.prefix)
                 y_int[c_name] = metric.compute().item()
+                if self.learning_modality == "localized" and c_name not in self.c_names_id[1]:
+                    continue
                 print(f"Task accuracy after intervention on {c_name}: {y_int[c_name]}")
             pickle.dump(y_int, open(f'results/single_c_interventions_on_y.pkl', 'wb'))
+
+            # if local_federated task accuracy after intervention on each individual ood concept for each client
+            if self.learning_modality == 'local_federated':
+                if len(self.c_names_ood) != 0:          
+                    y_int_OOD = dict()
+                    for client_id in range(1,len(self.c_names_ood)):
+                        y_int_OOD[client_id] = dict()
+                        for c_name in self.c_names_ood[client_id]:                
+                            y_int_OOD[client_id][c_name] = y_int[c_name]
+                            print(f"Task accuracy for client {client_id} after intervention on ood {c_name}: {y_int_OOD[client_id][c_name]}")
+                        pickle.dump(y_int_OOD[client_id], open(f'results/client_{client_id}_single_OODc_interventions_on_y.pkl', 'wb'))
+
+                    # task accuracy after intervention on each individual id concept for each client
+                    y_int_ID = dict()
+                    for client_id in range(1, len(self.c_names_ood)):
+                        y_int_ID[client_id] = dict()
+                        for c_name in self.c_names_id[client_id]:
+                            y_int_ID[client_id][c_name] = y_int[c_name]
+                            print(f"Task accuracy for client {client_id} after intervention on id {c_name}: {y_int_ID[client_id][c_name]}")
+                        pickle.dump(y_int_ID[client_id], open(f'results/client_{client_id}_single_IDc_interventions_on_y.pkl', 'wb'))     
 
             # task accuracy after intervention of each graph level
             y_int = {}
@@ -431,7 +469,8 @@ class Predictor(pl.LightningModule):
             pickle.dump(c_int, open(f'results/level_interventions_on_c.pkl', 'wb'))
 
             # save graph and concepts
-            pickle.dump({'concepts':self.c_names,
+            # DA RIVEDERE
+            pickle.dump({'concepts':self.c_names_all,
                          'policy':self.test_interv_policy}, open("graph.pkl", 'wb'))
 
     def configure_optimizers(self):
@@ -447,27 +486,31 @@ class Predictor(pl.LightningModule):
                 cfg["monitor"] = metric
         return cfg
 
-    def prepare_for_test(self, cfg):
-        """
-        Prepare the model for test time. This is called before the test step.
-        """
-        self.model.eval()
 
-        # Get the subgraph for the client
-        concept_ids, concept_names = get_subgraph_dict(cfg)
-        path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
-        concept_id_list = concept_ids['subgraph_'+identify_subgraph(path, cfg.client_id)]
-        concept_name_list = concept_names['subgraph_'+identify_subgraph(path, cfg.client_id)]
-
-        # Store the ids and names of the ID concepts
-        self.c_index_id = concept_id_list
-        self.c_name_id = [name for name in self.c_names if name in concept_name_list]
-
-        # Store the ids and names of the OOD concepts
-        self.c_index_ood = [id for id in range(self.n_concepts) if id not in concept_id_list]
-        self.c_name_ood = [name for name in self.c_names if name not in concept_name_list]
-
-        # Update the ID & OOD interventions
-        self.set_id_ood_interventions()
+#    def prepare_for_test(self, cfg):
+#        """
+#       Prepare the model for test time. This is called before the test step.
+#        """
+#        self.model.eval()
+#
+#
+#        # Get the subgraph for the client
+#        #concept_ids, concept_names = get_subgraph_dict(cfg)
+#        path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
+#        #concept_id_list = concept_ids['subgraph_'+identify_subgraph(path, cfg.client_id)]
+#        #concept_name_list = concept_names['subgraph_'+identify_subgraph(path, cfg.client_id)]
+#
+#
+#        # Store the ids and names of the ID concepts
+#        #self.c_index_id = concept_id_list
+#        #self.c_name_id = [name for name in self.c_names if name in concept_name_list]
+#
+#        # Store the ids and names of the OOD concepts
+#        #self.c_index_ood = [id for id in range(self.n_concepts) if id not in concept_id_list]
+#        #self.c_name_ood = [name for name in self.c_names if name not in concept_name_list]
+#
+#
+#       # Update the ID & OOD interventions
+#        self.set_id_ood_interventions()
 
 

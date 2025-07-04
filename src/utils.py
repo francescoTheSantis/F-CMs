@@ -124,35 +124,74 @@ def identify_subgraph(path, client_id):
 def update_config_from_data(cfg: DictConfig, dataset, subgraphs, subgraphs_concept_names) -> DictConfig:
     """ can be used to update the config based on the data, e.g., set input and output size """
     original_c_names = dataset.c_info['names']
+    
     with open_dict(cfg):
-        if cfg.learning.mode=='localized':
+        if cfg.learning.mode=="localized":
             path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
             # Get the subgraph giventhe client id
-            subgraph_id = identify_subgraph(path, cfg.client_id) #file.split('subgraph_')[1].split('.')[0]
-            #_, updated_c_names = get_subgraph_dict(cfg)  
-            updated_c_names = subgraphs_concept_names['subgraph_'+subgraph_id]       
-            c_names = [name for name in dataset.c_info['names'] if name in updated_c_names]
-            c_cardinality = [card for card, name in zip(dataset.c_info['cardinality'], dataset.c_info['names']) if name in c_names]
+            subgraph_id = identify_subgraph(path, cfg.client_id)
+            updated_c_names = subgraphs_concept_names['subgraph_'+subgraph_id]
+            c_cardinality = [card for card, name in zip(dataset.c_info['cardinality'], dataset.c_info['names']) if name in updated_c_names]
+            c_info = {'names': updated_c_names, 'cardinality': c_cardinality}
+
+            # The list of names for in-distribution concepts of the client
+            c_names_id = dict()
+            #c_cardinality = dict()
+            # The list of names for out-of-distribution concepts for the client
+            c_names_ood = dict()
+            ## Get the subgraph given the client id 
+            c_names_id = {cfg.client_id: [name for name in dataset.c_info['names'] if name in updated_c_names]}
+            #c_cardinality = {cfg.client_id: [card for card, name in zip(dataset.c_info['cardinality'], dataset.c_info['names']) if name in updated_c_names]}
+            c_names_ood = {cfg.client_id: [name for name in dataset.c_info['names'] if name not in updated_c_names]}
+            c_names_all = original_c_names
+
             
-            # The list of names for out-of-distribution concepts (concepts that the client has never seen before)
-            c_names_ood = [name for name in dataset.c_info['names'] if name not in updated_c_names]
-            c_info = {'names': c_names, 'cardinality': c_cardinality, 'c_names_ood': c_names_ood}
+        elif cfg.learning.mode=="local_federated":
+            c_info = dataset.c_info
+
+            path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
+            # The list of names for in-distribution concepts (concepts that the client has in its subgraph)
+            c_names_id = dict()
+            #c_cardinality = dict()
+            # The list of names for out-of-distribution concepts (concepts that the client has not in its subgraph)
+            c_names_ood = dict()
+            # The list of names for all concepts (in-distribution and out-of-distribution)
+            c_names_all = original_c_names 
+            for id in range(1, cfg.learning.n_clients + 1):
+                subgraph_id = identify_subgraph(path, id)
+                if subgraph_id is not None:
+                    updated_c_names = subgraphs_concept_names['subgraph_'+subgraph_id]
+                    c_names_id[id] = [name for name in dataset.c_info['names'] if name in updated_c_names]
+                    c_names_ood[id] = [name for name in dataset.c_info['names'] if name not in updated_c_names]
+
+            
+            ## The list of names for out-of-distribution concepts (concepts that the client has never seen before)
+            #c_names_ood = [name for name in dataset.c_info['names'] if name not in updated_c_names]
+            #c_names_all = c_names + c_names_ood
+    
         else:
             c_info = dataset.c_info
-            c_names = original_c_names
+            # For non-localized/federated learning, we assume all clients have the same concepts
+            c_names_id = {1: original_c_names}  
+            #c_cardinality = {1: dataset.c_info['cardinality']}
+            c_names_ood = {1: []}  # No out-of-distribution concepts
+            c_names_all = original_c_names  # All concepts are in-distribution
 
         cfg.engine.model.update(
             input_size = dataset.data["train"].X.shape[-1] if dataset.data["train"].X is not None else None,
             output_size = dataset.y_info['cardinality'][0], # we assume single class classification
             c_info = c_info,
             y_info = dataset.y_info,
-            c_name_index = {name: i for i, name in enumerate(original_c_names)},
+            c_name_index = {name: i for i, name in enumerate(c_names_all)},
         )
         cfg.engine.update(
-            c_names = c_names,
-            c_names_ood = c_info.get('c_names_ood', []),
-            c_name_index = {name: i for i, name in enumerate(original_c_names)}
+            c_names_id = c_names_id,
+            c_names_ood = c_names_ood,
+            c_names_all = c_names_all,
+            c_name_index = {name: i for i, name in enumerate(c_names_all)},
+            learning_modality = cfg.learning.mode
         )
+        
     return cfg
 
 def maybe_update_config_with_graph(cfg: DictConfig, graph, interv_policy) -> DictConfig:
@@ -184,12 +223,13 @@ def update_intervention_policy_and_graph(cfg, interv_policy, graph, subgraphs, s
 
     # Update policy
     updated_policy = []
-    c_name_idx = {k:v for k, v in zip(c_index, range(len(c_names)))}
+    #c_name_idx = {k:v for k, v in zip(c_index, range(len(c_names)))}
     for level in interv_policy:
         level_policy = []
         for i, node in enumerate(level):
             if node in c_index:
-                level_policy.append(c_name_idx[node])
+                #level_policy.append(c_name_idx[node])
+                level_policy.append(node)
         if len(level_policy) > 0:
             updated_policy.append(level_policy)
                 
