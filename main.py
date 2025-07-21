@@ -259,7 +259,7 @@ def main(cfg: DictConfig) -> None:
         local_engine.model.load_state_dict(torch.load(f"checkpoints/model_round_{best_round}.pth", weights_only=False))
 
         # Evaluate the model on the client datasets    
-        trainer.test(engine, test_dataloader)
+        trainer.test(local_engine, test_dataloader)
         print(f"\033[90mFinished! Training time: {round((time.time() - t0)/60, 2)} minutes\033[0m")
         
         
