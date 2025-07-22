@@ -169,29 +169,35 @@ def get_df_name(df):
     else:
         raise ValueError(f"Unknown dataset name: {df}")
 
+# Rename the datasets in the performance dataframe
+performance['dataset'] = performance['dataset'].apply(get_df_name)
+
 marker_size = 14
 
 # Define a dictionary to associate marker, name, and color to each model.
 # If the experiment you run does not contain a model, just remove it from the dictionary.
 # If you want to add a new model, just add it to the dictionary.
 model_styles = {
-    'cem': {'marker': 'P', 'name': 'CEM', 'color': 'tab:orange', 'size': marker_size},
-    'cbm_linear': {'marker': '*', 'name': 'CBM+Linear', 'color': 'tab:olive', 'size': marker_size},
-    'cbm_mlp': {'marker': '^', 'name': 'CBM+MLP', 'color': 'tab:red', 'size': marker_size},
-    'blackbox_multi': {'marker': 'o', 'name': 'BlackBox', 'color': 'tab:purple', 'size': marker_size},
-    'c2bm': {'marker': 's', 'name': 'C2BM', 'color': 'tab:blue', 'size': marker_size},
+    'cem': {'marker': 'P', 'name': 'CEM', 'color': 'tab:blue', 'size': marker_size},
+    'cbm_linear': {'marker': '*', 'name': 'CBM+Linear', 'color': 'tab:red', 'size': marker_size},
+    'cbm_mlp': {'marker': '^', 'name': 'CBM+MLP', 'color': 'tab:purple', 'size': marker_size},
+    'blackbox_multi': {'marker': 'o', 'name': 'BlackBox', 'color': 'tab:grey', 'size': marker_size},
+    'c2bm': {'marker': 's', 'name': 'C2BM', 'color': 'tab:green', 'size': marker_size},
 }
 
 # Define the custom order
 # If the experiment you run does not contain a dataset, just remove it from the list.
 custom_order = [
-    'asia',
-    'sachs',    
+    'Asia',
+    'Sachs',
 ]
 
 # Filter the performance dataframe to keep only the models in model_styles 
 # and datasets in custom_order.
 performance = performance[performance['model'].isin(model_styles.keys()) & performance['dataset'].isin(custom_order)]
+
+# change the name of the model
+performance['model'] = performance['model'].apply(lambda x: model_styles[x]['name'] if x in model_styles else x)
 
 ########## Task & Concept Accuracy Plot ##########
 
@@ -277,7 +283,6 @@ for learning in performance['learning'].unique():
 
     # Replace the model and dataset names
     final_table.index = final_table.index.map(lambda x: model_styles[x]['name'] if x in model_styles else x)
-    final_table.columns = final_table.columns.map(lambda x: get_df_name(x))
 
     # print('\n\nTask Accuracy Table:')
     # print('-------------------')
@@ -319,7 +324,6 @@ for learning in performance['learning'].unique():
 
     # Replace the model and dataset names
     final_table.index = final_table.index.map(lambda x: model_styles[x]['name'] if x in model_styles else x)
-    final_table.columns = final_table.columns.map(lambda x: get_df_name(x))
 
     # print('\n\nConcept Accuracy Table:')
     # print('-------------------')
@@ -359,7 +363,6 @@ for learning in performance['learning'].unique():
 
     # Replace the model and dataset names
     final_table.index = final_table.index.map(lambda x: model_styles[x]['name'] if x in model_styles else x)
-    final_table.columns = final_table.columns.map(lambda x: get_df_name(x))
 
     print('\n\nLabel Accuracy Table:')
     print('-------------------')
