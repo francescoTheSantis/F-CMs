@@ -16,3 +16,5 @@ To reproduce the experiments described in this repository, follow these steps:
   ```bash
   python main.py
   ```
+
+This will execute all the experiments defined in the `sweep.yaml` file.
