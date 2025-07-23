@@ -3,6 +3,8 @@ outputs
 OLD
 *.ckpt
 plots_DEF_cumulative
+make_plots.py
+figs/
 
 *.pth
 *.png
