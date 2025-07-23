@@ -5,8 +5,8 @@ defaults:
 mode: local_federated
 
 settings:
-  n_rounds: 200
+  n_rounds: ${trainer.max_epochs}
   local_epochs: 2
   num_threads: 1
   freezing: true
-  patience: 30
+  patience: ${trainer.patience}
