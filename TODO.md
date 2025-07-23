@@ -16,3 +16,5 @@
 
 **Dario**
 - [ ] wip
+- [ ] privacy leakage analysis, introduce MIAs
+- [ ] design specific-concept-based attack
