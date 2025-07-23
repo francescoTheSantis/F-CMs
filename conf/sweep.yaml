@@ -9,18 +9,18 @@ hydra:
   sweeper:
     params:
       # possible datsets are: asia, sachs, alarm, hailfinder, insurance
-      seed: 1, 2, 3, 4, 5
-      dataset: asia, sachs, alarm, insurance, hailfinder
+      seed: 2, 3 #1, 2, 3, 4, 5
+      dataset: asia, sachs #, alarm, insurance, hailfinder
       # possible models are:
       # blackbox, blackbox_multi, cbm_linear, cbm_mlp, cem, c2bm
-      model: blackbox_multi #blackbox_multi, cbm_linear, cem, c2bm 
-      learning: centralized # localized, centralized, local_federated 
+      model: blackbox_multi, cbm_linear, cem, c2bm 
+      learning: localized, centralized, local_federated 
       
 model:
   hidden_size: 128
 
 dataset:
-  load_embeddings: false # disable when sweeping over different seeds
+  load_embeddings: true 
   load_graph: false
   load_true_graph: true
   batch_size: 128
@@ -36,7 +36,7 @@ engine:
 trainer:
   # logger: wandb
   devices: [0]
-  max_epochs: 1
+  max_epochs: 500
   patience: 30
 
 rag:

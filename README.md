@@ -18,9 +18,3 @@ To reproduce the experiments described in this repository, follow these steps:
   ```
 
 This will execute all the experiments defined in the `sweep.yaml` file.
-
-
-
-# TODO
-
- - [ ] fare in modo che sia il client_id a selezionare la partizione (porzione di dataset su cui trainare) e non il seed

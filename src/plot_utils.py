@@ -22,6 +22,32 @@ def reorder(learning_methods):
     ordered_learning_methods = [method for method in custom_order if method in learning_methods]
     return ordered_learning_methods
 
+def rename_learning_methods(learning_method):
+    for method in learning_method:
+        if method == 'centralized':
+            renamed_method = ['Centralized']
+        elif method == 'local_federated':
+            renamed_method = ['Federated']
+        elif method.startswith('localized'):
+            # Extract the number from the method name
+            num = method.split('_')[-1]
+            renamed_method = [f'Localized (cl. {num})']
+        else:
+            raise ValueError(f"Unknown learning method: {method}")
+    return renamed_method
+
+def average_over_seed(input):
+    d = {}
+    for el in input:
+        for k, v in el.items():
+            if k not in d:
+                d[k] = []
+            d[k].append(v)
+
+    mean = {k: np.mean(v) for k, v in d.items()}
+    std = {k: np.std(v) for k, v in d.items()}
+    return mean, std
+
 def plot_single_c_on_y(
     input,
     custom_order,
@@ -30,11 +56,11 @@ def plot_single_c_on_y(
     figsize=(20, 15),
     title_size=16,
     label_size=14,
-    tick_size=12,
-    legend_size=12,
+    tick_size=14,
+    legend_size=14,
     legend_bgcolor='lightgray',
     legend_edgecolor='black',
-    legend_alpha=0.9
+    legend_alpha=0.3
 ):
     input = input[['seed', 'dataset', 'model', 'learning', 'single_c_interventions_on_y']].dropna()
     input['single_c_interventions_on_y'] = input['single_c_interventions_on_y'].apply(delta_single_c_interventions_on_y)
@@ -68,19 +94,21 @@ def plot_single_c_on_y(
                 if model_subset.empty:
                     continue
 
-                interventions = model_subset['single_c_interventions_on_y'].iloc[0]
+                interventions, interventions_std = average_over_seed(model_subset['single_c_interventions_on_y'])
                 x_labels = list(interventions.keys())
                 x = np.arange(len(x_labels))
                 bar_width = 0.2
                 model_idx = [x['name'] for x in model_styles.values()].index(model['name'])
                 offset = model_idx * bar_width
                 bar_heights = [interventions[label] for label in x_labels]
+                bar_errors = [(1.96 * interventions_std[label] / np.sqrt(len(model_subset))) for label in x_labels]
 
                 color = {el['name']:el['color'] for el in model_styles.values()}[model['name']]
 
                 bars = ax.bar(
                     x + offset,
                     bar_heights,
+                    yerr=bar_errors,
                     width=bar_width,
                     label=model['name'],
                     color=color,
@@ -110,10 +138,21 @@ def plot_single_c_on_y(
 
                 ax.set_ylabel("$\Delta$ on $y$", fontsize=label_size)
 
-        # Add learning method as a label for the row (outside the subplots)
+        # Get average vertical position of current row
+        row_axes = [axes[i * n_cols + j] for j in range(n_cols)]
+        bbox = [ax.get_position() for ax in row_axes]
+        y_middle = np.mean([b.y0 + b.height / 2 for b in bbox])
+
+        # Dynamically determine a good x-position based on left-most subplot
+        leftmost_ax = row_axes[0].get_position()
+        x_pos = leftmost_ax.x0 - 0.04  # Decrease this to get closer (0.02–0.03 usually works well)
+
+        # Rename the learning methods
+        learning_method = rename_learning_methods([learning_method])[0]
+
         fig.text(
-            0.04,  # x position
-            1 - (i + 0.5) / n_rows,  # y position (middle of the row)
+            x_pos,
+            y_middle,
             learning_method,
             va='center',
             ha='right',
@@ -140,6 +179,36 @@ def plot_single_c_on_y(
     plt.tight_layout(rect=[0.08, 0.07, 1, 1])
 
     if folder:
-        plt.savefig(f"{folder}/single_c_interventions_on_y.png", bbox_inches='tight')
+        plt.savefig(f"{folder}/single_c_interventions_on_y.pdf", bbox_inches='tight')
     else:
         raise ValueError("Folder path is required to save the figure.")
+    
+def delta_single_id_interventions_on_y_id_ood(d, baseline=None):
+    baseline = baseline['_baseline']
+    delta_dicts = []
+    for int in d:
+        delta_dicts.append({k:(v - baseline) for k, v in int.items()})
+    mean, std = average_over_seed(delta_dicts)
+    return mean, std
+
+def plot_single_id_ood_on_y(
+    input,
+    custom_order,
+    model_styles,
+    folder=None,
+    figsize=(20, 15),
+    title_size=16,
+    label_size=14,
+    tick_size=12,
+    legend_size=12,
+    legend_bgcolor='lightgray',
+    legend_edgecolor='black',
+    legend_alpha=0.9,
+    id=True
+):
+
+    input = input[['seed', 'dataset', 'model', 'learning', 'single_id_on_y', 'single_ood_on_y', 'single_c_interventions_on_y']].dropna()
+    if id:
+        input['single_id_on_y'] = input.apply(lambda row: \
+                                              delta_single_id_interventions_on_y_id_ood(row['single_id_on_y'], 
+                                                                                        row['single_c_interventions_on_y']), axis=1)

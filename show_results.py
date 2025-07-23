@@ -8,14 +8,18 @@ import yaml
 from matplotlib.ticker import FuncFormatter
 import pickle
 import math
-from src.plot_utils import plot_single_c_on_y
+from src.plot_utils import *
 
 warnings.filterwarnings("ignore")
 plt.style.use(['science', 'ieee', 'no-latex'])
 
 # List the paths containing the results
 paths = [
+    #"/home/fdesantis/projects/Federated-C2BM/outputs/multirun/2025-07-22/22-20-36",
+    #"/home/fdesantis/projects/Federated-C2BM/outputs/multirun/2025-07-23/08-50-04",
     "/home/fdesantis/projects/Federated-C2BM/outputs/outputs_v1/2025-07-21/14-21-18",
+    #"/home/fdesantis/projects/Federated-C2BM/outputs/outputs_v3/multirun/2025-07-21/20-01-20",
+    #"/home/fdesantis/projects/Federated-C2BM/outputs/outputs_v4/multirun/2025-07-21/23-41-58"
 ]
 
 # maximum number of clients
@@ -80,7 +84,7 @@ for exp in exps_path:
             ###### Collect the results for the interventions
             single_id_on_y_files = [os.path.join(exp, 'results', f'client_{client}_single_IDc_interventions_on_y.pkl') \
                                     for client in range(1,n_clients)] # The maximum number of clients has to be known
-            single_ood_on_y_files = [os.path.join(exp, 'results', f'client_{client}_single_OODc_on_y.pkl') \
+            single_ood_on_y_files = [os.path.join(exp, 'results', f'client_{client}_single_OODc_interventions_on_y.pkl') \
                                      for client in range(1,n_clients)] # The maximum number of clients has to be known
 
             level_interventions_on_c_file = os.path.join(exp, 'results', 'level_interventions_on_c.pkl')
@@ -90,21 +94,21 @@ for exp in exps_path:
             single_c_interventions_on_y_file = os.path.join(exp, 'results', 'single_c_interventions_on_y.pkl')
 
             # now read all those files 
+            d['single_id_on_y'] = []
+            d['single_ood_on_y'] = []
             for client in range(1, n_clients):
                 if os.path.exists(single_id_on_y_files[client-1]):
-                    d['single_id_on_y'] = []
                     with open(single_id_on_y_files[client-1], 'rb') as f:
                         d['single_id_on_y'].append(pickle.load(f))
-                    
-                else:
-                    d['single_id_on_y'] = None
 
                 if os.path.exists(single_ood_on_y_files[client-1]):
-                    d['single_ood_on_y'] = []
                     with open(single_ood_on_y_files[client-1], 'rb') as f:
                         d['single_ood_on_y'].append(pickle.load(f))
-                else:
-                    d['single_ood_on_y'] = None
+
+            if d['single_id_on_y'] == []:
+                d['single_id_on_y'] = None
+            if d['single_ood_on_y'] == []:
+                d['single_ood_on_y'] = None
 
             if os.path.exists(level_interventions_on_c_file):
                 with open(level_interventions_on_c_file, 'rb') as f:
@@ -166,6 +170,12 @@ def get_df_name(df):
         return 'Sachs'
     elif df=='asia':
         return 'Asia'
+    elif df=='alarm':
+        return 'Alarm'
+    elif df=='heilfinder':
+        return 'Heilfinder'
+    elif df=='insurance':
+        return 'Insurance'
     else:
         raise ValueError(f"Unknown dataset name: {df}")
 
@@ -190,6 +200,9 @@ model_styles = {
 custom_order = [
     'Asia',
     'Sachs',
+    #'Alarm',
+    #'Insurance',
+    #'Heilfinder',
 ]
 
 # Filter the performance dataframe to keep only the models in model_styles 
@@ -294,7 +307,6 @@ for learning in performance['learning'].unique():
         os.makedirs(os.path.dirname(result_file))
     final_table.to_csv(result_file, index=True)
 
-
     ########## Concept Accuracy Table ##########
 
     task_avg = concept_stats[['model', 'dataset', 'avg_accuracy_concept']]
@@ -379,8 +391,19 @@ for learning in performance['learning'].unique():
 ########## Intervention ID plots ##########
 
 ### Intervention plot for single c interventions on y ###
-
 plot_single_c_on_y(performance, custom_order, model_styles, visualization_folder)
+
+### Intervention plot for single ID interventions on y ###
+plot_single_id_ood_on_y(performance, custom_order, model_styles, visualization_folder, id=True)
+
+### Intervention plot for single OOD interventions on y ###
+#plot_single_ood_on_y(performance, custom_order, model_styles, visualization_folder)
+
+### Intervention plot for level interventions on c ###
+#plot_level_interventions_on_c(performance, custom_order, model_styles, visualization_folder)
+
+
+
 
 
 
