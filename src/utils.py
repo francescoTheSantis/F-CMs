@@ -22,8 +22,13 @@ import copy
 import math
 import scipy
 
-from torch.utils.data import random_split
-from torch.utils.data import DataLoader, Subset, ConcatDataset, random_split
+from torch.utils.data import (
+    DataLoader,
+    Dataset,
+    Subset,
+    ConcatDataset,
+    random_split,
+)
 
 
 def load_dataloaders(cfg: DictConfig, path: str, n_clients: int):
@@ -694,10 +699,6 @@ def score_whitebox_batch(batch, model, client_update, cfg):
     y_hat, c_hat = model(x)
     y_hat_loss, c_hat_loss = model.filter_output_for_loss(y_hat, c_hat)
     losses = model.loss(y_hat_loss, y, c_hat_loss, c, reduction='none')  # Use 'none' to get per-sample losses
-    # print(f"Predictions shape: {predictions.shape}, Targets shape: {targets.shape}")
-    # print(f"Predictions: {predictions}, Targets: {targets}")
-    # losses = torch.nn.functional.cross_entropy(predictions, targets.long(), reduction='none')
-    # losses, y_output, c_output, y, c = model.shared_step(batch, 1)
     
     for i, loss in enumerate(losses):
         grad_vector = torch.autograd.grad(
@@ -714,37 +715,33 @@ def score_whitebox_batch(batch, model, client_update, cfg):
     return scores.cpu().numpy()
 
 
-# def dataprocess_auditing(train_dataloaders, cfg):
-#     """
-#     This function prepares the dataloaders for auditing by subsampling canaries
-#     and creating separate dataloaders for canaries and non-canaries.
-#     """
-#     canary_fraction = cfg.learning.settings.canary_fraction
+class _SIASampleDataset(Dataset):
+    """ A thin wrapper to expose (sample, target, c, cid) or dict+cid. """
 
-#     canary_loaders = []
-#     true_in_outs = []
-#     subsampled_train_loaders = []
-#     for cid in range(cfg.learning.n_clients):
-#         train_loader = train_dataloaders[cid]
+    def __init__(self, base_ds: Dataset, base_indices: List[int], cid: int):
+        self.base_ds = base_ds
+        self.indices = base_indices
+        self.cid = cid
+        if hasattr(base_ds, "c"):
+            self.c = base_ds.c[base_indices]
+
+    def __len__(self):
+        return len(self.indices)
+
+    def __getitem__(self, idx):
+        item = self.base_ds[self.indices[idx]]
         
-#         # prepare dataset auditing
-#         canaries, non_canaries = random_split(train_loader.dataset, [canary_fraction, 1 - canary_fraction])
-#         n_canaries = len(canaries)
-#         cfg.learning.settings.n_canaries = n_canaries
+        # dict → copy and add key(s)
+        if isinstance(item, dict):
+            sample = dict(item)  # shallow copy
+            sample["cid"] = self.cid
+            if hasattr(self.base_ds, "c"):
+                sample["c"] = self.base_ds.c[self.indices[idx]]
+            return sample
 
-#         # subsample canaries & make new dataloader
-#         true_in_out = torch.distributions.bernoulli.Bernoulli(torch.ones(n_canaries) * 0.5).sample()
-#         # true_in_out = true_in_out.numpy()
-#         canaries_in_idx = torch.nonzero(true_in_out)
-#         subsampled_train_data = torch.utils.data.ConcatDataset([
-#             non_canaries,
-#             torch.utils.data.Subset(canaries, canaries_in_idx)
-#         ])
-#         subsampled_train_loaders.append(DataLoader(subsampled_train_data, batch_size=cfg.dataset.batch_size, shuffle=True))
-#         canary_loaders.append(DataLoader(canaries, batch_size=cfg.dataset.batch_size, shuffle=False))
-#         true_in_outs.append(true_in_out)
-    
-#     return subsampled_train_loaders, canary_loaders, true_in_outs
+        else:
+            raise RuntimeError("Unsupported item type in _SIASampleDataset: expected dict, got {}".format(type(item)))
+
 
 def _clone_loader(template_loader, dataset, *, shuffle):
     """Return a DataLoader with the same runtime parameters as `template_loader`."""
@@ -760,37 +757,47 @@ def _clone_loader(template_loader, dataset, *, shuffle):
         persistent_workers=getattr(template_loader, "persistent_workers", False),
     )
 
+
 def dataprocess_auditing(train_dataloaders, cfg):
+    """
+    Produces:
+      • subsampled_train_loaders : list[DataLoader]
+      • canary_loaders          : list[DataLoader]
+      • true_in_outs            : list[torch.BoolTensor]
+      • sia_loader              : DataLoader   
+    """
     frac = cfg.learning.settings.canary_fraction
+    sia_k = cfg.learning.settings.sia_samples_per_client
+
     subsampled_train_loaders, canary_loaders, true_in_outs = [], [], []
+    sia_datasets: List[_SIASampleDataset] = []
 
     for cid in range(cfg.learning.n_clients):
-        base_loader   = train_dataloaders[cid]
-        base_dataset  = base_loader.dataset
-        n_total       = len(base_dataset)
+        base_loader  = train_dataloaders[cid]
+        base_dataset = base_loader.dataset
+        n_total      = len(base_dataset)
 
-        # split
-        n_canaries    = max(1, int(round(frac * n_total)))
-        n_non_can     = n_total - n_canaries
+        # ---------- 1. split into canaries / non-canaries -------------------
+        n_canaries   = max(1, int(round(frac * n_total)))
+        n_non_can    = n_total - n_canaries
         canaries_ds, non_canaries_ds = random_split(
             base_dataset, [n_canaries, n_non_can]
         )
 
-        # keep your custom attribute
         if hasattr(base_dataset, "c"):
             full_c = base_dataset.c
             canaries_ds.c      = full_c[canaries_ds.indices]
             non_canaries_ds.c  = full_c[non_canaries_ds.indices]
 
-        # pick canaries to stay "in"
-        true_in_out = (torch.rand(n_canaries) < 0.5)
+        # ---------- 2. subsample canaries "in" / "out" ----------------------
+        true_in_out = torch.rand(n_canaries) < 0.5
         keep_idx    = true_in_out.nonzero(as_tuple=False).squeeze(1)
 
         canaries_in_ds = Subset(canaries_ds, keep_idx)
         if hasattr(canaries_ds, "c"):
             canaries_in_ds.c = canaries_ds.c[keep_idx]
 
-        # concat & build loaders ---------
+        # ---------- 3. build *training* dataset & loaders -------------------
         combined_ds = ConcatDataset([non_canaries_ds, canaries_in_ds])
         if hasattr(base_dataset, "c"):
             combined_ds.c = torch.cat([non_canaries_ds.c, canaries_in_ds.c])
@@ -802,10 +809,29 @@ def dataprocess_auditing(train_dataloaders, cfg):
             _clone_loader(base_loader, canaries_ds, shuffle=False)
         )
         true_in_outs.append(true_in_out)
-
         cfg.learning.settings.n_canaries = n_canaries
 
-    return subsampled_train_loaders, canary_loaders, true_in_outs
+        # ---------- 4. build SIA samples for this client --------------------
+        if cfg.learning.settings.sia:
+            pool = non_canaries_ds.indices    # only non-canaries
+            sel  = random.sample(pool, min(sia_k, len(pool)))
+            sia_datasets.append(_SIASampleDataset(base_dataset, sel, cid))
+
+    # ---------- 5. concatenate SIA datasets from all clients ---------------
+    if sia_datasets:
+        sia_dataset = ConcatDataset(sia_datasets)
+        if hasattr(train_dataloaders[0].dataset, "c"):
+            sia_dataset.c = torch.cat([d.c for d in sia_datasets])
+
+        sia_loader = _clone_loader(
+            train_dataloaders[0],   # template with proper collate_fn
+            sia_dataset,
+            shuffle=False           # keep deterministic order
+        )
+    else:
+        sia_loader = None
+
+    return subsampled_train_loaders, canary_loaders, true_in_outs, sia_loader
 
 
 def p_value_DP_audit(m, r, v, eps, delta):
@@ -919,3 +945,86 @@ def initialize_mia_results(n_clients):
         mia_epsilons["blackbox"][cid] = []
         
     return mia_accuracies, mia_epsilons
+
+
+@torch.no_grad()
+def _sia_batch_loss(batch, model, cfg):
+    """
+    Returns the per-sample task&concept loss for a batch, **CPU numpy**.
+    Accepts either tuple- or dict-style batches produced by `sia_loader`.
+    """
+    # ------------- unpack --------------------------------------------------
+    if isinstance(batch, dict):
+        x = batch["x"].to(cfg.device)
+        y = batch["y"].to(cfg.device)
+        c = batch.get("c")
+        c = c.to(cfg.device) if c is not None else None
+    else:                                   # tuple or list
+        raise RuntimeError("Unsupported batch type in _sia_batch_loss: expected dict, got {}".format(type(batch)))
+    
+    x, y = x.to(cfg.device), y.to(cfg.device)
+
+    # ------------- forward & loss -----------------------------------------
+    y_hat, c_hat = model(x)
+    y_hat_loss, c_hat_loss = model.filter_output_for_loss(y_hat, c_hat)
+    losses = model.loss(
+        y_hat_loss, y, c_hat_loss, c, reduction="none", ignore_index=-1
+    )  # shape = (B,)
+
+    return losses.detach().cpu().numpy() 
+
+
+def _sia_true_cids(dataset):
+    """Return a NumPy array with the cid for every sample in the dataset."""
+    if isinstance(dataset, ConcatDataset):
+        cids = []
+        for sub in dataset.datasets:          # each is _SIASampleDataset
+            cids.extend([sub.cid] * len(sub))
+        return np.asarray(cids, dtype=np.int64)
+    else:                                     # single _SIASampleDataset
+        return np.asarray([dataset.cid] * len(dataset), dtype=np.int64)
+    
+
+def run_sia_attack(
+    local_engine,
+    sia_loader: torch.utils.data.DataLoader,
+    client_params: List[Tuple[List[torch.Tensor], int]],
+    cfg,
+) -> float:
+    """
+    Args
+    ----
+    sia_loader     : the joint loader built in `dataprocess_auditing`
+    client_params  : list[(parameters_list, n_samples)] – exactly what you
+                     already build for FedAvg
+    cfg            : Hydra / OmegaConf config (for `device`, `engine`, ...)
+
+    Returns
+    -------
+    accuracy : proportion of samples whose source client is predicted
+               correctly (lower loss → chosen client)
+    """
+    n_clients    = len(client_params)
+    n_samples    = len(sia_loader.dataset)
+    losses_all   = np.empty((n_samples, n_clients), dtype=np.float32)
+
+    # We'll fill losses column-wise (one client at a time)
+    for cid in range(n_clients):
+        set_parameters(local_engine, client_params[cid][0])
+        local_engine.model.to(cfg.device)
+        local_engine.model.eval()
+
+        # collect losses for *all* SIA samples with this client’s model
+        losses_client = []
+        for batch in sia_loader:            # the loader is NOT shuffled
+            losses_client.append(_sia_batch_loss(batch, local_engine.model, cfg))
+        losses_all[:, cid] = np.concatenate(losses_client)
+
+    # ----------- prediction & accuracy -------------------------------------
+    pred_cid   = losses_all.argmin(axis=1)           # (n_samples,)
+    true_cid = _sia_true_cids(sia_loader.dataset)
+
+    accuracy   = (pred_cid == true_cid).mean()
+
+    return accuracy
+
