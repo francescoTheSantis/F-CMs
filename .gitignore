@@ -11,6 +11,11 @@ figs/
 *.log
 *.pkl
 *.pt
+*.json
+*.csv
+*.gz
+*.tar
 
+data_batch*
 # ignore all the folders that start with outputs
 outputs*
