@@ -146,6 +146,7 @@ class CBM(nn.Module):
         c_hat_dict: Dict[str, torch.Tensor],
         c: torch.Tensor,
         reduction: str = "mean",          # "mean" | "sum" | "none"
+        ignore_index: int = -100
     ):
         """
         Task-and-concept loss with an optional per-sample output.
@@ -167,7 +168,7 @@ class CBM(nn.Module):
         # ----- helper that works for both reductions ---------------------------
         def nll(pred_log, tgt):
             return torch.nn.functional.nll_loss(
-                pred_log, tgt, reduction=reduction
+                pred_log, tgt, reduction=reduction, ignore_index=ignore_index
             )                                        # shape → () or (B,)
 
         # ----- task loss --------------------------------------------------------

@@ -125,7 +125,7 @@ class BlackBox_Multi(nn.Module):
         # ----- helper that works for both reductions ---------------------------
         def nll(pred_log, tgt):
             return torch.nn.functional.nll_loss(
-                pred_log, tgt, reduction=reduction, ignore_index=-1
+                pred_log, tgt, reduction=reduction, ignore_index=ignore_index
             )                                        # shape → () or (B,)
 
         # ----- task loss --------------------------------------------------------

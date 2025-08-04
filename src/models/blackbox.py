@@ -43,8 +43,8 @@ class BlackBox(nn.Module):
     
     def filter_output_for_metric(self, y_output, c_output):
         return y_output, None
-    
-    def loss(self, y_hat, y, c_hat_dict, c, reduction='mean'):
+
+    def loss(self, y_hat, y, c_hat_dict, c, reduction='mean', ignore_index=-100):
         """Compute the loss function.
         Args:
             y_hat: Predicted logits.
@@ -53,4 +53,4 @@ class BlackBox(nn.Module):
             (unused) c: True concept values."""
         y = y.flatten().long()
         # cross entropy
-        return torch.nn.functional.cross_entropy(y_hat, y, reduction=reduction)
+        return torch.nn.functional.cross_entropy(y_hat, y, reduction=reduction, ignore_index=ignore_index)
