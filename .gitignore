@@ -17,5 +17,7 @@ figs/
 *.tar
 
 data_batch*
+test_batch*
+batches*
 # ignore all the folders that start with outputs
 outputs*
