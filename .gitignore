@@ -10,6 +10,7 @@ figs/
 *.png
 *.log
 *.pkl
+*.pt
 
 # ignore all the folders that start with outputs
 outputs*
