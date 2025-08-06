@@ -15,3 +15,4 @@ CACHE = Path(
 CACHE.mkdir(exist_ok=True)
  
 env['HYDRA_FULL_ERROR'] = '1'
+env['CUDA_LAUNCH_BLOCKING'] = '1'

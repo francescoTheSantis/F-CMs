@@ -1,4 +1,4 @@
-name: federated_c2bm
+name: fed_cbm
 channels:
   - pyg
   - pytorch

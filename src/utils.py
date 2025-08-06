@@ -131,8 +131,9 @@ def update_config_from_data(cfg: DictConfig, dataset, subgraphs, subgraphs_conce
             # Get the subgraph giventhe client id
             subgraph_id = identify_subgraph(path, cfg.client_id)
             updated_c_names = subgraphs_concept_names['subgraph_'+subgraph_id]
-            c_cardinality = [card for card, name in zip(dataset.c_info['cardinality'], dataset.c_info['names']) if name in updated_c_names]
-            c_info = {'names': updated_c_names, 'cardinality': c_cardinality}
+            #c_cardinality = [card for card, name in zip(dataset.c_info['cardinality'], dataset.c_info['names']) if name in updated_c_names]
+            c_combined = [(name, card) for name, card in zip(dataset.c_info['names'], dataset.c_info['cardinality']) if name in updated_c_names]
+            c_info = {'names': [x for x, _ in c_combined], 'cardinality': [card for _, card in c_combined]}
 
             # The list of names for in-distribution concepts of the client
             c_names_id = dict()

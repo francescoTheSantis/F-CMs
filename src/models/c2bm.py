@@ -43,7 +43,11 @@ class C2BM(nn.Module):
         self.virtual_roots = [name for name in c_info['names'] if name.startswith('#virtual_')]
         self.combo_info = {'names': c_info['names'] + y_info['names'],
                            'cardinality': c_info['cardinality'] + y_info['cardinality']}
-        assert self.c_names + self.y_names == graph_labels
+        
+        # sort c_names and graph_labels
+        c2bm_graph = sorted(self.c_names + self.y_names)
+        graph_labels = sorted(graph_labels)
+        assert c2bm_graph == graph_labels
 
         # Encoder
         self.encoder = MLP(input_size=input_size,

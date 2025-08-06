@@ -13,7 +13,8 @@ class BlackBox(nn.Module):
                  activation='leaky_relu',
                  c_info={},
                  y_info={},
-                 name: str = 'BlackBox'):
+                 name: str = 'BlackBox',
+                 c_name_index=None):
         super(BlackBox, self).__init__()
         
         # to be stored for every model

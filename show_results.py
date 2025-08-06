@@ -15,9 +15,8 @@ plt.style.use(['science', 'ieee', 'no-latex'])
 
 # List the paths containing the results
 paths = [
-    #"/home/fdesantis/projects/Federated-C2BM/outputs/multirun/2025-07-22/22-20-36",
-    #"/home/fdesantis/projects/Federated-C2BM/outputs/multirun/2025-07-23/08-50-04",
-    "/home/fdesantis/projects/Federated-C2BM/outputs/outputs_v1/2025-07-21/14-21-18",
+    "/home/fdesantis/projects/Federated-C2BM/outputs/multirun/2025-07-22/22-20-36",
+    #"/home/fdesantis/projects/Federated-C2BM/outputs/outputs_v1/2025-07-21/14-21-18",
     #"/home/fdesantis/projects/Federated-C2BM/outputs/outputs_v3/multirun/2025-07-21/20-01-20",
     #"/home/fdesantis/projects/Federated-C2BM/outputs/outputs_v4/multirun/2025-07-21/23-41-58"
 ]
@@ -200,9 +199,9 @@ model_styles = {
 custom_order = [
     'Asia',
     'Sachs',
-    #'Alarm',
-    #'Insurance',
-    #'Heilfinder',
+    'Alarm',
+    'Insurance',
+    'Heilfinder',
 ]
 
 # Filter the performance dataframe to keep only the models in model_styles 
@@ -297,9 +296,9 @@ for learning in performance['learning'].unique():
     # Replace the model and dataset names
     final_table.index = final_table.index.map(lambda x: model_styles[x]['name'] if x in model_styles else x)
 
-    # print('\n\nTask Accuracy Table:')
-    # print('-------------------')
-    # print(final_table)
+    print('\n\nTask Accuracy Table:')
+    print('-------------------')
+    print(final_table)
 
     # store the table in a csv file
     result_file = f'{visualization_folder}/{learning}/task_accuracy.csv'

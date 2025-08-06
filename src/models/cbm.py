@@ -121,7 +121,6 @@ class CBM(nn.Module):
         # -- task loss
         y_hat = torch.log(y_hat + 1e-6)
         
-
         # -- concepts loss
         concept_loss = 0
 
@@ -130,7 +129,6 @@ class CBM(nn.Module):
                 c_hat = torch.log(c_hat + 1e-6)
                 concept_loss += loss_form(c_hat, c[:,self.c_name_index[name]].long())
 
-           
         if y[y== -1].numel() != 0:
             total_loss = concept_loss  
         else:
