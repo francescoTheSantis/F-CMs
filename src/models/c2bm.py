@@ -119,6 +119,16 @@ class C2BM(nn.Module):
         else:
             raise ValueError('invalid prop_type')     
         
+    def label_absence_checker(self, c, intervention_index, name, i):
+        # If the concept label is -1, it means the client has no access to the concept label.
+        # For this reason the rand int cannot be applied.
+        if name not in self.y_names:
+            if not (c[:,self.c_name_index[name]].long()!=-1).sum()==0:
+                # It means there are no -1 in the batch for the specific concept
+                pass
+            else:
+                intervention_index[:,i] = torch.zeros_like(intervention_index[:,i], dtype=torch.int64)
+        return intervention_index
 
     def forward(self, x, c=None, intervention_index=None):
         # Encode input, get the latent features
@@ -126,6 +136,11 @@ class C2BM(nn.Module):
 
         c_embs, c_probs, c_values_emb = {}, {}, {}
         for i, name in enumerate(self.combo_info['names']):
+
+            # update intervention index according to the concept label availability
+            if intervention_index is not None:
+                intervention_index = self.label_absence_checker(c, intervention_index, name, i)
+
             # create embeddings and probabilities for each root concept
             # this assumes the task is last in the name list
             if name in self.roots_info['names']:
