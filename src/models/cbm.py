@@ -108,20 +108,39 @@ class CBM(nn.Module):
         """Filter output for metric function"""
         return y_output, c_output
 
-    # def loss(self, y_hat, y, c_hat_dict, c):
-    #     """Compute loss function.
-    #     Args:
-    #         y_hat (torch.Tensor): Predicted task logits
-    #         y (torch.Tensor): True task labels
-    #         c_hat_dict (Dict): Predicted concept logits
-    #         c (torch.Tensor): True concept labels"""
-    #     y = y.flatten().long()
-    #     # c = c.long() # later to avoid nan to disappear
-    #     loss_form = torch.nn.NLLLoss()
+    def loss(
+        self, 
+        y_hat, 
+        y, 
+        c_hat_dict, 
+        c,         
+        reduction: str = "mean",          # "mean" | "sum" | "none"
+        ignore_index: int = -100
+    ):
 
-    #     # -- task loss
-    #     y_hat = torch.log(y_hat + 1e-6)
-        
+        """Compute loss function.
+        Args:
+            y_hat (torch.Tensor): Predicted task logits
+            y (torch.Tensor): True task labels
+            c_hat_dict (Dict): Predicted concept logits
+            c (torch.Tensor): True concept labels"""
+                
+        y = y.flatten().long()
+        # c = c.long() # later to avoid nan to disappear
+        loss_form = torch.nn.NLLLoss()
+
+        # ----- helper that works for both reductions ---------------------------
+        def nll(pred_log, tgt):
+            return torch.nn.functional.nll_loss(
+                pred_log, tgt, reduction=reduction, ignore_index=ignore_index
+            )                                        # shape → () or (B,)
+
+        # ----- task loss --------------------------------------------------------
+        y_hat_log = torch.log_softmax(y_hat, dim=1)  # log-p
+        task_loss = None
+        if (y != -1).any():                          # at least one labelled sample
+            task_loss = nll(y_hat_log, y)
+
 
         # -- concepts loss
         concept_loss = 0
