@@ -18,6 +18,17 @@ from flwr.common import NDArrays
 from collections import OrderedDict
 import shutil
 import pickle
+import copy
+import math
+import scipy
+
+from torch.utils.data import (
+    DataLoader,
+    Dataset,
+    Subset,
+    ConcatDataset,
+    random_split,
+)
 
 
 def load_dataloaders(cfg: DictConfig, path: str, n_clients: int):
@@ -38,6 +49,7 @@ def load_dataloaders(cfg: DictConfig, path: str, n_clients: int):
         val_dataloaders.append(val_dataloader)
     return train_dataloaders, val_dataloaders
             
+            
 def remove_checkpoints(best_round: int):
     for file in os.listdir("checkpoints"):
         path = os.path.join("checkpoints", file)
@@ -46,6 +58,7 @@ def remove_checkpoints(best_round: int):
                 os.remove(path)
             elif os.path.isdir(path):
                 shutil.rmtree(path)
+
 
 def aggregate(results: List[Tuple[NDArrays, int]]) -> NDArrays:
     """Compute weighted average."""
@@ -64,13 +77,16 @@ def aggregate(results: List[Tuple[NDArrays, int]]) -> NDArrays:
     ]
     return weights_prime
 
+
 def get_parameters(engine):
     return [val.cpu().numpy() for _, val in engine.model.state_dict().items()]
+
 
 def set_parameters(engine, parameters):
     params_dict = zip(engine.model.state_dict().keys(), parameters)
     state_dict = OrderedDict({k: torch.tensor(v) for k, v in params_dict})
     engine.model.load_state_dict(state_dict, strict=True)
+
 
 def model_has_concepts(model):
     if target_classname(model) in ['BlackBox_Multi', 'CBM', 'CEM', 'C2BM', 'SCBM']:
@@ -89,6 +105,7 @@ def model_is_causal(model):
     else:
         raise ValueError(f"Unknown model type: {target_classname(model)}")
 
+
 def clean_empty_configs(cfg: DictConfig) -> DictConfig:
     """ can be used to set default values for missing keys """
     with open_dict(cfg):
@@ -100,11 +117,13 @@ def clean_empty_configs(cfg: DictConfig) -> DictConfig:
             cfg.update(rag = None)
     return cfg
 
+
 # def update_config_from_model(cfg: DictConfig) -> DictConfig:
 #     """ can be used to update the config based on the model """
 #     if not model_is_causal(cfg.model):
 #         cfg.causal_discovery = None
 #     return cfg
+
 
 def extract_number_between_substrings(s, start_substring='trainset_', end_substring='_subgraph'):
     pattern = re.escape(start_substring) + r'(\d+)' + re.escape(end_substring)
@@ -113,6 +132,7 @@ def extract_number_between_substrings(s, start_substring='trainset_', end_substr
         return int(match.group(1))
     return None
 
+
 def identify_subgraph(path, client_id):
     for file in os.listdir(path):
         if extract_number_between_substrings(file) == client_id:
@@ -120,6 +140,7 @@ def identify_subgraph(path, client_id):
             subgraph_id = file.split('subgraph_')[1].split('.')[0]
             return subgraph_id
     return None
+
 
 def update_config_from_data(cfg: DictConfig, dataset, subgraphs, subgraphs_concept_names) -> DictConfig:
     """ can be used to update the config based on the data, e.g., set input and output size """
@@ -195,6 +216,7 @@ def update_config_from_data(cfg: DictConfig, dataset, subgraphs, subgraphs_conce
         
     return cfg
 
+
 def maybe_update_config_with_graph(cfg: DictConfig, graph, interv_policy) -> DictConfig:
     """ can be used to update the config based on the graph """
     if graph is not None:
@@ -210,6 +232,7 @@ def maybe_update_config_with_graph(cfg: DictConfig, graph, interv_policy) -> Dic
                 test_interv_policy = interv_policy
             )
     return cfg
+
 
 def update_intervention_policy_and_graph(cfg, interv_policy, graph, subgraphs, subgraphs_concept_names):
     path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
@@ -238,9 +261,11 @@ def update_intervention_policy_and_graph(cfg, interv_policy, graph, subgraphs, s
     updated_graph = graph.loc[c_names+cfg.model.y_info['names'], c_names+cfg.model.y_info['names']]
     return updated_policy, updated_graph
 
+
 def get_parents(graph, i):
     # get the indices of the parents of the node i
     return graph[:,i].nonzero().squeeze(1)
+
 
 def get_roots(graph):
     return graph.sum(dim=0) == 0
@@ -262,6 +287,7 @@ def dfs(node, adj_matrix, visited, stack, remove):
     stack[node] = False
     return False
 
+
 def contains_cycle(adj_matrix):
     visited = [False] * len(adj_matrix)
     stack = [False] * len(adj_matrix)
@@ -270,6 +296,7 @@ def contains_cycle(adj_matrix):
             if dfs(node, adj_matrix, visited, stack, False):
                 return True
     return False
+
 
 def remove_cycles(graph, start_node):
     """
@@ -292,6 +319,7 @@ def remove_cycles(graph, start_node):
     graph = pd.DataFrame(adj_matrix, index=graph.index, columns=graph.columns, dtype=int)
     return graph
 
+
 def remove_problematic_edges(graph, dataset):
     graph, virtual_c_names = common_cause_nodes(graph)
     if virtual_c_names:
@@ -305,6 +333,7 @@ def remove_problematic_edges(graph, dataset):
         print('therefore no virtual nodes where added and the ground truth graph and C are left untouched') 
     return graph, dataset
 
+
 def get_graph_levels(graph, task_node):
     # extract the subgraph of the task node
     involeved_nodes, roots = get_task_graph(graph, task_node)
@@ -313,6 +342,7 @@ def get_graph_levels(graph, task_node):
     # check if the levels and roots are correct
     check_graph(levels, graph)
     return levels
+
 
 def common_cause_nodes(graph):
     """
@@ -377,6 +407,7 @@ def get_task_graph(graph, task_node):
     involved_nodes = [node for branch in branches for node in branch]
     return involved_nodes, roots
 
+
 def get_levels(graph, involved_nodes, roots):
     # start from the top of the graph
     # 1st level: get all nodes that requires only the roots to be computed
@@ -391,6 +422,7 @@ def get_levels(graph, involved_nodes, roots):
         involved_nodes = [node for node in involved_nodes if node not in previous_level]
     levels.insert(0, roots)
     return levels
+
 
 def check_graph(graph_levels, true_graph):
     roots = graph_levels[0].copy()
@@ -435,6 +467,7 @@ def check_graph(graph_levels, true_graph):
                 parents = torch.unique(torch.cat(parents)).tolist()
             assert node_index == len_node_to_roots, \
                 f"The position of the node {node} in the graph levels is not correct"
+  
                     
 def get_intervention_policy(graph, y_index):
     # get the levels of the graph
@@ -451,6 +484,7 @@ def get_intervention_policy(graph, y_index):
     level_names = [[names[i] for i in level] for level in levels] 
     return levels, level_names
 
+
 def extract_between(text, split):
     if split=='train':
         substring1 = 'trainset_'
@@ -466,6 +500,7 @@ def extract_between(text, split):
         return text[start + len(substring1):end]
     else:
         return None
+   
     
 def get_split_paths(cfg, path, test=False):
     if not test:
@@ -490,6 +525,7 @@ def get_split_paths_fl(cfg, path, client_id):
             val_path = os.path.join(path, file)
     return train_path, val_path
 
+
 def seed_everything(seed: int):
     print(f"Seed set to {seed}")
     random.seed(seed)
@@ -498,6 +534,7 @@ def seed_everything(seed: int):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
+
 
 # plot and save plot on server side
 def plot_loss_and_accuracy(
@@ -550,6 +587,7 @@ def plot_loss_and_accuracy(
     print(f"\n\033[1;34mServer Side\033[0m \nMinimum Loss occurred at round {min_loss_index + 1} with a loss value of {loss[min_loss_index]:.3f} \nMaximum Accuracy occurred at round {max_accuracy_index + 1} with an accuracy value of {accuracy[max_accuracy_index]*100:.2f}\n")
     
     return min_loss_index + 1, max_accuracy_index + 1
+
 
 # create folders
 def create_folders():
@@ -619,3 +657,375 @@ def maybe_freeze_parameters(c, model, learning, freezing = True):
             #    print(f"{name}: requires_grad = {param.requires_grad}")
 
     return None
+
+
+def parameters_to_1d(parameters):
+    return np.concatenate([x.flatten() for x in parameters])
+
+
+def score_blackbox_batch(batch, model, cfg):
+    '''
+    Computes membership inference attack scores for a batch by 
+    computing the negative log-likelihood of the model's predictions.
+    '''
+    with torch.no_grad():
+        x = batch['x'].to(cfg.device)
+        y = batch['y'].to(cfg.device)
+        c = batch['c'].to(cfg.device) if 'c' in batch else None
+
+        # Forward pass
+        y_hat, c_hat = model(x)
+        y_hat_loss, c_hat_loss = model.filter_output_for_loss(y_hat, c_hat)
+        losses = model.loss(y_hat_loss, y, c_hat_loss, c, reduction='none') 
+        return -losses.cpu().numpy()  
+
+
+def score_whitebox_batch(batch, model, client_update, cfg):
+    '''
+    Computes membership inference attack scores for a batch by 
+    computing the inner product between the 'pseudogradient'
+    represented by each client update and the true gradients
+    for each sample in the batch.
+    '''
+    # Move data
+    x = batch['x'].to(cfg.device)
+    y = batch['y'].to(cfg.device)
+    c = batch['c'].to(cfg.device) if 'c' in batch else None
+
+    # Pre-allocate scores array on GPU
+    batch_size = len(y)
+    scores = torch.zeros(batch_size, device=cfg.device) # Zeroing directly on GPU
+
+    # Forward pass
+    y_hat, c_hat = model(x)
+    y_hat_loss, c_hat_loss = model.filter_output_for_loss(y_hat, c_hat)
+    losses = model.loss(y_hat_loss, y, c_hat_loss, c, reduction='none')  # Use 'none' to get per-sample losses
+    
+    for i, loss in enumerate(losses):
+        grad_vector = torch.autograd.grad(
+            loss, 
+            model.parameters(),
+            retain_graph=True
+        )
+        
+        # Flatten and concatenate gradients
+        with torch.no_grad():
+            flat_grad = torch.cat([g.flatten() for g in grad_vector])
+            scores[i] = -torch.dot(flat_grad, client_update) # Dot product directly on GPU
+    
+    return scores.cpu().numpy()
+
+
+class _SIASampleDataset(Dataset):
+    """ A thin wrapper to expose (sample, target, c, cid) or dict+cid. """
+
+    def __init__(self, base_ds: Dataset, base_indices: List[int], cid: int):
+        self.base_ds = base_ds
+        self.indices = base_indices
+        self.cid = cid
+        if hasattr(base_ds, "c"):
+            self.c = base_ds.c[base_indices]
+
+    def __len__(self):
+        return len(self.indices)
+
+    def __getitem__(self, idx):
+        item = self.base_ds[self.indices[idx]]
+        
+        # dict → copy and add key(s)
+        if isinstance(item, dict):
+            sample = dict(item)  # shallow copy
+            sample["cid"] = self.cid
+            if hasattr(self.base_ds, "c"):
+                sample["c"] = self.base_ds.c[self.indices[idx]]
+            return sample
+
+        else:
+            raise RuntimeError("Unsupported item type in _SIASampleDataset: expected dict, got {}".format(type(item)))
+
+
+def _clone_loader(template_loader, dataset, *, shuffle):
+    """Return a DataLoader with the same runtime parameters as `template_loader`."""
+    return DataLoader(
+        dataset,
+        batch_size=template_loader.batch_size,
+        shuffle=shuffle,
+        num_workers=template_loader.num_workers,
+        pin_memory=template_loader.pin_memory,
+        drop_last=template_loader.drop_last,
+        collate_fn=template_loader.collate_fn,
+        worker_init_fn=template_loader.worker_init_fn,
+        persistent_workers=getattr(template_loader, "persistent_workers", False),
+    )
+
+
+def dataprocess_auditing(train_dataloaders, cfg):
+    """
+    Produces:
+      • subsampled_train_loaders : list[DataLoader]
+      • canary_loaders          : list[DataLoader]
+      • true_in_outs            : list[torch.BoolTensor]
+      • sia_loader              : DataLoader   
+    """
+    frac = cfg.learning.settings.canary_fraction
+    sia_k = cfg.learning.settings.sia_samples_per_client
+
+    subsampled_train_loaders, canary_loaders, true_in_outs = [], [], []
+    sia_datasets: List[_SIASampleDataset] = []
+
+    for cid in range(cfg.learning.n_clients):
+        base_loader  = train_dataloaders[cid]
+        base_dataset = base_loader.dataset
+        n_total      = len(base_dataset)
+
+        # ---------- 1. split into canaries / non-canaries -------------------
+        n_canaries   = max(1, int(round(frac * n_total)))
+        n_non_can    = n_total - n_canaries
+        canaries_ds, non_canaries_ds = random_split(
+            base_dataset, [n_canaries, n_non_can]
+        )
+
+        if hasattr(base_dataset, "c"):
+            full_c = base_dataset.c
+            canaries_ds.c      = full_c[canaries_ds.indices]
+            non_canaries_ds.c  = full_c[non_canaries_ds.indices]
+
+        # ---------- 2. subsample canaries "in" / "out" ----------------------
+        true_in_out = torch.rand(n_canaries) < 0.5
+        keep_idx    = true_in_out.nonzero(as_tuple=False).squeeze(1)
+
+        canaries_in_ds = Subset(canaries_ds, keep_idx)
+        if hasattr(canaries_ds, "c"):
+            canaries_in_ds.c = canaries_ds.c[keep_idx]
+
+        # ---------- 3. build *training* dataset & loaders -------------------
+        combined_ds = ConcatDataset([non_canaries_ds, canaries_in_ds])
+        if hasattr(base_dataset, "c"):
+            combined_ds.c = torch.cat([non_canaries_ds.c, canaries_in_ds.c])
+
+        subsampled_train_loaders.append(
+            _clone_loader(base_loader, combined_ds, shuffle=True)
+        )
+        canary_loaders.append(
+            _clone_loader(base_loader, canaries_ds, shuffle=False)
+        )
+        true_in_outs.append(true_in_out)
+        cfg.learning.settings.n_canaries = n_canaries
+
+        # ---------- 4. build SIA samples for this client --------------------
+        if cfg.learning.settings.sia:
+            pool = non_canaries_ds.indices    # only non-canaries
+            sel  = random.sample(pool, min(sia_k, len(pool)))
+            sia_datasets.append(_SIASampleDataset(base_dataset, sel, cid))
+
+    # ---------- 5. concatenate SIA datasets from all clients ---------------
+    if sia_datasets:
+        sia_dataset = ConcatDataset(sia_datasets)
+        if hasattr(train_dataloaders[0].dataset, "c"):
+            sia_dataset.c = torch.cat([d.c for d in sia_datasets])
+
+        sia_loader = _clone_loader(
+            train_dataloaders[0],   # template with proper collate_fn
+            sia_dataset,
+            shuffle=False           # keep deterministic order
+        )
+    else:
+        sia_loader = None
+
+    return subsampled_train_loaders, canary_loaders, true_in_outs, sia_loader
+
+
+def p_value_DP_audit(m, r, v, eps, delta):
+    """
+    Computes the p-value for the audit hypothesis test under differential privacy.
+    The implementation follows Appendix D from:
+    https://arxiv.org/pdf/2305.08846
+
+    Args:
+        m (int): Total number of examples, each included independently with probability 0.5.
+        r (int): Number of guesses made by the auditor (excluding abstentions).
+        v (int): Number of correct guesses by the auditor.
+        eps (float): Differential privacy epsilon parameter.
+        delta (float): Differential privacy delta parameter.
+
+    Returns:
+        float: p-value, i.e., the probability of observing at least v correct guesses under the null hypothesis.
+    """
+    assert 0 <= v <= r <= m
+    assert eps >= 0
+    assert 0 <= delta <= 1
+    q = 1/(1+math.exp(-eps)) # accuracy of eps-DP randomized response
+    beta = scipy.stats.binom.sf(v-1, r, q) # = P[Binomial(r, q) >= v]
+    alpha = 0
+    sum = 0 # = P[v > Binomial(r, q) >= v - i]
+    for i in range(1, v + 1):
+        sum = sum + scipy.stats.binom.pmf(v - i, r, q)
+        if sum > i * alpha:
+            alpha = sum / i
+    p = beta + alpha * delta * 2 * m
+    return min(p, 1)
+
+
+def get_eps_audit(m, r, v, delta, p):
+    """
+    Computes a lower bound on epsilon (eps) for which the observed audit results
+    would not be (eps, delta)-differentially private at confidence level 1-p.
+
+    Args:
+        m (int): Total number of examples, each included independently with probability 0.5.
+        r (int): Number of guesses made by the auditor (excluding abstentions).
+        v (int): Number of correct guesses by the auditor.
+        delta (float): Differential privacy delta parameter.
+        p (float): 1 - confidence level (e.g., p=0.05 for 95% confidence).
+
+    Returns:
+        float: Lower bound on epsilon (eps) such that the mechanism is not (eps, delta)-DP
+               with probability at least 1-p.
+    """
+    assert 0 <= v <= r <= m
+    assert 0 <= delta <= 1
+    assert 0 < p < 1
+    eps_min = 0 # maintain p_value_DP(eps_min) < p
+    eps_max = 1 # maintain p_value_DP(eps_max) >= p
+    while p_value_DP_audit(m, r, v, eps_max, delta) < p: eps_max = eps_max + 1
+    for _ in range(30): # binary search
+        eps = (eps_min + eps_max) / 2
+        if p_value_DP_audit(m, r, v, eps, delta) < p:
+            eps_min = eps
+        else:
+            eps_max = eps
+    return eps_min
+
+
+def evaluate_privacy(scores, true_in_out, cfg):
+    n_canaries = cfg.learning.settings.n_canaries
+    ground_truth = copy.deepcopy(true_in_out)
+    score_indices_sorted = np.argsort(scores)[::-1]
+    classified_in = score_indices_sorted[:int(n_canaries * cfg.learning.settings.k_plus + 1)]
+    classified_out = score_indices_sorted[int(n_canaries * (1 - cfg.learning.settings.k_min) + 1):]
+    abstained = np.setdiff1d(score_indices_sorted, np.concatenate((classified_in, classified_out)))
+    classification = np.zeros(n_canaries)
+    classification[classified_in] = 1
+    classification[abstained] = 2
+    ground_truth[abstained] = 2
+    W = ground_truth == classification
+    num_correct = W.sum() - len(abstained)
+    accuracy_mia = num_correct / (n_canaries - len(abstained))
+    
+    # tpr = np.sum(classification == true_in_out) / len(canaries_in_idx)
+    # tnr = np.sum((1 - classification) == (1 - true_in_out)) / len(canaries_out_idx)
+    # fpr = np.sum(classification == (1 - true_in_out)) / len(canaries_out_idx)
+    # fnr = np.sum((1 - classification) == true_in_out) / len(canaries_in_idx)
+
+    # compute empirical privacy estimate, which should be < epsilon w/ high probability
+    privacy_estimate = get_eps_audit(
+        m=n_canaries,
+        r=n_canaries - len(abstained),
+        v=num_correct,
+        delta=cfg.learning.settings.delta,
+        p=0.05)
+    
+    # Kairouz privacy estimate from https://proceedings.mlr.press/v37/kairouz15.html
+    # privacy_estimate = np.max([np.log(1 - cfg.delta - fpr) - np.log(fnr), 
+                        # np.log(1 - cfg.delta - fnr) - np.log(fpr)])
+                        
+    return accuracy_mia, privacy_estimate
+
+
+def initialize_mia_results(n_clients):
+    """ Initialize dictionaries to store MIA results for each client """
+    if n_clients <= 0:
+        raise ValueError("Number of clients must be greater than 0")
+    
+    mia_accuracies = {"whitebox": {}, "blackbox": {}}
+    mia_epsilons = {"whitebox": {}, "blackbox": {}}
+    for cid in range(n_clients):
+        mia_accuracies["whitebox"][cid] = []
+        mia_accuracies["blackbox"][cid] = []
+        mia_epsilons["whitebox"][cid] = []
+        mia_epsilons["blackbox"][cid] = []
+        
+    return mia_accuracies, mia_epsilons
+
+
+@torch.no_grad()
+def _sia_batch_loss(batch, model, cfg):
+    """
+    Returns the per-sample task&concept loss for a batch, **CPU numpy**.
+    Accepts either tuple- or dict-style batches produced by `sia_loader`.
+    """
+    # ------------- unpack --------------------------------------------------
+    if isinstance(batch, dict):
+        x = batch["x"].to(cfg.device)
+        y = batch["y"].to(cfg.device)
+        c = batch.get("c")
+        c = c.to(cfg.device) if c is not None else None
+    else:                                   # tuple or list
+        raise RuntimeError("Unsupported batch type in _sia_batch_loss: expected dict, got {}".format(type(batch)))
+    
+    x, y = x.to(cfg.device), y.to(cfg.device)
+
+    # ------------- forward & loss -----------------------------------------
+    y_hat, c_hat = model(x)
+    y_hat_loss, c_hat_loss = model.filter_output_for_loss(y_hat, c_hat)
+    losses = model.loss(
+        y_hat_loss, y, c_hat_loss, c, reduction="none", ignore_index=-1
+    )  # shape = (B,)
+
+    return losses.detach().cpu().numpy() 
+
+
+def _sia_true_cids(dataset):
+    """Return a NumPy array with the cid for every sample in the dataset."""
+    if isinstance(dataset, ConcatDataset):
+        cids = []
+        for sub in dataset.datasets:          # each is _SIASampleDataset
+            cids.extend([sub.cid] * len(sub))
+        return np.asarray(cids, dtype=np.int64)
+    else:                                     # single _SIASampleDataset
+        return np.asarray([dataset.cid] * len(dataset), dtype=np.int64)
+    
+
+def run_sia_attack(
+    local_engine,
+    sia_loader: torch.utils.data.DataLoader,
+    client_params: List[Tuple[List[torch.Tensor], int]],
+    cfg,
+) -> float:
+    """
+    Args
+    ----
+    sia_loader     : the joint loader built in `dataprocess_auditing`
+    client_params  : list[(parameters_list, n_samples)] – exactly what you
+                     already build for FedAvg
+    cfg            : Hydra / OmegaConf config (for `device`, `engine`, ...)
+
+    Returns
+    -------
+    accuracy : proportion of samples whose source client is predicted
+               correctly (lower loss → chosen client)
+    """
+    n_clients    = len(client_params)
+    n_samples    = len(sia_loader.dataset)
+    losses_all   = np.empty((n_samples, n_clients), dtype=np.float32)
+
+    # We'll fill losses column-wise (one client at a time)
+    for cid in range(n_clients):
+        set_parameters(local_engine, client_params[cid][0])
+        local_engine.model.to(cfg.device)
+        local_engine.model.eval()
+
+        # collect losses for *all* SIA samples with this client’s model
+        losses_client = []
+        for batch in sia_loader:            # the loader is NOT shuffled
+            losses_client.append(_sia_batch_loss(batch, local_engine.model, cfg))
+        losses_all[:, cid] = np.concatenate(losses_client)
+
+    # ----------- prediction & accuracy -------------------------------------
+    pred_cid   = losses_all.argmin(axis=1)           # (n_samples,)
+    true_cid = _sia_true_cids(sia_loader.dataset)
+
+    accuracy   = (pred_cid == true_cid).mean()
+
+    return accuracy
+

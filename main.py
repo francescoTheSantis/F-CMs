@@ -8,7 +8,9 @@ from torch.utils.data import DataLoader
 from src.data.utils import static_graph_collate
 from pytorch_lightning.loggers import WandbLogger
 from src.trainer import Trainer
+from src.plots_mia import plot_and_save_max_mia, plot_and_save_max_sia
 import subprocess
+import json
 
 from hydra.utils import instantiate, call
 from omegaconf import DictConfig, open_dict, OmegaConf
@@ -20,7 +22,22 @@ import time
 
 import hydra
 from hydra.core.hydra_config import HydraConfig
-from src.utils import seed_everything, maybe_freeze_parameters, aggregate, get_parameters, set_parameters, remove_checkpoints, load_dataloaders
+from src.utils import (
+    seed_everything, 
+    maybe_freeze_parameters, 
+    aggregate, 
+    get_parameters, 
+    set_parameters, 
+    remove_checkpoints, 
+    load_dataloaders,
+    parameters_to_1d,
+    score_blackbox_batch,
+    score_whitebox_batch,
+    dataprocess_auditing,
+    evaluate_privacy,
+    initialize_mia_results,
+    run_sia_attack,
+)
 
 #from src.server import get_evaluate_fn
 #from src.strategy import CustomFedAvgWithModelSaving
@@ -161,7 +178,8 @@ def main(cfg: DictConfig) -> None:
         
         # read client data
         train_dataloaders, val_dataloaders = load_dataloaders(cfg, path, n_clients)
-        
+        train_dataloaders, canary_loaders, true_in_outs, sia_loader = dataprocess_auditing(train_dataloaders, cfg) # NOTE: for the moment we are reducing the training data size
+
         # try with and without these two lines
         engine = instantiate(cfg.engine)
         engine.model.to(cfg.device)
@@ -170,7 +188,9 @@ def main(cfg: DictConfig) -> None:
         best_loss = float('inf')
         best_round = 0
         no_improvement_count = 0
+        sia_accuracies = []
         history = {"round": [], "loss_val_avg": []}
+        mia_accuracies, mia_epsilons = initialize_mia_results(n_clients)
         global_params = get_parameters(instantiate(cfg.engine))
         for rnd in range(1, n_rounds + 1):
             print(f"\033[92m\n--> ROUND {rnd}/{n_rounds}\033[0m")
@@ -203,7 +223,55 @@ def main(cfg: DictConfig) -> None:
 
                 # collect weights for aggregation
                 client_params.append((get_parameters(local_engine), n_samples))
+
+            # ------------------------------------------------------------
+            # Privacy Attack: MIA
+            # ------------------------------------------------------------
+            if cfg.learning.settings.mia:
+                print(f"\033[93mRunning Membership Inference Attack (MIA)\033[0m")
                 
+                for cid in range(n_clients):
+                    # normalize client update vector
+                    true_in_out = true_in_outs[cid].float().numpy()
+                    client_update = parameters_to_1d(client_params[cid][0]) - parameters_to_1d(global_params)
+                    client_update = torch.tensor(client_update / np.linalg.norm(client_update), device=cfg.device)
+                    
+                    # white box attack
+                    set_parameters(local_engine, global_params)
+                    client_model = local_engine.model.to(cfg.device)
+                    for batch in canary_loaders[cid]:
+                        scores_whitebox = score_whitebox_batch(batch, client_model, client_update, cfg)
+                    set_parameters(local_engine, client_params[cid][0])
+
+                    # black box attack
+                    client_model = local_engine.model.to(cfg.device)
+                    for batch in canary_loaders[cid]:
+                        scores_blackbox = score_blackbox_batch(batch, client_model, cfg)
+
+                    # convert scores to MIA accuracy and epsilon privacy budget
+                    accuracy_mia, privacy_estimate = evaluate_privacy(scores_whitebox, true_in_out, cfg)
+                    print(f"Client {cid} - MIA accuracy (whitebox): {accuracy_mia:.4f}, epsilon: {privacy_estimate:.4f}")
+                    mia_accuracies["whitebox"][cid].append(accuracy_mia)
+                    mia_epsilons["whitebox"][cid].append(privacy_estimate)
+                    accuracy_mia, privacy_estimate = evaluate_privacy(scores_blackbox, true_in_out, cfg)
+                    print(f"Client {cid} - MIA accuracy (blackbox): {accuracy_mia:.4f}, epsilon: {privacy_estimate:.4f}")
+                    mia_accuracies["blackbox"][cid].append(accuracy_mia)
+                    mia_epsilons["blackbox"][cid].append(privacy_estimate)
+            
+            # ------------------------------------------------------------
+            # Privacy Attack: SIA
+            # ------------------------------------------------------------
+            if cfg.learning.settings.sia:
+                print(f"\033[93mRunning Source Inference Attack (SIA)\033[0m")
+
+                sia_accuracies.append(run_sia_attack(
+                    local_engine=local_engine,  # instantiated engine
+                    sia_loader=sia_loader,          # returned by dataprocess_auditing
+                    client_params=client_params,    # local models from this round
+                    cfg=cfg,
+                ))
+                print(f"\033[92mSIA accuracy this round: {sia_accuracies[-1]:.4f}\033[0m")  
+
             # ------------------------------------------------------------
             # FedAvg aggregation
             # ------------------------------------------------------------
@@ -259,8 +327,33 @@ def main(cfg: DictConfig) -> None:
         local_engine.model.load_state_dict(torch.load(f"checkpoints/model_round_{best_round}.pth", weights_only=False))
 
         # Evaluate the model on the client datasets    
-        trainer.test(local_engine, test_dataloader)
+        trainer.test(local_engine, test_dataloader)        
         print(f"\033[90mFinished! Training time: {round((time.time() - t0)/60, 2)} minutes\033[0m")
+        
+        # save mia results
+        if cfg.learning.settings.mia:
+            print(f"Saving MIA results: {os.getcwd() + '/mia_results.json'}")
+            with open("mia_results.json", "w") as fp:
+                json.dump(
+                    {
+                        "accuracies": mia_accuracies,  
+                        "epsilons":   mia_epsilons,
+                    }, fp, indent=2)
+            
+            # plot MIA results
+            plot_and_save_max_mia(show=False)
+        
+        # save sia results
+        if cfg.learning.settings.sia:
+            print(f"Saving SIA results: {os.getcwd() + '/sia_results.json'}")
+            with open("sia_results.json", "w") as fp:
+                json.dump(
+                    {
+                        "accuracies": sia_accuracies,
+                    }, fp, indent=2)
+            
+            # plot SIA results
+            plot_and_save_max_sia(out_json="sia_max.json", show=False)
         
         
     elif cfg.learning.mode == 'federated':

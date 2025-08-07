@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from src.models.layers.base import MLP
 from src.models.layers.intervention import maybe_intervene
+from typing import Dict
 
 class CBM(nn.Module):
     """
@@ -107,20 +108,21 @@ class CBM(nn.Module):
         """Filter output for metric function"""
         return y_output, c_output
 
-    def loss(self, y_hat, y, c_hat_dict, c):
-        """Compute loss function.
-        Args:
-            y_hat (torch.Tensor): Predicted task logits
-            y (torch.Tensor): True task labels
-            c_hat_dict (Dict): Predicted concept logits
-            c (torch.Tensor): True concept labels"""
-        y = y.flatten().long()
-        # c = c.long() # later to avoid nan to disappear
-        loss_form = torch.nn.NLLLoss()
+    # def loss(self, y_hat, y, c_hat_dict, c):
+    #     """Compute loss function.
+    #     Args:
+    #         y_hat (torch.Tensor): Predicted task logits
+    #         y (torch.Tensor): True task labels
+    #         c_hat_dict (Dict): Predicted concept logits
+    #         c (torch.Tensor): True concept labels"""
+    #     y = y.flatten().long()
+    #     # c = c.long() # later to avoid nan to disappear
+    #     loss_form = torch.nn.NLLLoss()
 
-        # -- task loss
-        y_hat = torch.log(y_hat + 1e-6)
+    #     # -- task loss
+    #     y_hat = torch.log(y_hat + 1e-6)
         
+
         # -- concepts loss
         concept_loss = 0
 
@@ -129,9 +131,20 @@ class CBM(nn.Module):
                 c_hat = torch.log(c_hat + 1e-6)
                 concept_loss += loss_form(c_hat, c[:,self.c_name_index[name]].long())
 
+           
         if y[y== -1].numel() != 0:
             total_loss = concept_loss  
         else:
-            task_loss = loss_form(y_hat, y)
-            total_loss =  self.concept_loss_weight * concept_loss + (1-self.concept_loss_weight) * task_loss
+            if reduction == "none":
+                total_loss = (
+                    self.concept_loss_weight * concept_loss
+                    + (1.0 - self.concept_loss_weight) * task_loss
+                )                                    # element-wise
+            else:
+                total_loss = (
+                    self.concept_loss_weight * concept_loss
+                    + (1.0 - self.concept_loss_weight) * task_loss
+                )
+
         return total_loss
+

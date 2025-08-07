@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 
 from src.models.layers.base import MLP
+from typing import Dict
 
 class BlackBox_Multi(nn.Module):
     """
@@ -66,32 +67,110 @@ class BlackBox_Multi(nn.Module):
     def filter_output_for_metric(self, y_output, c_output):
         return y_output, c_output
     
-    def loss(self, y_hat, y, c_hat_dict, c):
-        """Compute loss function.
-        Args:
-            y_hat (torch.Tensor): Predicted task logits
-            y (torch.Tensor): True task labels
-            c_hat_dict (Dict): Predicted concept logits
-            c (torch.Tensor): True concept labels"""
-        y = y.flatten().long()
-        # c = c.long() # later to avoid nan to disappear
-        loss_form = torch.nn.NLLLoss()
+    # def loss(self, y_hat, y, c_hat_dict, c):
+    #     """Compute loss function.
+    #     Args:
+    #         y_hat (torch.Tensor): Predicted task logits
+    #         y (torch.Tensor): True task labels
+    #         c_hat_dict (Dict): Predicted concept logits
+    #         c (torch.Tensor): True concept labels"""
+    #     y = y.flatten().long()
+    #     # c = c.long() # later to avoid nan to disappear
+    #     loss_form = torch.nn.NLLLoss()
 
-        # -- task loss
-        y_hat = torch.log(y_hat + 1e-6)
+    #     # -- task loss
+    #     y_hat = torch.log(y_hat + 1e-6)
 
-        # -- concepts loss
-        concept_loss = 0
+    #     # -- concepts loss
+    #     concept_loss = 0
+    #     for name, c_hat in c_hat_dict.items():
+    #         if not (c[:,self.c_name_index[name]].long()!=-1).sum()==0:
+    #             c_hat = torch.log(c_hat + 1e-6)
+    #             concept_loss += loss_form(c_hat, c[:,self.c_name_index[name]].long()) 
+
+    #     if y[y== -1].numel() != 0:
+    #         total_loss = concept_loss
+    #     else:
+    #         task_loss = loss_form(y_hat, y)
+    #         total_loss = self.concept_loss_weight * concept_loss + (1-self.concept_loss_weight) * task_loss
+
+    #     return total_loss
+
+    def loss(
+        self,
+        y_hat: torch.Tensor,
+        y: torch.Tensor,
+        c_hat_dict: Dict[str, torch.Tensor],
+        c: torch.Tensor,
+        reduction: str = "mean",          # "mean" | "sum" | "none"
+        ignore_index: int = -100
+    ):
+        """
+        Task-and-concept loss with an optional per-sample output.
+
+        Args
+        ----
+        y_hat : (B, n_classes) logits **before** soft-max
+        y     : (B,) task labels  (−1 marks “missing”)
+        c_hat_dict : {name: (B, n_c_values) logits}
+        c     : (B, n_concepts)   (−1 marks “missing”)
+        reduction : how to reduce losses:
+            - "mean" (default) : scalar identical to the old code
+            - "none"           : length-B tensor with the loss for each sample
+            - "sum"            : scalar sum of all samples
+        """
+
+        y = y.flatten().long()                       # (B,)
+
+        # ----- helper that works for both reductions ---------------------------
+        def nll(pred_log, tgt):
+            return torch.nn.functional.nll_loss(
+                pred_log, tgt, reduction=reduction, ignore_index=ignore_index
+            )                                        # shape → () or (B,)
+
+        # ----- task loss --------------------------------------------------------
+        y_hat_log = torch.log_softmax(y_hat, dim=1)  # log-p
+        task_loss = None
+        if (y != -1).any():                          # at least one labelled sample
+            task_loss = nll(y_hat_log, y)
+
+        # ----- concept loss -----------------------------------------------------
+        if reduction == "none":
+            # keep running total per sample
+            concept_loss = torch.zeros_like(y_hat_log[:, 0])   # (B,)
+        else:
+            concept_loss = 0.0
+
         for name, c_hat in c_hat_dict.items():
-            if not (c[:,self.c_name_index[name]].long()!=-1).sum()==0:
-                c_hat = torch.log(c_hat + 1e-6)
-                concept_loss += loss_form(c_hat, c[:,self.c_name_index[name]].long()) 
+            idx   = self.c_name_index[name]
+            label = c[:, idx].long()                # (B,)
+            if (label != -1).sum() == 0:
+                continue                            # this concept is fully missing
 
-        if y[y== -1].numel() != 0:
+            c_hat_log = torch.log_softmax(c_hat, dim=1)
+
+            closs = nll(c_hat_log, label)           # shape as chosen above
+
+            # accumulate
+            if reduction == "none":
+                concept_loss = concept_loss + closs  # per-sample add
+            else:
+                concept_loss = concept_loss + closs  # scalar add
+
+        # ----- final mixture ----------------------------------------------------
+        # If *all* task labels are missing, return only concept loss
+        if (y == -1).all():
             total_loss = concept_loss
         else:
-            task_loss = loss_form(y_hat, y)
-            total_loss = self.concept_loss_weight * concept_loss + (1-self.concept_loss_weight) * task_loss
-
+            if reduction == "none":
+                total_loss = (
+                    self.concept_loss_weight * concept_loss
+                    + (1.0 - self.concept_loss_weight) * task_loss
+                )                                    # element-wise
+            else:
+                total_loss = (
+                    self.concept_loss_weight * concept_loss
+                    + (1.0 - self.concept_loss_weight) * task_loss
+                )
 
         return total_loss

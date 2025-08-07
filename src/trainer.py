@@ -17,6 +17,7 @@ from hydra.core.hydra_config import HydraConfig
 from src.my_hydra import parse_hyperparams
 from wandb.sdk.lib.runid import generate_id
 import os
+import torch
 
 class GradientMonitor_afterB(pl.Callback):
     def on_after_backward(self, trainer, pl_module):
@@ -93,11 +94,24 @@ class Trainer(_Trainer_):
                     save_weights_only=False,
                 )
             )
-        # callbacks.append(GradientMonitor_afterB())
-        if cuda.is_available():
+        callbacks.append(GradientMonitor_afterB())
+
+        if torch.cuda.is_available():
             accelerator = "gpu"
+            devices = cfg.trainer.get("devices", torch.cuda.device_count())
+        elif torch.backends.mps.is_available():      # Apple Silicon
+            accelerator = "mps"
+            devices = 1
         else:
             accelerator = "cpu"
+            dev_cfg = cfg.trainer.get("devices")
+            if dev_cfg in (None, "auto"):
+                devices = None           
+            else:
+                devices = int(dev_cfg)
+                if devices <= 0:        
+                    devices = 1
+        
         if cfg.trainer.get("logger") is not None:
             logger = _get_logger(cfg)
         else:
