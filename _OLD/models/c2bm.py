@@ -138,6 +138,8 @@ class C2BM(nn.Module):
         c_embs, c_probs, c_values_emb = {}, {}, {}
         for i, name in enumerate(self.combo_info['names']):
 
+            breakpoint()
+
             # update intervention index according to the concept label availability
             if intervention_index is not None:
                 intervention_index = self.label_absence_checker(c, intervention_index, name, i)

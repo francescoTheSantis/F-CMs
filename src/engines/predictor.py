@@ -329,7 +329,7 @@ class Predictor(pl.LightningModule):
             y_collection = getattr(self, f"{step}_y_metrics")
             y_collection.update(y_hat, y)
             self.log_metrics(y_collection, batch_size=batch['batch_size'])
-        if calculate_c_metrics:
+        if calculate_c_metrics and self.model.has_concepts:
             # update and log concept metrics
             c_collection = getattr(self, f"{step}_c_metrics")
             # log metrics for all predicted concepts 
@@ -381,14 +381,11 @@ class Predictor(pl.LightningModule):
         val_loss, y_output, c_output, y, c = self.shared_step(batch, step='val')
         # Update metrics and log
         y_hat, c_hat = self.model.filter_output_for_metric(y_output, c_output)
-
         if y[y== -1].numel() != 0:
             self.update_and_log_metrics("val", y_hat, y, c_hat, c, batch, calculate_c_metrics = True, calculate_y_metrics = False)
         else:
             self.update_and_log_metrics("val", y_hat, y, c_hat, c, batch) 
-        #self.update_and_log_metrics("val", y_hat, y, c_hat, c, batch)
         self.log_loss("val", val_loss, batch_size=batch['batch_size'])
-
         return val_loss
     
     def test_step(self, batch, batch_idx):

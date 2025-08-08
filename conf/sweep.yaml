@@ -10,11 +10,11 @@ hydra:
     params:
       # possible datsets are: asia, sachs, alarm, hailfinder, insurance
       seed: 1 #, 2, 3, 4, 5
-      dataset: alarm, insurance, hailfinder #, sachs #, alarm, insurance, hailfinder
+      dataset: asia #, sachs, alarm, insurance, hailfinder
       # possible models are:
       # blackbox, blackbox_multi, cbm_linear, cbm_mlp, cem, c2bm
-      model: c2bm #blackbox_multi, cbm_linear, cem, c2bm 
-      learning: localized, centralized, local_federated 
+      model: cgm #, cbm_linear, cem, c2bm 
+      learning: localized #centralized, localized, local_federated 
       
 model:
   hidden_size: 64
@@ -28,7 +28,7 @@ dataset:
    noise: 0.5  # for bndatasets only
 
 engine:
-  intervention_prob: 0.8
+  intervention_prob: 0
   test_interv_noise: 0.8   # for bndatasets only
   optim_kwargs:
     lr: 0.00075
@@ -36,7 +36,7 @@ engine:
 trainer:
   # logger: wandb
   devices: [0]
-  max_epochs: 1
+  max_epochs: 100
   patience: 30
 
 rag:

@@ -89,21 +89,23 @@ def set_parameters(engine, parameters):
 
 
 def model_has_concepts(model):
-    if target_classname(model) in ['BlackBox_Multi', 'CBM', 'CEM', 'C2BM', 'SCBM']:
+    name = model.name
+    if name in ['blackbox_multi', 'cbm', 'cem', 'c2bm']:
         return True
-    elif target_classname(model) in ['BlackBox']:
+    elif name in ['blackbox']:
         return False
     else:
-        raise ValueError(f"Unknown model type: {target_classname(model)}")
-    
+        raise ValueError(f"Unknown model type: {name}")
+
 
 def model_is_causal(model):
-    if target_classname(model) in ['C2BM']:
+    name = model.name
+    if name in ['c2bm', 'cgm']:
         return True
-    elif target_classname(model) in ['BlackBox', 'BlackBox_Multi', 'CEM', 'CBM', 'SCBM']:
+    elif name in ['blackbox', 'blackbox_multi', 'cem', 'cbm']:
         return False
     else:
-        raise ValueError(f"Unknown model type: {target_classname(model)}")
+        raise ValueError(f"Unknown model type: {name}")
 
 
 def clean_empty_configs(cfg: DictConfig) -> DictConfig:
