@@ -707,8 +707,16 @@ def score_whitebox_batch(batch, model, client_update, cfg):
         grad_vector = torch.autograd.grad(
             loss, 
             model.parameters(),
-            retain_graph=True
+            retain_graph=True,
+            allow_unused=True # Allow unused gradients, otherwise an error is raised while computing the gradients.
         )
+
+        # Since some of the gradient vectors may be None (due to some part of the model being frozen), 
+        # we replace them with zero vectors.
+        grad_vector = [
+            g if g is not None else torch.zeros_like(p)
+            for g, p in zip(grad_vector, model.parameters())
+        ]
         
         # Flatten and concatenate gradients
         with torch.no_grad():
