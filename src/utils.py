@@ -151,7 +151,7 @@ def update_config_from_data(cfg: DictConfig, dataset, subgraphs, subgraphs_conce
     with open_dict(cfg):
         if cfg.learning.mode=="localized":
             path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
-            # Get the subgraph giventhe client id
+            # Get the subgraph given the client id
             subgraph_id = identify_subgraph(path, cfg.client_id)
             updated_c_names = subgraphs_concept_names['subgraph_'+subgraph_id]
             #c_cardinality = [card for card, name in zip(dataset.c_info['cardinality'], dataset.c_info['names']) if name in updated_c_names]
@@ -206,7 +206,7 @@ def update_config_from_data(cfg: DictConfig, dataset, subgraphs, subgraphs_conce
             output_size = dataset.y_info['cardinality'][0], # we assume single class classification
             c_info = c_info,
             y_info = dataset.y_info,
-            c_name_index = {name: i for i, name in enumerate(c_names_all)},
+            c_name_index = {name: i for i, name in enumerate(c_names_all + dataset.y_info['names'])},
         )
         cfg.engine.update(
             c_names_id = c_names_id,

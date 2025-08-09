@@ -57,8 +57,6 @@ class CEM(BaseModel):
         # Concept encoders, one for each concept
         self.concept_encoders = nn.ModuleDict()
         for name in self.concept_names:
-            if name in self.virtual_roots: 
-                continue
             concept_idx = self.concept_names.index(name)
             self.concept_encoders[name] = ConceptBlock(
                 input_size=self.hidden_size,
@@ -70,7 +68,7 @@ class CEM(BaseModel):
         
         # Decoder
         if self.output_size is not None:
-            n_concepts = len(self.concept_names) - len(self.virtual_roots)
+            n_concepts = len(self.concept_names)
             self.decoder = MLP(
                 input_size=n_concepts * self.concept_hidden_size,
                 hidden_size=n_concepts * self.concept_hidden_size // 2,
@@ -94,11 +92,16 @@ class CEM(BaseModel):
         # Encode input, get the latent features
         x_encoded = self.encoder(x)
 
+        # Update intervention_index according to the annotation availability
+        intervention_index = self._concept_availability_checker(c, intervention_index)
+
         # create embeddings and probabilities for each concept
         c_embeddings, c_hat_probs = {}, {}
         for name in self.concept_names:
-            if name in self.virtual_roots: 
-                continue
+
+            # The concept annotation tensor c has shape (B, #total_concepts).
+            # For this reason we need the self.c_name_index to access the position related
+            # to the i-th concept
             i = self.c_name_index[name]
             
             # Handle case where c or intervention_index might be None
