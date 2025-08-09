@@ -15,10 +15,7 @@ plt.style.use(['science', 'ieee', 'no-latex'])
 
 # List the paths containing the results
 paths = [
-    "/home/fdesantis/projects/Federated-C2BM/outputs/multirun/2025-07-22/22-20-36",
-    #"/home/fdesantis/projects/Federated-C2BM/outputs/outputs_v1/2025-07-21/14-21-18",
-    #"/home/fdesantis/projects/Federated-C2BM/outputs/outputs_v3/multirun/2025-07-21/20-01-20",
-    #"/home/fdesantis/projects/Federated-C2BM/outputs/outputs_v4/multirun/2025-07-21/23-41-58"
+    "/home/bigdata-01QYD/s280037/Projects/Federated-C2BM/outputs/multirun/2025-08-07/15-56-41"
 ]
 
 # maximum number of clients
@@ -171,8 +168,8 @@ def get_df_name(df):
         return 'Asia'
     elif df=='alarm':
         return 'Alarm'
-    elif df=='heilfinder':
-        return 'Heilfinder'
+    elif df=='hailfinder':
+        return 'Hailfinder'
     elif df=='insurance':
         return 'Insurance'
     else:
@@ -201,7 +198,7 @@ custom_order = [
     'Sachs',
     'Alarm',
     'Insurance',
-    'Heilfinder',
+    'Hailfinder',
 ]
 
 # Filter the performance dataframe to keep only the models in model_styles 

@@ -178,6 +178,7 @@ class BaseModel(nn.Module, ABC):
         Returns:
             Computed concept loss
         """
+    
         if not self.has_concepts or not c_hat_dict:
             return torch.tensor(0.0, device=next(self.parameters()).device)
         

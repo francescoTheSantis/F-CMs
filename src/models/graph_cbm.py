@@ -230,7 +230,7 @@ class GraphCBM(BaseModel):
              c_hat_dict: Dict[str, torch.Tensor],
              c: torch.Tensor,
              reduction: str = "mean",
-             ignore_index: int = -100) -> torch.Tensor:
+             ignore_index: int = -1) -> torch.Tensor:
         """
         Compute the loss function for C2BM model.
         

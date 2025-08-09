@@ -90,7 +90,7 @@ def set_parameters(engine, parameters):
 
 def model_has_concepts(model):
     name = model.name
-    if name in ['blackbox_multi', 'cbm', 'cem', 'c2bm']:
+    if name in ['blackbox_multi', 'cbm_linear', 'cbm_mlp', 'cem', 'c2bm']:
         return True
     elif name in ['blackbox']:
         return False
@@ -102,7 +102,7 @@ def model_is_causal(model):
     name = model.name
     if name in ['c2bm', 'cgm']:
         return True
-    elif name in ['blackbox', 'blackbox_multi', 'cem', 'cbm']:
+    elif name in ['blackbox', 'blackbox_multi', 'cem', 'cbm_linear', 'cbm_mlp']:
         return False
     else:
         raise ValueError(f"Unknown model type: {name}")
