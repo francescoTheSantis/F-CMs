@@ -13,7 +13,7 @@ hydra:
       dataset: asia, sachs, alarm, insurance, hailfinder
       # possible models are:
       # blackbox, blackbox_multi, cbm_linear, cbm_mlp, cem, cgm, c2bm
-      model: blackbox_multi, cbm_linear, cbm_mlp
+      model: cem, cgm, c2bm
       learning: centralized, localized, local_federated 
       
 model:
