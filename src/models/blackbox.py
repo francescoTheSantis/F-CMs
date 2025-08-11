@@ -75,26 +75,10 @@ class BlackBox(BaseModel):
     def loss(self, y_hat, y, c_hat_dict, c, reduction='mean', ignore_index=-100):
         """
         Compute the loss function for BlackBox model.
-        
-        Args:
-            y_hat: Predicted logits.
-            y: True labels.
-            c_hat_dict: Predicted concept probabilities (unused for BlackBox).
-            c: True concept values (unused for BlackBox).
-            reduction: Loss reduction method.
-            ignore_index: Index to ignore in loss computation.
-            
-        Returns:
-            Cross-entropy loss for the task prediction.
         """
 
         y = y.flatten().long()
 
-        loss =  self._compute_nll_loss(
-            pred_log=torch.nn.functional.log_softmax(y_hat, dim=-1),
-            target=y,
-            reduction=reduction,
-            ignore_index=ignore_index
-        )
+        task_loss = self._compute_task_loss(y_hat, y, reduction, ignore_index)
 
-        return loss
+        return task_loss

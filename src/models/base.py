@@ -179,6 +179,21 @@ class BaseModel(nn.Module, ABC):
             pred_log, target, reduction=reduction, ignore_index=ignore_index
         )
     
+    def _compute_task_loss(self, 
+                          y_hat: torch.Tensor, 
+                          y: torch.Tensor, 
+                          reduction: str = "mean", 
+                          ignore_index: int = -1) -> torch.Tensor:
+        y = y.flatten().long()
+
+        # ----- task loss --------------------------------------------------------
+        y_hat_log = torch.log_softmax(y_hat, dim=1)
+        task_loss = None
+        if (y != ignore_index).any():  # at least one labelled sample
+            task_loss = self._compute_nll_loss(y_hat_log, y, reduction, ignore_index)
+
+        return task_loss
+
     def _compute_concept_loss(self, 
                              c_hat_dict: Dict[str, torch.Tensor], 
                              c: torch.Tensor, 
@@ -228,13 +243,13 @@ class BaseModel(nn.Module, ABC):
         
         return concept_loss
 
-    def _compute_total_loss(self,
-                           task_loss: Optional[torch.Tensor],
-                           concept_loss: torch.Tensor,
-                           reduction: str = "mean") -> torch.Tensor:
+    def _mix_losses(self,
+                    task_loss: Optional[torch.Tensor],
+                    concept_loss: torch.Tensor,
+                    reduction: str = "mean") -> torch.Tensor:
         """
-        Compute the total loss combining task and concept losses.
-        
+        Mix task and concept losses.
+
         Args:
             task_loss: Task loss tensor
             concept_loss: Concept loss tensor
@@ -254,5 +269,43 @@ class BaseModel(nn.Module, ABC):
                 self.concept_loss_weight * concept_loss
                 + (1.0 - self.concept_loss_weight) * task_loss
             )
+
+        return total_loss
+    
+    def _concept_based_loss(self,
+             y_hat: torch.Tensor,
+             y: torch.Tensor,
+             c_hat_dict: Dict[str, torch.Tensor],
+             c: torch.Tensor,
+             reduction: str = "mean",
+             ignore_index: int = -1) -> torch.Tensor:
+        """
+        Compute the loss function for Concept-based models.
+        
+        Args:
+            y_hat: Predicted task logits/probabilities
+            y: True task labels
+            c_hat_dict: Predicted concept probabilities
+            c: True concept labels
+            reduction: Loss reduction method ("mean", "sum", "none")
+            ignore_index: Index to ignore in loss computation
+            
+        Returns:
+            Total loss combining task and concept losses
+        """
+        y = y.flatten().long()
+
+        # ----- task loss --------------------------------------------------------
+        task_loss = self._compute_task_loss(y_hat, y, reduction, ignore_index)
+
+        # ----- concept loss -----------------------------------------------------
+        concept_loss = self._compute_concept_loss(c_hat_dict, c, reduction, ignore_index)
+
+        # ----- final mixture ----------------------------------------------------
+        # If *all* task labels are missing, return only concept loss
+        if (y == ignore_index).all():
+            total_loss = concept_loss
+        else:
+            total_loss = self._mix_losses(task_loss, concept_loss, reduction)
 
         return total_loss

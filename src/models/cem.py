@@ -140,34 +140,15 @@ class CEM(BaseModel):
              ignore_index: int = -1) -> torch.Tensor:
         """
         Compute the loss function for CEM model.
-        
-        Args:
-            y_hat: Predicted task logits/probabilities
-            y: True task labels
-            c_hat_dict: Predicted concept probabilities
-            c: True concept labels
-            reduction: Loss reduction method ("mean", "sum", "none")
-            ignore_index: Index to ignore in loss computation
-            
-        Returns:
-            Total loss combining task and concept losses
         """
-        y = y.flatten().long()
 
-        # ----- task loss --------------------------------------------------------
-        y_hat_log = torch.log_softmax(y_hat, dim=1)
-        task_loss = None
-        if (y != ignore_index).any():  # at least one labelled sample
-            task_loss = self._compute_nll_loss(y_hat_log, y, reduction, ignore_index)
+        loss = self._concept_based_loss(
+            y_hat,
+            y,
+            c_hat_dict,
+            c,
+            reduction,
+            ignore_index
+        )
 
-        # ----- concept loss -----------------------------------------------------
-        concept_loss = self._compute_concept_loss(c_hat_dict, c, reduction, ignore_index)
-
-        # ----- final mixture ----------------------------------------------------
-        # If *all* task labels are missing, return only concept loss
-        if (y == ignore_index).all():
-            total_loss = concept_loss
-        else:
-            total_loss = self._compute_total_loss(task_loss, concept_loss, reduction)
-
-        return total_loss
+        return loss

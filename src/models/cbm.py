@@ -132,65 +132,86 @@ class CBM(BaseModel):
         
         return y_hat_probs, c_hat_probs
 
-    def loss(self, 
+    def loss(self,
              y_hat: torch.Tensor,
              y: torch.Tensor,
-             c_hat_dict: Optional[Dict[str, torch.Tensor]],
-             c: Optional[torch.Tensor],
+             c_hat_dict: Dict[str, torch.Tensor],
+             c: torch.Tensor,
              reduction: str = "mean",
              ignore_index: int = -1) -> torch.Tensor:
         """
-        Compute the CBM loss function.
-        
-        Args:
-            y_hat: Predicted task probabilities
-            y: True task labels
-            c_hat_dict: Predicted concept probabilities
-            c: True concept labels
-            reduction: Loss reduction method
-            ignore_index: Index to ignore in loss computation
-            
-        Returns:
-            Computed loss tensor
+        Compute the loss function for CEM model.
         """
-        y = y.flatten().long()
+
+        loss = self._concept_based_loss(
+            y_hat,
+            y,
+            c_hat_dict,
+            c,
+            reduction,
+            ignore_index
+        )
+
+        return loss
+    
+    # def loss(self, 
+    #          y_hat: torch.Tensor,
+    #          y: torch.Tensor,
+    #          c_hat_dict: Optional[Dict[str, torch.Tensor]],
+    #          c: Optional[torch.Tensor],
+    #          reduction: str = "mean",
+    #          ignore_index: int = -1) -> torch.Tensor:
+    #     """
+    #     Compute the CBM loss function.
         
-        # Task loss
-        y_hat_log = torch.log_softmax(y_hat, dim=1)
-        task_loss = None
+    #     Args:
+    #         y_hat: Predicted task probabilities
+    #         y: True task labels
+    #         c_hat_dict: Predicted concept probabilities
+    #         c: True concept labels
+    #         reduction: Loss reduction method
+    #         ignore_index: Index to ignore in loss computation
+            
+    #     Returns:
+    #         Computed loss tensor
+    #     """
+    #     y = y.flatten().long()
         
-        if (y != ignore_index).any():  # At least one labeled sample
-            task_loss = self._compute_nll_loss(y_hat_log, y, reduction, ignore_index)
+    #     # Task loss
+    #     y_hat_log = torch.log_softmax(y_hat, dim=1)
+    #     task_loss = None
+    #     if (y != ignore_index).any():  # At least one labeled sample
+    #         task_loss = self._compute_nll_loss(y_hat_log, y, reduction, ignore_index)
         
-        # Concept loss
-        concept_loss = torch.tensor(0.0, device=y_hat.device)
+    #     # Concept loss
+    #     concept_loss = torch.tensor(0.0, device=y_hat.device)
         
-        if c_hat_dict and c is not None:
-            for name, c_hat in c_hat_dict.items():
-                if name in self.c_name_index:
-                    concept_idx = self.c_name_index[name]
-                    concept_labels = c[:, concept_idx].long()
+    #     if c_hat_dict and c is not None:
+    #         for name, c_hat in c_hat_dict.items():
+    #             if name in self.c_name_index:
+    #                 concept_idx = self.c_name_index[name]
+    #                 concept_labels = c[:, concept_idx].long()
                     
-                    # Skip if no valid labels
-                    if (concept_labels != ignore_index).sum() == 0:
-                        continue
+    #                 # Skip if no valid labels
+    #                 if (concept_labels != ignore_index).sum() == 0:
+    #                     continue
                     
-                    # Compute concept loss
-                    c_hat_log = torch.log(c_hat + 1e-6)
-                    concept_loss += torch.nn.functional.nll_loss(
-                        c_hat_log, concept_labels, reduction="mean", ignore_index=ignore_index
-                    )
+    #                 # Compute concept loss
+    #                 c_hat_log = torch.log(c_hat + 1e-6)
+    #                 concept_loss += torch.nn.functional.nll_loss(
+    #                     c_hat_log, concept_labels, reduction="mean", ignore_index=ignore_index
+    #                 )
         
-        # Total loss
-        if (y == ignore_index).all():  # No task labels
-            total_loss = concept_loss
-        else:
-            if task_loss is not None:
-                total_loss = (
-                    self.concept_loss_weight * concept_loss
-                    + (1.0 - self.concept_loss_weight) * task_loss
-                )
-            else:
-                total_loss = concept_loss
+    #     # Total loss
+    #     if (y == ignore_index).all():  # No task labels
+    #         total_loss = concept_loss
+    #     else:
+    #         if task_loss is not None:
+    #             total_loss = (
+    #                 self.concept_loss_weight * concept_loss
+    #                 + (1.0 - self.concept_loss_weight) * task_loss
+    #             )
+    #         else:
+    #             total_loss = concept_loss
         
-        return total_loss
+    #     return total_loss
