@@ -49,13 +49,6 @@ class CBM(BaseModel):
 
         # Setup concept loss weight
         self._setup_concept_loss_weight(concept_loss_weight)
-        
-        # Filter out virtual roots from concept info
-        self.filtered_c_info = {
-            "names": [name for name in c_info["names"] if name not in self.virtual_roots],
-            "cardinality": [card for name, card in zip(c_info["names"], c_info["cardinality"]) 
-                           if name not in self.virtual_roots]
-        }
 
         # Build model architecture
         self._build_model()
@@ -72,17 +65,17 @@ class CBM(BaseModel):
         
         # Concept encoders - one for each concept
         self.c_mlp = nn.ModuleDict()
-        for i, name in enumerate(self.filtered_c_info['names']):
+        for i, name in enumerate(self.c_info['names']):
             self.c_mlp[name] = MLP(
                 input_size=self.hidden_size,
                 hidden_size=self.concept_hidden_size,
-                output_size=self.filtered_c_info['cardinality'][i],
+                output_size=self.c_info['cardinality'][i],
                 n_layers=self.n_layers_concept_encoder,
                 activation=self.activation
             )
         
         # Decoder
-        total_concept_dim = sum(self.filtered_c_info['cardinality'])
+        total_concept_dim = sum(self.c_info['cardinality'])
         if self.decoder_type == 'mlp':
             self.decoder = MLP(
                 input_size=total_concept_dim,
@@ -102,49 +95,33 @@ class CBM(BaseModel):
                 intervention_index: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         """
         Forward pass of the CBM.
-        
-        Args:
-            x: Input data tensor
-            c: Concept labels (optional)
-            intervention_index: Intervention indices (optional)
-            
-        Returns:
-            Tuple of (task_predictions, concept_predictions)
         """
         # Encode input
         x_encoded = self.encoder(x)
-        
-        # Filter out virtual roots from c and intervention_index if provided
-        filtered_c = None
-        filtered_intervention_index = None
-        
-        if c is not None:
-            filtered_indices = [v for k, v in self.c_name_index.items() 
-                              if k in self.concept_names and k not in self.virtual_roots]
-            filtered_c = c[:, filtered_indices]
-        
-        if intervention_index is not None:
-            filtered_indices = [v for k, v in self.c_name_index.items() 
-                              if k in self.concept_names and k not in self.virtual_roots]
-            filtered_intervention_index = intervention_index[:, filtered_indices]
+
+        # Update intervention_index according to the annotation availability
+        intervention_index = self._concept_availability_checker(c, intervention_index)
 
         # Predict concepts
         c_hat_logits = {}
         c_hat_probs = {}
         
-        for i, name in enumerate(self.filtered_c_info['names']):
+        for name in self.c_info['names']:
+            
+            # The concept annotation tensor c has shape (B, #total_concepts).
+            # For this reason we need the self.c_name_index to access the position related
+            # to the i-th concept
+            i = self.c_name_index[name]
+
             # Get logits for current concept
             c_hat_logits[name] = self.c_mlp[name](x_encoded)
             c_hat_probs[name] = torch.softmax(c_hat_logits[name], dim=1)
-            
-            # Maybe intervene on concept probabilities
-            if (filtered_c is not None and filtered_intervention_index is not None and 
-                i < filtered_c.shape[1] and i < filtered_intervention_index.shape[1]):
-                c_hat_probs[name] = maybe_intervene(
+                
+            c_hat_probs[name] = maybe_intervene(
                     c_hat_probs[name], 
-                    filtered_c[:, i], 
-                    filtered_intervention_index[:, i]
-                )
+                    c[:, i] if c is not None else None, 
+                    intervention_index[:, i] if intervention_index is not None else torch.zeros_like(c_hat_probs[name])
+            )
         
         # Concatenate concept probabilities
         c_probs_concat = torch.cat(list(c_hat_probs.values()), dim=1)

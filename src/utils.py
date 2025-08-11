@@ -151,7 +151,7 @@ def update_config_from_data(cfg: DictConfig, dataset, subgraphs, subgraphs_conce
     with open_dict(cfg):
         if cfg.learning.mode=="localized":
             path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
-            # Get the subgraph giventhe client id
+            # Get the subgraph given the client id
             subgraph_id = identify_subgraph(path, cfg.client_id)
             updated_c_names = subgraphs_concept_names['subgraph_'+subgraph_id]
             #c_cardinality = [card for card, name in zip(dataset.c_info['cardinality'], dataset.c_info['names']) if name in updated_c_names]
@@ -206,7 +206,7 @@ def update_config_from_data(cfg: DictConfig, dataset, subgraphs, subgraphs_conce
             output_size = dataset.y_info['cardinality'][0], # we assume single class classification
             c_info = c_info,
             y_info = dataset.y_info,
-            c_name_index = {name: i for i, name in enumerate(c_names_all)},
+            c_name_index = {name: i for i, name in enumerate(c_names_all + dataset.y_info['names'])},
         )
         cfg.engine.update(
             c_names_id = c_names_id,
@@ -707,8 +707,16 @@ def score_whitebox_batch(batch, model, client_update, cfg):
         grad_vector = torch.autograd.grad(
             loss, 
             model.parameters(),
-            retain_graph=True
+            retain_graph=True,
+            allow_unused=True # Allow unused gradients, otherwise an error is raised while computing the gradients.
         )
+
+        # Since some of the gradient vectors may be None (due to some part of the model being frozen), 
+        # we replace them with zero vectors.
+        grad_vector = [
+            g if g is not None else torch.zeros_like(p)
+            for g, p in zip(grad_vector, model.parameters())
+        ]
         
         # Flatten and concatenate gradients
         with torch.no_grad():

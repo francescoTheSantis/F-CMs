@@ -10,8 +10,7 @@ from typing import Dict, Optional, Tuple
 
 class GraphCBM(BaseModel):
     """
-    Graph version of Concept Bottleneck model: it propagates the information through 
-    a predefined graph of concepts.
+    Graph CBM: It propagates the information through a predefined graph of concepts.
     """
     def __init__(self, 
                  input_size, 
@@ -100,47 +99,32 @@ class GraphCBM(BaseModel):
             raise ValueError('The target variable cannot be a root concept')
         
         # get list of propagators
-        if self.prop_type in ['embeddings', 'equations']:
-            self.propagators = nn.ModuleDict()
-            for i in range(1, len(graph_levels)):
-                level = graph_levels[i]
-                self.propagators[str(i)] = nn.ModuleDict()
-                for node in level:
-                    node_name = self.combo_info['names'][node]
-                    parents = get_parents(self.graph, node).tolist()
-                    node_cardinality = self.combo_info['cardinality'][node]
-                    parents_cardinality = [self.combo_info['cardinality'][p] for p in parents]
-                    
-                    if self.prop_type == 'embeddings':
-                        self.propagators[str(i)][node_name] = MLP(
-                            input_size=node_cardinality*self.concept_hidden_size,
-                            hidden_size=self.concept_hidden_size,
-                            output_size=node_cardinality,
-                            n_layers=self.n_layers_propagation,
-                            activation=self.activation
-                        )
-                    elif self.prop_type == 'equations':
-                        self.propagators[str(i)][node_name] = MLP(
-                            input_size=node_cardinality*self.concept_hidden_size,
-                            hidden_size=self.concept_hidden_size,
-                            output_size=sum(parents_cardinality)*node_cardinality,
-                            n_layers=self.n_layers_propagation,
-                            activation=self.activation
-                        )
-        else:
-            raise ValueError('invalid prop_type')     
-        
-    def label_absence_checker(self, c, intervention_index, name, i):
-        """Check for label absence and update intervention index accordingly."""
-        # If the concept label is -1, it means the client has no access to the concept label.
-        # For this reason the rand int cannot be applied.
-        if name not in self.y_names:
-            if not (c[:,self.c_name_index[name]].long()!=-1).sum()==0:
-                # It means there are no -1 in the batch for the specific concept
-                pass
-            else:
-                intervention_index[:,i] = torch.zeros_like(intervention_index[:,i], dtype=torch.int64)
-        return intervention_index
+        self.propagators = nn.ModuleDict()
+        for i in range(1, len(graph_levels)):
+            level = graph_levels[i]
+            self.propagators[str(i)] = nn.ModuleDict()
+            for node in level:
+                node_name = self.combo_info['names'][node]
+                parents = get_parents(self.graph, node).tolist()
+                node_cardinality = self.combo_info['cardinality'][node]
+                parents_cardinality = [self.combo_info['cardinality'][p] for p in parents]
+                
+                if self.prop_type == 'embeddings':
+                    self.propagators[str(i)][node_name] = MLP(
+                        input_size=node_cardinality*self.concept_hidden_size,
+                        hidden_size=self.concept_hidden_size,
+                        output_size=node_cardinality,
+                        n_layers=self.n_layers_propagation,
+                        activation=self.activation
+                    )
+                elif self.prop_type == 'equations':
+                    self.propagators[str(i)][node_name] = MLP(
+                        input_size=node_cardinality*self.concept_hidden_size,
+                        hidden_size=self.concept_hidden_size,
+                        output_size=sum(parents_cardinality)*node_cardinality,
+                        n_layers=self.n_layers_propagation,
+                        activation=self.activation
+                    )   
 
     def forward(self, x, c=None, intervention_index=None):
         """
@@ -157,13 +141,18 @@ class GraphCBM(BaseModel):
         # Encode input, get the latent features
         x_encoded = self.encoder(x)
 
+        # Update intervention_index according to the annotation availability
+        intervention_index = self._concept_availability_checker(c, intervention_index)
+
         c_embs, c_probs, c_values_emb = {}, {}, {}
-        for i, name in enumerate(self.combo_info['names']):
 
-            # update intervention index according to the concept label availability
-            if intervention_index is not None and c is not None:
-                intervention_index = self.label_absence_checker(c, intervention_index, name, i)
+        for name in self.combo_info['names']:
 
+            # The concept annotation tensor c has shape (B, #total_concepts).
+            # For this reason we need the self.c_name_index to access the position related
+            # to the i-th concept
+            i = self.c_name_index[name]
+            
             # create embeddings and probabilities for each root concept
             # this assumes the task is last in the name list
             if name in self.roots_info['names']:
@@ -175,7 +164,7 @@ class GraphCBM(BaseModel):
                     intervention_input,
                     to_return=['embs', 'probs']
                 )
-            else:
+            elif name in self.c_names:
                 # create latent for each non-root concept    
                 # remember not to intervene on the task
                 c_input = c[:,i] if name in self.c_names and c is not None else None
@@ -186,7 +175,14 @@ class GraphCBM(BaseModel):
                     intervention_input,
                     to_return=['values_embs']
                 )
-                
+            else: # it's the task variable
+                c_values_emb[name] = self.concept_encoders[name](
+                    x_encoded, 
+                    None, 
+                    None,
+                    to_return=['values_embs']
+                )
+
         # propagate the information through the causal graph
         for _, level in self.propagators.items():
             # update all nodes in the level
@@ -202,7 +198,7 @@ class GraphCBM(BaseModel):
                 if self.prop_type == 'embeddings':
                     logits = propagator(c_values_emb[c_name]) # shape: (batch_size, c_cardinality)
                     c_probs[c_name] = torch.softmax(logits, dim=1)
-                else:
+                elif self.prop_type == 'equations':
                     weights = propagator(c_values_emb[c_name])
                     weights = weights.reshape(-1, c_cardinality, sum(p_cardinality))
                     c_probs[c_name] = torch.softmax(torch.matmul(weights, c_prop_parents).squeeze(-1), dim=1)

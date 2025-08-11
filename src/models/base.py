@@ -74,6 +74,24 @@ class BaseModel(nn.Module, ABC):
             Tuple of (task_predictions, concept_predictions)
         """
         pass
+
+    def _concept_availability_checker(self, c, intervention_index):
+        """
+        Check for label absence and update intervention index accordingly.
+        """
+        # If the concept label is -1, it means the client has no access to the concept label.
+        # For this reason the rand int cannot be applied.
+        if c is not None and intervention_index is not None:
+            for i, name in enumerate(list(self.c_name_index.keys())):
+                # first, check if the name is a task variable
+                if name in self.y_info['names']:
+                    continue
+                # Check if concept annotations are available
+                if not (c[:,self.c_name_index[name]].long()!=-1).sum()==0:
+                    continue
+                else:
+                    intervention_index[:,i] = torch.zeros_like(intervention_index[:,i], dtype=torch.int64)
+        return intervention_index
     
     def filter_output_for_loss(self, 
                               y_output: torch.Tensor, 
@@ -114,7 +132,7 @@ class BaseModel(nn.Module, ABC):
              c_hat_dict: Optional[Dict[str, torch.Tensor]],
              c: Optional[torch.Tensor],
              reduction: str = "mean",
-             ignore_index: int = -100) -> torch.Tensor:
+             ignore_index: int = -1) -> torch.Tensor:
         """
         Compute the loss function.
         
