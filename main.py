@@ -294,6 +294,7 @@ def main(cfg: DictConfig) -> None:
                 # collect weights for aggregation
                 client_params.append((get_parameters(local_engine), n_samples))
 
+            '''
             # ------------------------------------------------------------
             # Privacy Attack: MIA
             # ------------------------------------------------------------
@@ -341,6 +342,7 @@ def main(cfg: DictConfig) -> None:
                     cfg=cfg,
                 ))
                 print(f"\033[92mSIA accuracy this round: {sia_accuracies[-1]:.4f}\033[0m")  
+            '''
 
             # ------------------------------------------------------------
             # FedAvg aggregation
@@ -400,6 +402,7 @@ def main(cfg: DictConfig) -> None:
         trainer.test(local_engine, test_dataloader)        
         print(f"\033[90mFinished! Training time: {round((time.time() - t0)/60, 2)} minutes\033[0m")
         
+        '''
         # save mia results
         if cfg.learning.settings.mia:
             print(f"Saving MIA results: {os.getcwd() + '/mia_results.json'}")
@@ -424,7 +427,7 @@ def main(cfg: DictConfig) -> None:
             
             # plot SIA results
             plot_and_save_max_sia(out_json="sia_max.json", show=False)
-        
+        '''
         
     elif cfg.learning.mode == 'federated':
 

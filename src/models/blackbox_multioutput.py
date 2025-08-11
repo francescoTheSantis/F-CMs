@@ -35,7 +35,7 @@ class BlackBox_Multi(BaseModel):
         )
         
         # BlackBox_Multi specific properties
-        self.has_concepts = False  # It predicts concepts but doesn't use them for reasoning
+        self.has_concepts = True
         self.is_causal = False
         self.n_layers_decoder = n_layers_decoder
         self.concept_cardinality = c_info['cardinality']
@@ -55,17 +55,9 @@ class BlackBox_Multi(BaseModel):
         total_output_size = self.output_size + sum(self.concept_cardinality)
         alt_hidden_size = int(total_output_size * 2)
 
-        # Update encoder with potentially larger hidden size
-        self.encoder = MLP(
-            input_size=self.input_size,
-            hidden_size=max(self.hidden_size, alt_hidden_size),
-            n_layers=self.n_layers_encoder,
-            activation=self.activation
-        )
-
         # Create decoder
         self.decoder = MLP(
-            input_size=max(self.hidden_size, alt_hidden_size),
+            input_size=self.hidden_size,
             hidden_size=alt_hidden_size,
             output_size=total_output_size,
             n_layers=self.n_layers_decoder,
@@ -89,9 +81,6 @@ class BlackBox_Multi(BaseModel):
         
         # Extract task predictions
         y_hat_probs = torch.softmax(all_hat_logits[:, :self.task_cardinality[0]], dim=1)
-        
-        breakpoint()
-
         # Extract concept predictions
         c_hat_probs = {}
         for i, name in enumerate(self.concept_names):
@@ -101,14 +90,6 @@ class BlackBox_Multi(BaseModel):
             
         return y_hat_probs, c_hat_probs
     
-    def filter_output_for_loss(self, y_output, c_output):
-        """Filter outputs for loss computation."""
-        return y_output, c_output
-    
-    def filter_output_for_metric(self, y_output, c_output):
-        """Filter outputs for metric computation."""
-        return y_output, c_output
-
     def loss(self,
              y_hat: torch.Tensor,
              y: torch.Tensor,

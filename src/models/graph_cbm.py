@@ -78,13 +78,14 @@ class GraphCBM(BaseModel):
         # Concept encoders, one for each concept
         self.concept_encoders = nn.ModuleDict()
         for name in self.combo_info['names']:
-            concept_idx = self.combo_info['names'].index(name)
+            # concept_idx = self.combo_info['names'].index(name)
+            # concept_idx = self.c_name_index[name]
             self.concept_encoders[name] = ConceptBlock(
                 input_size=self.hidden_size,
                 hidden_size=self.concept_hidden_size,
                 n_layers=self.n_layers_concept_encoder,
                 activation=self.activation,
-                c_cardinality=self.combo_info['cardinality'][concept_idx]
+                c_cardinality=[c for n, c in zip(self.combo_info['names'], self.combo_info['cardinality']) if n==name][0] #self.combo_info['cardinality'][concept_idx]
             )
 
         # get levels
@@ -187,12 +188,17 @@ class GraphCBM(BaseModel):
         for _, level in self.propagators.items():
             # update all nodes in the level
             for c_name, propagator in level.items():
+                # Concept's index in the dictionary of the ID concepts of the client.
                 c_index = self.combo_info['names'].index(c_name)
                 p_indices = get_parents(self.graph, c_index).tolist()
                 p_names = [self.combo_info['names'][p] for p in p_indices]
                 
                 c_cardinality = self.combo_info['cardinality'][c_index]
                 p_cardinality = [self.combo_info['cardinality'][p] for p in p_indices]
+
+                # Concept's index in the dictionary of ALL concepts.
+                c_index = self.c_name_index[c_name]
+
                 # propagate embeddings
                 c_prop_parents = torch.cat([c_probs[p_name] for p_name in p_names], dim=1).unsqueeze(-1)
                 if self.prop_type == 'embeddings':

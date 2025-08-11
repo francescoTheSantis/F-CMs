@@ -55,13 +55,7 @@ class CBM(BaseModel):
 
     def _build_model(self):
         """Build the CBM architecture."""
-        # Encoder
-        self.encoder = MLP(
-            input_size=self.input_size,
-            hidden_size=self.hidden_size,
-            n_layers=self.n_layers_encoder,
-            activation=self.activation
-        )
+        # Encoder is already created in BaseModel
         
         # Concept encoders - one for each concept
         self.c_mlp = nn.ModuleDict()

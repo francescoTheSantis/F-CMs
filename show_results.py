@@ -15,8 +15,7 @@ plt.style.use(['science', 'ieee', 'no-latex'])
 
 # List the paths containing the results
 paths = [
-    "/home/fdesantis/projects/Federated-C2BM/outputs/multirun/2025-08-11/12-23-50",
-    "/home/fdesantis/projects/Federated-C2BM/outputs/multirun/2025-08-11/12-27-41",
+    "/home/bigdata-01QYD/s280037/Projects/Federated-C2BM/outputs/multirun/2025-08-11/18-15-33",
 ]
 
 # maximum number of clients

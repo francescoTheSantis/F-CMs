@@ -122,14 +122,6 @@ class CEM(BaseModel):
         y_hat_probs = torch.softmax(y_hat_logits, dim=1)
         
         return y_hat_probs, c_hat_probs
-    
-    def filter_output_for_loss(self, y_output, c_output):
-        """Filter output for loss function"""
-        return y_output, c_output
-    
-    def filter_output_for_metric(self, y_output, c_output):
-        """Filter output for metric function"""
-        return y_output, c_output
 
     def loss(self,
              y_hat: torch.Tensor,
