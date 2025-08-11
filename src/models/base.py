@@ -144,7 +144,7 @@ class BaseModel(nn.Module, ABC):
                          pred_log: torch.Tensor, 
                          target: torch.Tensor, 
                          reduction: str = "mean", 
-                         ignore_index: int = -100) -> torch.Tensor:
+                         ignore_index: int = -1) -> torch.Tensor:
         """
         Helper function to compute NLL loss with specified reduction.
         
