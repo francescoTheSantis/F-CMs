@@ -15,7 +15,8 @@ plt.style.use(['science', 'ieee', 'no-latex'])
 
 # List the paths containing the results
 paths = [
-    "/home/bigdata-01QYD/s280037/Projects/Federated-C2BM/outputs/multirun/2025-08-07/15-56-41"
+    "/home/fdesantis/projects/Federated-C2BM/outputs/multirun/2025-08-11/12-23-50",
+    "/home/fdesantis/projects/Federated-C2BM/outputs/multirun/2025-08-11/12-27-41",
 ]
 
 # maximum number of clients
@@ -144,7 +145,7 @@ for idx, row in performance.iterrows():
             performance.at[idx, 'graph'] = matching_rows.iloc[0]['graph']
 
 def format_results(row, graph, count_nan=False, task=None):
-    values = [v for k,v in row.items() if k in graph]
+    values = [v for k,v in row.items() if k in row]
     if count_nan:
         return sum([1 for x in values if math.isnan(x)]) if values else 0
     else:
@@ -187,7 +188,9 @@ model_styles = {
     'cem': {'marker': 'P', 'name': 'CEM', 'color': 'tab:blue', 'size': marker_size},
     'cbm_linear': {'marker': '*', 'name': 'CBM+Linear', 'color': 'tab:red', 'size': marker_size},
     'cbm_mlp': {'marker': '^', 'name': 'CBM+MLP', 'color': 'tab:purple', 'size': marker_size},
-    'blackbox_multi': {'marker': 'o', 'name': 'BlackBox', 'color': 'tab:grey', 'size': marker_size},
+    'blackbox': {'marker': 'o', 'name': 'BlackBox', 'color': 'tab:black', 'size': marker_size},
+    'blackbox_multi': {'marker': 'o', 'name': 'BlackBox (Multi)', 'color': 'tab:grey', 'size': marker_size},
+    'cgm': {'marker': 'D', 'name': 'CGM', 'color': 'tab:orange', 'size': marker_size},
     'c2bm': {'marker': 's', 'name': 'C2BM', 'color': 'tab:green', 'size': marker_size},
 }
 

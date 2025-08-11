@@ -10,8 +10,8 @@ from typing import Dict, Optional, Tuple
 
 class GraphCBM(BaseModel):
     """
-    Causal version of the CEM model. 
-    It propagates the information through a predefined causal graph.
+    Graph version of Concept Bottleneck model: it propagates the information through 
+    a predefined graph of concepts.
     """
     def __init__(self, 
                  input_size, 
