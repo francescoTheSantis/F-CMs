@@ -39,12 +39,23 @@ from src.utils import (
     run_sia_attack,
 )
 
+
+# data loading
+from src.data.dataset_block import get_dataset
+
+# causal discovery
+#from src.causal_discovery.causal_discovery_block import causal_discovery
+
+# graph completion block
+#from src.completion.completion_block import complete_graph_with_llm
+
 #from src.server import get_evaluate_fn
 #from src.strategy import CustomFedAvgWithModelSaving
 from src.utils import clean_empty_configs
 from src.data.dataset_block import get_dataset
 from src.utils import get_intervention_policy, remove_cycles, remove_problematic_edges, get_split_paths, get_split_paths_fl
 from src.utils import clean_empty_configs, update_config_from_data, maybe_update_config_with_graph, update_intervention_policy_and_graph
+from src.data.utils import update_datasets, construct_combined_true_graph
 from src.plots import maybe_plot_graph
 from src.my_hydra import parse_hyperparams
 from src.data.generate_split import generate_split, get_subgraph_dict
@@ -59,7 +70,7 @@ import shutil
 warnings.filterwarnings("ignore", message="When grouping with a length-1 list-like")
     
 
-@hydra.main(config_path="conf", config_name="sweep", version_base="1.3")
+@hydra.main(config_path="conf", config_name="my_sweep", version_base="1.3")
 def main(cfg: DictConfig) -> None:
     # various preliminaries, it set the seed for reproducibility
     torch.set_num_threads(cfg.get("num_threads", 1))
@@ -73,16 +84,75 @@ def main(cfg: DictConfig) -> None:
 
     # instantiate the dataset, split into train, val, test
     # preprocess all of them and save the preprocessed dataset
-    dataset, true_graph, dataset_directory = get_dataset(cfg)
+    dataset, true_graph, dataset_directory = get_dataset(cfg.dataset, cfg.device)
     graph = true_graph
+
+    combined_dataset = OmegaConf.select(cfg, 'combined_datasets.other_datasets', default=None)
+    if combined_dataset is not None:
+        datasets = {}
+        datasets[0] = dataset
+        base_conf_path = hydra.utils.get_original_cwd() + "/conf/dataset"
+
+        for i, ds_name in enumerate(cfg.combined_datasets.other_datasets):
+            ds_path = os.path.join(base_conf_path, f"{ds_name}.yaml")
+            original_cfg = OmegaConf.load(ds_path)
+            overrides = cfg.combined_datasets.get(ds_name, {})
+            merged_cfg = OmegaConf.merge(original_cfg, overrides)
+            new_dataset, _, _ = get_dataset(merged_cfg, cfg.device)
+
+            # consistency checks
+            # check at least two variables are in common
+            original_variables = dataset.c_info['names']+dataset.y_info['names']
+            new_variables = new_dataset.c_info['names']+new_dataset.y_info['names']
+            common_variables = set(original_variables) & set(new_variables)
+            if len(common_variables) < 2:
+                raise ValueError(f"Dataset {ds_name} does not have at least two variables in common with the original dataset.")
+            else:
+                datasets = update_datasets(datasets, new_dataset, cfg.combined_datasets)
+                graph = construct_combined_true_graph(datasets, cfg.dataset, cfg.combined_datasets)
 
     print(OmegaConf.to_yaml(cfg))
 
-    graph, dataset = remove_problematic_edges(graph, dataset)
-    # (part 2): remove cycles
-    y_index = list(graph.index).index(dataset.y_info['names'][0]); assert y_index == len(graph) - 1
-    graph = remove_cycles(graph, y_index)
-    maybe_plot_graph(graph, 'fixed_graph')
+    
+
+    # get the causal graph
+    #if cfg.dataset.load_true_graph:
+    #    graph = true_graph
+    #else:
+    #    if cfg.dataset.load_graph:
+    #        with open(os.path.join(dataset_directory, "graph.pkl"), 'rb') as f:
+    #            graph = pickle.load(f)
+    #    else:
+    #        # estimate causal graph with causal structural learning algorithms
+    #        predicted_graph = causal_discovery(cfg, dataset, true_graph)
+    #        #if true_graph is not None:
+    #        #    hamming = hamming_distance(true_graph, predicted_graph)
+    #        #    print('(after CD) structural hamming distance: ', hamming)    
+
+    #        # complete the causal graph with LLM and RAG
+    #        completed_graph = complete_graph_with_llm(cfg, predicted_graph, cfg.dataset.name)
+    #        #if true_graph is not None:
+    #        #    hamming = hamming_distance(true_graph, completed_graph)
+    #        #     print('(after LLM + RAG) structural hamming distance: ', hamming)
+    #        graph = completed_graph
+    #
+    #        # save graph
+    #        with open(os.path.join(dataset_directory, "graph.pkl"), 'wb') as f:
+    #            pickle.dump(graph, f)
+
+    # fix the graph
+    # (part 1): remove bidirected and undirected edges + add virtual nodes
+    # edge can only be directed at this stage, the following function is just here in 
+    # case the CD + LLM + RAG pipeline is modified and could produce bidirected or undirected edges
+    #graph, dataset = remove_problematic_edges(graph, dataset)
+    y_index = len(graph)-1
+    ## (part 2): remove cycles
+    #graph = remove_cycles(graph, y_index)
+
+    #if true_graph is not None:
+        #hamming = hamming_distance(true_graph, graph)
+        #print('(after fix) structural hamming distance: ', hamming)
+    maybe_plot_graph(graph, 'graph')
 
     #partitions = get_partitions(graph, y_index, n_clients = 5)
     #col_to_index = {col: idx for idx, col in enumerate(graph.columns)}    

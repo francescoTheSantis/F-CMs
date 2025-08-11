@@ -1,0 +1,48 @@
+defaults:
+  - default
+  - override causal_discovery: ges
+  - override llm: gpt
+  - override rag: standard
+  - _self_
+
+client_id: 1
+
+hydra:
+  mode: MULTIRUN
+  sweeper:
+    params:
+      # possible datsets are: asia, sachs, alarm, hailfinder, insurance
+      seed: 1 #1, 2, 3, 4, 5
+      dataset: colormnist #, alarm, insurance, hailfinder, colormnist, fashionmnist
+      # possible models are:
+      # blackbox, blackbox_multi, cbm_linear, cbm_mlp, cem, c2bm
+      model: cbm_linear
+      learning: centralized 
+      
+model:
+  hidden_size: 128
+
+dataset:
+  load_embeddings: false
+  load_graph: false
+  load_true_graph: false
+  batch_size: 128
+  autoencoder:
+   noise: 0.5  # for bndatasets only
+
+engine:
+  intervention_prob: 0.8
+  test_interv_noise: 0.9   # for bndatasets only
+  optim_kwargs:
+    lr: 0.00075
+
+trainer:
+  # logger: wandb
+  devices: [0]
+  max_epochs: 500
+  patience: 30
+
+rag:
+  verbose: false
+
+notes: test_run

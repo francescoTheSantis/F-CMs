@@ -13,6 +13,7 @@
 - [ ] federated causal discovery alg. 2
 - [ ] (optional) federated causal discovery alg. 3
 - [ ] background knowlwdge?
+- [ ] check partizioni
 
 **Dario**
 - [ ] wip

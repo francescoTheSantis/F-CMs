@@ -1,0 +1,39 @@
+defaults:
+  - commons
+  - _self_
+
+name: fashionmnist
+loader:
+    _target_: src.data.datasets.fashionmnist.FashionMNISTDataset
+    val_size: 0.1
+    ftune_size: 0.      # 0.3
+    ftune_val_size: 0.  # 0.1
+    coloring:
+        train:
+            mode: complex   #False / random / custom / complex
+            #kwargs:
+            #    random_prob: 0.5
+            kwargs:
+                scales: [[0,0.5], [0.6,1.0]]
+                degrees: [[60,60], [120,120]]
+                colors: ['red', 'green']
+
+        test:
+            mode: complex   #False / random / custom / complex
+            kwargs:
+                scales: [[0,0.5], [0.51,1.0]]
+                degrees: [[60,60], [120,120]]
+                colors: ['red', 'green']
+
+batch_size: 512
+
+is_image_dataset: true
+reduce_fraction: Null
+onehot_to_concepts: true
+
+load_embeddings: true
+
+label_descriptions: # TO CHANGE
+    number: "a variable representing a number from 0 to 9."
+    parity: "a categorical variable that classifies each number based on its parity. It takes one of two values, 'even' (1) or 'odd' (0), where 'even' refers to numbers divisible by 2."
+    color: "a binary variable indicating a color, taking one of two possible values: 'red' (1) or 'green' (0)."
