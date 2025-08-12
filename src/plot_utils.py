@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import warnings
 import scienceplots
+import seaborn as sns
 
 warnings.filterwarnings("ignore")
 plt.style.use(['science', 'ieee', 'no-latex'])
@@ -86,7 +87,22 @@ def plot_single_c_on_y(
             ax = axes[i * n_cols + j]
             subset = input[(input['learning'] == learning_method) & (input['dataset'] == dataset)]
 
+            # Get unique x_labels for this subplot
+            all_x_labels = set()
             for model in model_styles.values():
+                if model['name'] in subset['model'].values:
+                    model_subset = subset[subset['model'] == model['name']]
+                    if not model_subset.empty:
+                        interventions, _ = average_over_seed(model_subset['single_c_interventions_on_y'])
+                        all_x_labels.update(interventions.keys())
+            
+            x_labels = sorted(list(all_x_labels))
+            x = np.arange(len(x_labels))
+
+            group_width = 0.8  # Total width for each group of bars
+            bar_width = group_width / len(model_styles)  # Width of individual bars
+            
+            for model_idx, model in enumerate(model_styles.values()):
                 if model['name'] not in subset['model'].values:
                     continue
 
@@ -95,13 +111,12 @@ def plot_single_c_on_y(
                     continue
 
                 interventions, interventions_std = average_over_seed(model_subset['single_c_interventions_on_y'])
-                x_labels = list(interventions.keys())
-                x = np.arange(len(x_labels))
-                bar_width = 0.2
-                model_idx = [x['name'] for x in model_styles.values()].index(model['name'])
-                offset = model_idx * bar_width
-                bar_heights = [interventions[label] for label in x_labels]
-                bar_errors = [(1.96 * interventions_std[label] / np.sqrt(len(model_subset))) for label in x_labels]
+                
+                # Calculate offset for this specific model
+                offset = (model_idx - (len(model_styles) - 1) / 2) * bar_width
+
+                bar_heights = [interventions.get(label, 0) for label in x_labels]
+                bar_errors = [1.96 * interventions_std.get(label, 0) / np.sqrt(len(model_subset)) for label in x_labels]
 
                 color = {el['name']:el['color'] for el in model_styles.values()}[model['name']]
 
@@ -118,25 +133,23 @@ def plot_single_c_on_y(
                 if i == 0 and j == 0:
                     handles_labels.append(([bars[0], model['name']]))
 
-                ax.set_xticks(x + bar_width * (len(model_styles) - 1) / 2)
-                ax.set_xticklabels(x_labels, rotation=45, ha='right', fontsize=tick_size)
-                ax.tick_params(axis='y', labelsize=tick_size)
-                ax.minorticks_off()
-                ax.grid(True)
+            ax.set_xticks(x)
+            ax.set_xticklabels(x_labels, rotation=45, ha='right', fontsize=tick_size)
+            ax.tick_params(axis='y', labelsize=tick_size)
+            ax.minorticks_off()
+            ax.grid(True)
 
-                # Show x-axis label only for last row
-                if i == n_rows - 1:
-                    ax.set_xlabel("Concept Names", fontsize=label_size)
-                #else:
-                #    ax.set_xticklabels([])  # hide tick labels
+            # Show x-axis label only for last row
+            if i == n_rows - 1:
+                ax.set_xlabel("Concept Names", fontsize=label_size)
 
-                # Show dataset name only in top row
-                if i == 0:
-                    ax.set_title(dataset, fontsize=title_size)
-                else:
-                    ax.set_title("")
+            # Show dataset name only in top row
+            if i == 0:
+                ax.set_title(dataset, fontsize=title_size)
+            else:
+                ax.set_title("")
 
-                ax.set_ylabel("$\Delta$ on $y$", fontsize=label_size)
+            ax.set_ylabel("$\\Delta$ on $y$", fontsize=label_size)
 
         # Get average vertical position of current row
         row_axes = [axes[i * n_cols + j] for j in range(n_cols)]
@@ -182,33 +195,47 @@ def plot_single_c_on_y(
         plt.savefig(f"{folder}/single_c_interventions_on_y.pdf", bbox_inches='tight')
     else:
         raise ValueError("Folder path is required to save the figure.")
-    
-def delta_single_id_interventions_on_y_id_ood(d, baseline=None):
-    baseline = baseline['_baseline']
-    delta_dicts = []
-    for int in d:
-        delta_dicts.append({k:(v - baseline) for k, v in int.items()})
-    mean, std = average_over_seed(delta_dicts)
-    return mean, std
+
+def delta_single_c_interventions_on_y_id_ood(d, base):
+    baseline = base['_baseline']
+    delta_dict = {k:(v - baseline) for k, v in d[0].items()}
+    return delta_dict
 
 def plot_single_id_ood_on_y(
-    input,
+    input, 
     custom_order,
     model_styles,
     folder=None,
+    id=False,
     figsize=(20, 15),
     title_size=16,
     label_size=14,
-    tick_size=12,
-    legend_size=12,
+    tick_size=14,
+    legend_size=14,
     legend_bgcolor='lightgray',
     legend_edgecolor='black',
-    legend_alpha=0.9,
-    id=True
+    legend_alpha=0.3
 ):
+    str_id = 'id' if id else 'ood'
+    input = input[['seed', 'dataset', 'model', 'learning', f'single_{str_id}_on_y', 'single_c_interventions_on_y']].dropna()
 
-    input = input[['seed', 'dataset', 'model', 'learning', 'single_id_on_y', 'single_ood_on_y', 'single_c_interventions_on_y']].dropna()
-    if id:
-        input['single_id_on_y'] = input.apply(lambda row: \
-                                              delta_single_id_interventions_on_y_id_ood(row['single_id_on_y'], 
-                                                                                        row['single_c_interventions_on_y']), axis=1)
+    input[f'single_{str_id}_on_y'] = input.apply(
+        lambda row: delta_single_c_interventions_on_y_id_ood(row[f'single_{str_id}_on_y'], row['single_c_interventions_on_y']), 
+        axis=1
+    )
+    #input[f'single_{str_id}_on_y'].apply(delta_single_c_interventions_on_y)
+    datasets = input['dataset'].unique()
+    # Reorder datasets according to custom order
+    datasets = sorted(datasets, key=lambda x: custom_order.index(x) if x in custom_order else len(custom_order))
+    learning_methods = input['learning'].unique()
+
+    learning_methods = reorder(learning_methods) 
+
+    n_rows = len(learning_methods)
+    n_cols = len(datasets)
+
+    fig = plt.figure(figsize=figsize)
+    gs = fig.add_gridspec(n_rows, n_cols, hspace=0.4, wspace=0.4)
+    axes = [fig.add_subplot(gs[i, j]) for i in range(n_rows) for j in range(n_cols)]
+
+    handles_labels = []

@@ -15,7 +15,8 @@ plt.style.use(['science', 'ieee', 'no-latex'])
 
 # List the paths containing the results
 paths = [
-    "/home/bigdata-01QYD/s280037/Projects/Federated-C2BM/outputs/multirun/2025-08-11/18-15-33",
+    "/home/bigdata-01QYD/s280037/Projects/Federated-C2BM/outputs/multirun/2025-08-11/20-44-33",
+    "/home/bigdata-01QYD/s280037/Projects/Federated-C2BM/outputs/multirun/2025-08-11/20-46-06",
 ]
 
 # maximum number of clients
@@ -386,16 +387,25 @@ for learning in performance['learning'].unique():
 
 
 
-########## Intervention ID plots ##########
+########## Intervention plots ##########
+
+# Eliminate blackbox and blackbox_multi from the model style
+model_styles = {k: v for k, v in model_styles.items() if k not in ['blackbox', 'blackbox_multi']}
+
+# Eliminate blackbox and blackbox_multi from the performance dataframe
+performance = performance[performance['model'].isin(['blackbox', 'blackbox_multi']) == False]
 
 ### Intervention plot for single c interventions on y ###
 plot_single_c_on_y(performance, custom_order, model_styles, visualization_folder)
+
+### Intervention plot for level interventions on y ###
+#plot_level_interventions_on_y(performance, custom_order, model_styles, visualization_folder)
 
 ### Intervention plot for single ID interventions on y ###
 plot_single_id_ood_on_y(performance, custom_order, model_styles, visualization_folder, id=True)
 
 ### Intervention plot for single OOD interventions on y ###
-#plot_single_ood_on_y(performance, custom_order, model_styles, visualization_folder)
+#plot_single_id_ood_on_y(performance, custom_order, model_styles, visualization_folder, id=False)
 
 ### Intervention plot for level interventions on c ###
 #plot_level_interventions_on_c(performance, custom_order, model_styles, visualization_folder)
