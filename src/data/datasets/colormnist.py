@@ -8,6 +8,7 @@ import random
 from torchvision.datasets import MNIST
 from typing import Union
 from torch_geometric.utils import to_dense_adj
+from src.data.utils import modify_class_values
 
 from src.data.utils import split_dataset
 from src.data.utils import random_coloring, custom_coloring, complex_coloring, transform_and_colorize, split_dataset
@@ -21,7 +22,7 @@ def update_concept_names_ColorMNIST(dataset, is_complex_coloring = False):
     
     if is_complex_coloring:
         dataset.c_info = {'names': ['number', 'color', 'scale', 'degree'], 
-                          'cardinality': [10, 3, 6, 6]}
+                          'cardinality': [10, 3, len(dataset.possible_scales), len(dataset.possible_degrees)]}
         
     dataset.y_info = {'names': ['parity'],
                       'cardinality': [2]}
@@ -37,12 +38,8 @@ def onehot_to_concepts_ColorMNIST(dataset, is_complex_coloring = False):
         # add an attribute to the class data
         #data.c = torch.stack([digits, colors], dim=1)
         if is_complex_coloring:
-            scales_indices = torch.argmax(data.c[:, 13:19], axis=1)
-            degrees_indices = torch.argmax(data.c[:, 19:], axis=1)
-            possible_scales_torch = torch.tensor(dataset.possible_scales)
-            possible_degrees_torch = torch.tensor(dataset.possible_degrees)
-            scales = possible_scales_torch[scales_indices]
-            degrees = possible_degrees_torch[degrees_indices]
+            scales = torch.argmax(data.c[:, 13:18], axis=1)
+            degrees = torch.argmax(data.c[:, 18:], axis=1)
             data.c = torch.stack([digits, colors, scales, degrees], dim=1)
         else:
             data.c = torch.stack([digits, colors], dim=1)
@@ -82,11 +79,12 @@ class ColorMNISTDataset():
         self.val_size = val_size
         self.ftune_val_size = ftune_val_size
 
-        self.possible_scales = [0.1, 0.3, 0.5, 0.7, 0.9, 1.0]
-        self.possible_degrees = [0, 60, 120, 210, 270, 330]
+        self.possible_scales = [0.1, 0.25, 0.5, 0.75, 1.0]
+        self.possible_degrees = [0, 60, 150, 210, 300]
         self.possible_colors = ['red', 'green', 'blue']
         
         self.coloring = coloring
+
 
         self.c_info = {'names': ['0', '1', '2', '3', '4', '5', \
                     '6', '7', '8', '9', 'red', 'green', 'blue'], 
@@ -108,10 +106,15 @@ class ColorMNISTDataset():
                        'cardinality': [2,2]}
         self.data = {}
 
-    def load_ground_truth_graph(self): 
-        node_labels = self.c_info['names'][0:2] + self.y_info['names'] # number, color, parity
-        values = to_dense_adj(torch.tensor([[0],[2]]))[0]
-        self.adj = pd.DataFrame(values, index=node_labels, columns=node_labels, dtype=int)
+    def load_ground_truth_graph(self):
+        node_labels = self.c_info['names'] + self.y_info['names'] 
+        if self.coloring['train'].get('mode') != 'complex':
+            # number, color, parity
+            values = to_dense_adj(torch.tensor([[0],[2]]))[0]
+            self.adj = pd.DataFrame(values, index=node_labels, columns=node_labels, dtype=int)
+        else:
+            values = to_dense_adj(torch.tensor([[0, 2, 3],[4,3, 1]]))[0]
+            self.adj = pd.DataFrame(values, index=node_labels, columns=node_labels, dtype=int)
         return self.adj
 
     def split(self):
@@ -154,8 +157,8 @@ class _ColorMNISTDataset(MNIST):
                  transform: Union[Compose, torch.nn.Module] = None,
                  target_transform: Union[Compose, torch.nn.Module] = None, 
                  download: bool = True, 
-                 possible_scales: list = [0.1, 0.3, 0.5, 0.7, 0.9, 1.0],
-                 possible_degrees: list = [0, 60, 120, 210, 270, 330],
+                 possible_scales: list = [0.1, 0.25, 0.5, 0.75, 1.0],
+                 possible_degrees: list = [0, 60, 150, 210, 300],
                  possible_colors: list = ['red', 'green', 'blue'],
                  coloring_mode: str = 'random',
                  coloring_kwargs: dict = {}):

@@ -11,7 +11,7 @@ import numpy as np
 from tqdm import tqdm
 
 from src.models.layers.pretrained import InputImgEncoder
-from src.data.utils import reduce_dataset
+from src.data.utils import reduce_dataset, change_task
 from src.data.datasets.colormnist import update_concept_names_ColorMNIST, onehot_to_concepts_ColorMNIST
 from src.data.datasets.fashionmnist import update_concept_names_FashionMNIST, onehot_to_concepts_FashionMNIST
 from src.data.autoencoder import AutoencoderTrainer, scale_embeddings
@@ -120,9 +120,16 @@ def preprocess_dataset(dataset_cfg, _dataset, device, backbone ='resnet18') -> d
                                           batch_size=256, 
                                           device=device,
                                           backbone=backbone)
+
         if dataset_cfg.get('onehot_to_concepts') == True:
             dataset = onehot_to_concepts_FashionMNIST(dataset, 
                                                     is_complex_coloring)
+            
+            change_task(dataset, task= 'color')
+
+        else:
+            raise ValueError("The FashionMNIST dataset requires onehot_to_concepts to be set to True to change the task to color; otherwise, clothing is not causally connected to any concept")
+    
 
     elif dataset_name in ['asia', 'alarm', 'sachs', 'hailfinder', 'insurance']:
         dataset = maybe_reduce(dataset_cfg.get('reduce_fraction', None), dataset)

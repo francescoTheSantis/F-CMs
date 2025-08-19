@@ -54,7 +54,7 @@ from src.data.dataset_block import get_dataset
 from src.utils import clean_empty_configs
 from src.data.dataset_block import get_dataset
 from src.utils import get_intervention_policy, remove_cycles, remove_problematic_edges, get_split_paths, get_split_paths_fl
-from src.utils import clean_empty_configs, update_config_from_data, maybe_update_config_with_graph, update_intervention_policy_and_graph
+from src.utils import clean_empty_configs, update_config_from_data, maybe_update_config_with_graph, update_intervention_policy_and_graph, update_config_from_client
 from src.data.utils import update_datasets, construct_combined_true_graph
 from src.plots import maybe_plot_graph
 from src.my_hydra import parse_hyperparams
@@ -89,11 +89,22 @@ def main(cfg: DictConfig) -> None:
 
     combined_dataset = OmegaConf.select(cfg, 'combined_datasets.other_datasets', default=None)
     if combined_dataset is not None:
-        datasets = {}
+        if cfg.learning.mode == "centralized":
+            raise ValueError("Combined datasets are not supported in centralized learning mode.")
+
+        if cfg.dataset.name not in ['colormnist', 'fashionmnist']:
+            raise ValueError("Combined datasets are only supported for the 'colormnist' and 'fashionmnist' datasets.")
+
+        datasets = {} 
         datasets[0] = dataset
         base_conf_path = hydra.utils.get_original_cwd() + "/conf/dataset"
 
         for i, ds_name in enumerate(cfg.combined_datasets.other_datasets):
+            if ds_name not in ['colormnist', 'fashionmnist']:
+                raise ValueError(f"Dataset {ds_name} is not supported.")
+            if ds_name == cfg.dataset.name:
+                warnings.warn(f"Dataset {ds_name} is the same as the original dataset. Skipping it.")
+                continue
             ds_path = os.path.join(base_conf_path, f"{ds_name}.yaml")
             original_cfg = OmegaConf.load(ds_path)
             overrides = cfg.combined_datasets.get(ds_name, {})
@@ -110,6 +121,9 @@ def main(cfg: DictConfig) -> None:
             else:
                 datasets = update_datasets(datasets, new_dataset, cfg.combined_datasets)
                 graph = construct_combined_true_graph(datasets, cfg.dataset, cfg.combined_datasets)
+    else:
+        datasets = {0: dataset}
+        
 
     print(OmegaConf.to_yaml(cfg))
 
@@ -146,6 +160,7 @@ def main(cfg: DictConfig) -> None:
     # case the CD + LLM + RAG pipeline is modified and could produce bidirected or undirected edges
     #graph, dataset = remove_problematic_edges(graph, dataset)
     y_index = len(graph)-1
+    
     ## (part 2): remove cycles
     #graph = remove_cycles(graph, y_index)
 
@@ -166,55 +181,64 @@ def main(cfg: DictConfig) -> None:
     print('intervention policy:', interv_policy)
     print('intervention policy names:', ip_names)
 
-    [dataset.data[split].register_graph(graph) for split in dataset.data]
-                    
+    for i, dataset in datasets.items():
+        [dataset.data[split].register_graph(graph) for split in dataset.data]
+
     # We split the data by selecting a sub-graph for each split
-    subgraphs, subgraphs_concept_names = generate_split(cfg, dataset, graph, y_index)
+    if cfg.learning.mode == "centralized":
+        subgraphs, subgraphs_concept_names = None, None
+    else:
+        subgraphs, subgraphs_concept_names = generate_split(cfg, datasets, graph, y_index)
 
     # update config based on the dataset
     # e.g., set input and output size of the model
-    cfg = update_config_from_data(cfg, dataset, subgraphs, subgraphs_concept_names)
+    cfg = update_config_from_data(cfg, datasets, subgraphs, subgraphs_concept_names)
     if cfg.learning.mode == 'localized':
         interv_policy, graph = update_intervention_policy_and_graph(cfg, interv_policy, graph, subgraphs, subgraphs_concept_names)  
 
     cfg = maybe_update_config_with_graph(cfg, graph, interv_policy)
 
     ############ data block ########################################################################################
-
-    # Load the unique test-set
-    test_dataloader = DataLoader(dataset.data['test'], batch_size=cfg.dataset.batch_size, collate_fn=static_graph_collate)
-    # save the test dataloader
-    test_path = os.path.join(str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption), "test_dataloader.pkl")
-    with open(test_path, 'wb') as f:
-        pickle.dump(test_dataloader, f)
+    #if combined_dataset is None:
+        # Load the unique test-set (if not combined dataset)
+        # test_dataloader = DataLoader(dataset.data['test'], batch_size=cfg.dataset.batch_size, collate_fn=static_graph_collate)
+        # save the test dataloader
+        #test_path = os.path.join(str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption), "test_dataloader.pkl")
+        #with open(test_path, 'wb') as f:
+        #    pickle.dump(test_dataloader, f)
 
     # Load the test dataloader for the specific client
-    path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
+    #path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
     #test_path = get_split_paths(cfg, path, True)
     #with open(test_path, 'rb') as f:
     #    test_dataloader = pickle.load(f)
 
     # If the training is centralized
     if cfg.learning.mode in ['centralized', 'localized']:
+        
         if cfg.learning.mode == 'localized':
+            path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
             print("\033[93mLocalized training\033[0m")
             # Load only the training and validation split specified by the local training parameters
             # From cache get the dataloader
-            train_path, val_path = get_split_paths(cfg, path)
+            train_path, val_path, test_path = get_split_paths(cfg, path)
             # if the file is not found, raise an error
-            if not os.path.exists(train_path) or not os.path.exists(val_path):
-                raise FileNotFoundError(f"File {train_path} or {val_path} not found")
+            if not os.path.exists(train_path) or not os.path.exists(val_path) or not os.path.exists(test_path):
+                raise FileNotFoundError(f"File {train_path} or {val_path} or {test_path} not found")
             # Load the dataloaders
             with open(train_path, 'rb') as f:
                 train_dataloader = pickle.load(f)
                 print("train_dataloader", train_dataloader)
                 print("train_dataloader length", len(train_dataloader))
             with open(val_path, 'rb') as f:
-                val_dataloader = pickle.load(f)            
+                val_dataloader = pickle.load(f)   
+            with open(test_path, 'rb') as f:
+                test_dataloader = pickle.load(f)
         else:
             # Load all the training and validation splits
-            train_dataloader = DataLoader(dataset.data['train'], batch_size=cfg.dataset.batch_size, collate_fn=static_graph_collate)
-            val_dataloader = DataLoader(dataset.data['val'], batch_size=cfg.dataset.batch_size, collate_fn=static_graph_collate)
+            train_dataloader = DataLoader(datasets[0].data['train'], batch_size=cfg.dataset.batch_size, collate_fn=static_graph_collate)
+            val_dataloader = DataLoader(datasets[0].data['val'], batch_size=cfg.dataset.batch_size, collate_fn=static_graph_collate)
+            test_dataloader = DataLoader(datasets[0].data['test'], batch_size=cfg.dataset.batch_size, collate_fn=static_graph_collate)
 
         engine = instantiate(cfg.engine)
         try:
@@ -247,8 +271,9 @@ def main(cfg: DictConfig) -> None:
         seed_everything(cfg.seed)
         
         # read client data
-        train_dataloaders, val_dataloaders = load_dataloaders(cfg, path, n_clients)
+        train_dataloaders, val_dataloaders, test_dataloaders = load_dataloaders(cfg, path, n_clients)
         train_dataloaders, canary_loaders, true_in_outs, sia_loader = dataprocess_auditing(train_dataloaders, cfg) # NOTE: for the moment we are reducing the training data size
+
 
         # try with and without these two lines
         engine = instantiate(cfg.engine)
@@ -273,9 +298,12 @@ def main(cfg: DictConfig) -> None:
             print(f"\033[93mLocal training on {n_clients} clients\033[0m")
             for cid in range(n_clients):
                 # clone global params → local model
+                update_config_from_client(cfg, datasets, cid)
                 local_engine = instantiate(cfg.engine)
+                #print(local_engine.client_id)
                 set_parameters(local_engine, global_params)
                 local_engine.model.to(cfg.device)
+                #local_engine.client_id = cid
 
                 # freeze if required
                 maybe_freeze_parameters(
@@ -398,8 +426,21 @@ def main(cfg: DictConfig) -> None:
         local_engine = instantiate(cfg.engine)
         local_engine.model.load_state_dict(torch.load(f"checkpoints/model_round_{best_round}.pth", weights_only=False))
 
-        # Evaluate the model on the client datasets    
-        trainer.test(local_engine, test_dataloader)        
+        # Evaluate the model on the client datasets 
+        for testid in range(len(test_dataloaders)):
+            test_dataloader = test_dataloaders[testid]   
+            trainer.test(local_engine, test_dataloader)        
+        print(f"\033[90mFinished! Training time: {round((time.time() - t0)/60, 2)} minutes\033[0m")
+
+        # Evaluate the model on the client datasets
+        #test_losses, sizes = [], []
+    #{'val/c/asia': 0.0, 'val/c/bronc': 0.0, 'val/c/either': 0.0, 'val/c/lung': 0.0, 'val/c/smoke': 0.0, 'val/c/tub': 0.0, 'val/c/xray': 0.0, 'val_loss': nan}
+            #test_losses.append(test_metrics['test_loss'])
+            #sizes.append(len(test_dataloaders[cid].dataset))
+
+            # log aggregated val metrics (weighted)
+            #t_loss = sum(l * s for l, s in zip(test_losses, sizes)) / sum(sizes)
+
         print(f"\033[90mFinished! Training time: {round((time.time() - t0)/60, 2)} minutes\033[0m")
         
         '''

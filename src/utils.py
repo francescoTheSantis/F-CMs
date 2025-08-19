@@ -2,7 +2,7 @@ import torch
 import random
 import numpy as np
 import pandas as pd
-from omegaconf import DictConfig, open_dict
+from omegaconf import DictConfig, open_dict, OmegaConf
 from src.my_hydra import parse_hyperparams, target_classname
 from src.metrics import edge_type
 from env import CACHE
@@ -32,23 +32,38 @@ from torch.utils.data import (
 
 
 def load_dataloaders(cfg: DictConfig, path: str, n_clients: int):
+    combined_dataset = OmegaConf.select(cfg, 'combined_datasets.other_datasets', default=None)
     train_dataloaders = []
     val_dataloaders = []
+    test_dataloaders = []
+
+    # if cfg.combined_datasets is None then there is a unique test_dataloader
     for client_id in range(1,n_clients+1):
-        train_path, val_path = get_split_paths_fl(cfg, path, client_id)
+        train_path, val_path, test_path = get_split_paths_fl(cfg, path, client_id)
         # if the file is not found, raise an error
-        if not os.path.exists(train_path) or not os.path.exists(val_path):
-            raise FileNotFoundError(f"File {train_path} or {val_path} not found")
+        if not os.path.exists(train_path) or not os.path.exists(val_path) or not os.path.exists(test_path):
+            raise FileNotFoundError(f"File {train_path} or {val_path} or {test_path} not found")
         # Load the dataloaders
         with open(train_path, 'rb') as f:
             train_dataloader = pickle.load(f)
         with open(val_path, 'rb') as f:
             val_dataloader = pickle.load(f)
-            
+
         train_dataloaders.append(train_dataloader)
         val_dataloaders.append(val_dataloader)
-    return train_dataloaders, val_dataloaders
-            
+
+        if combined_dataset is not None:
+            with open(test_path, 'rb') as f:
+                test_dataloader = pickle.load(f)
+            test_dataloaders.append(test_dataloader)
+        else:
+            if client_id == 1:
+                with open(test_path, 'rb') as f:
+                    test_dataloader = pickle.load(f)
+                test_dataloaders.append(test_dataloader)
+
+    return train_dataloaders, val_dataloaders, test_dataloaders
+
             
 def remove_checkpoints(best_round: int):
     for file in os.listdir("checkpoints"):
@@ -143,13 +158,29 @@ def identify_subgraph(path, client_id):
             return subgraph_id
     return None
 
+def update_config_from_client(cfg: DictConfig, datasets, cid: int) -> DictConfig:
+    """ can be used to update the config based on the client id """
+    if cfg.learning.mode=="local_federated" and len(datasets)>1:
+        with open_dict(cfg):
+            dataset = datasets[(cid) % len(datasets)]
+            cfg.engine.model.update(input_size = dataset.data["train"].X.shape[-1] if dataset.data["train"].X is not None else None)
+    return cfg
 
-def update_config_from_data(cfg: DictConfig, dataset, subgraphs, subgraphs_concept_names) -> DictConfig:
-    """ can be used to update the config based on the data, e.g., set input and output size """
-    original_c_names = dataset.c_info['names']
-    
+
+def update_config_from_data(cfg: DictConfig, datasets, subgraphs, subgraphs_concept_names) -> DictConfig:
+    """ can be used to update the config based on the data, e.g., set input and output size """ 
+
     with open_dict(cfg):
+
         if cfg.learning.mode=="localized":
+            if len(datasets)>1:
+                dataset = datasets[cfg.client_id-1]
+            else:
+                dataset = datasets[0]
+
+            #input_size = dataset.data["train"].X.shape[-1] if dataset.data["train"].X is not None else None
+
+            original_c_names = dataset.c_info['names']
             path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
             # Get the subgraph given the client id
             subgraph_id = identify_subgraph(path, cfg.client_id)
@@ -169,11 +200,15 @@ def update_config_from_data(cfg: DictConfig, dataset, subgraphs, subgraphs_conce
             c_names_ood = {cfg.client_id: [name for name in dataset.c_info['names'] if name not in updated_c_names]}
             c_names_all = original_c_names
 
+
             
         elif cfg.learning.mode=="local_federated":
-            c_info = dataset.c_info
+            
+            original_c_names = datasets[0].c_info['names']
+            c_info = datasets[0].c_info
 
             path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
+            #input_size = dict()
             # The list of names for in-distribution concepts (concepts that the client has in its subgraph)
             c_names_id = dict()
             #c_cardinality = dict()
@@ -182,6 +217,11 @@ def update_config_from_data(cfg: DictConfig, dataset, subgraphs, subgraphs_conce
             # The list of names for all concepts (in-distribution and out-of-distribution)
             c_names_all = original_c_names 
             for id in range(1, cfg.learning.n_clients + 1):
+                if len(datasets)>1:
+                    dataset = datasets[(id-1) % len(datasets)]
+                else:
+                    dataset = datasets[0]
+                #input_size[id-1] = dataset.data["train"].X.shape[-1] if dataset.data["train"].X is not None else None
                 subgraph_id = identify_subgraph(path, id)
                 if subgraph_id is not None:
                     updated_c_names = subgraphs_concept_names['subgraph_'+subgraph_id]
@@ -194,7 +234,10 @@ def update_config_from_data(cfg: DictConfig, dataset, subgraphs, subgraphs_conce
             #c_names_all = c_names + c_names_ood
     
         else:
+            dataset = datasets[0]
+            #input_size = dataset.data["train"].X.shape[-1] if dataset.data["train"].X is not None else None
             c_info = dataset.c_info
+            original_c_names = dataset.c_info['names']
             # For non-localized/federated learning, we assume all clients have the same concepts
             c_names_id = {1: original_c_names}  
             #c_cardinality = {1: dataset.c_info['cardinality']}
@@ -202,11 +245,11 @@ def update_config_from_data(cfg: DictConfig, dataset, subgraphs, subgraphs_conce
             c_names_all = original_c_names  # All concepts are in-distribution
 
         cfg.engine.model.update(
-            input_size = dataset.data["train"].X.shape[-1] if dataset.data["train"].X is not None else None,
-            output_size = dataset.y_info['cardinality'][0], # we assume single class classification
+            input_size =  datasets[0].data["train"].X.shape[-1] if datasets[0].data["train"].X is not None else None,
+            output_size = datasets[0].y_info['cardinality'][0], # we assume single class classification
             c_info = c_info,
-            y_info = dataset.y_info,
-            c_name_index = {name: i for i, name in enumerate(c_names_all + dataset.y_info['names'])},
+            y_info = datasets[0].y_info,
+            c_name_index = {name: i for i, name in enumerate(c_names_all + datasets[0].y_info['names'])},
         )
         cfg.engine.update(
             c_names_id = c_names_id,
@@ -215,7 +258,9 @@ def update_config_from_data(cfg: DictConfig, dataset, subgraphs, subgraphs_conce
             c_name_index = {name: i for i, name in enumerate(c_names_all)},
             learning_modality = cfg.learning.mode
         )
-        
+        #if not( cfg.learning.mode=="local_federated" and len(datasets)>1):
+        #    cfg.engine.model.update(input_size = datasets[0].data["train"].X.shape[-1] if datasets[0].data["train"].X is not None else None)
+
     return cfg
 
 
@@ -504,28 +549,43 @@ def extract_between(text, split):
         return None
    
     
-def get_split_paths(cfg, path, test=False):
-    if not test:
-        for file in os.listdir(path):
-            if extract_between(file, 'train') == str(cfg.client_id):
-                train_path = os.path.join(path, file)
-            if extract_between(file, 'val') == str(cfg.client_id):
-                val_path = os.path.join(path, file)
-        return train_path, val_path
-    else:
-        for file in os.listdir(path):
+def get_split_paths(cfg, path):
+    combined_dataset = OmegaConf.select(cfg, 'combined_datasets.other_datasets', default=None)
+    root = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
+    if combined_dataset is None:
+        test_path = os.path.join(root, f"test.pkl")
+
+    for file in os.listdir(path):
+        if extract_between(file, 'train') == str(cfg.client_id):
+            train_path = os.path.join(path, file)
+        if extract_between(file, 'val') == str(cfg.client_id):
+            val_path = os.path.join(path, file)
+        
+        if combined_dataset is not None:
             if extract_between(file, 'test') == str(cfg.client_id):
                 test_path = os.path.join(path, file)
-        return test_path
+
+
+    
+    return train_path, val_path, test_path
 
 
 def get_split_paths_fl(cfg, path, client_id):
+    combined_dataset = OmegaConf.select(cfg, 'combined_datasets.other_datasets', default=None)
     for file in os.listdir(path):
         if extract_between(file, 'train') == str(client_id):
             train_path = os.path.join(path, file)
         if extract_between(file, 'val') == str(client_id):
             val_path = os.path.join(path, file)
-    return train_path, val_path
+
+        if combined_dataset is not None:
+            if extract_between(file, 'test') == str(client_id):
+                test_path = os.path.join(path, file)
+        else:
+            root = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
+            test_path = os.path.join(root, f"test.pkl")
+
+    return train_path, val_path, test_path
 
 
 def seed_everything(seed: int):
@@ -612,14 +672,14 @@ def maybe_freeze_parameters(c, model, learning, freezing = True):
     Returns:
         None
     """
-    if learning == "federated" and freezing:
+    if (learning == "local_federated" or learning=="federated") and freezing:
 
         c_indices_to_freeze = torch.where(c[0] == -1)[0]
 
         for param in model.parameters():
             param.requires_grad = True
 
-        if model.__class__.__name__=="CBM":
+        if model.name=="cbm_linear" or model.name =="cbm_mlp":
             c_keys = list(model.c_mlp.keys())
             c_to_freeze = [c_keys[i] for i in c_indices_to_freeze]
             for name, mlp in model.c_mlp.items():
@@ -628,7 +688,7 @@ def maybe_freeze_parameters(c, model, learning, freezing = True):
                             param.requires_grad = False
             print("Parameters frozen for concepts:", c_to_freeze)
 
-        if model.__class__.__name__=="CEM":
+        if model.name=="cem":
             c_keys = list(model.concept_encoders.keys())
             c_to_freeze = [c_keys[i] for i in c_indices_to_freeze]
             for name, concept_encoder in model.concept_encoders.items():
@@ -637,7 +697,7 @@ def maybe_freeze_parameters(c, model, learning, freezing = True):
                         param.requires_grad = False
             print("Parameters frozen for concepts:", c_to_freeze)
         
-        if model.__class__.__name__=="C2BM":
+        if model.name=="c2bm":
             c_keys = list(model.concept_encoders.keys())
             c_to_freeze = [c_keys[i] for i in c_indices_to_freeze]
 

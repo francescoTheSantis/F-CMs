@@ -21,7 +21,7 @@ def update_concept_names_FashionMNIST(dataset, is_complex_coloring = False):
     
     if is_complex_coloring:
         dataset.c_info = {'names': ['color', 'scale', 'degree'], 
-                          'cardinality': [3, 6, 6]}
+                          'cardinality': [3, len(dataset.possible_scales), len(dataset.possible_degrees)]}
         
     dataset.y_info = {'names': ['clothing'],
                       'cardinality': [10]}
@@ -37,12 +37,8 @@ def onehot_to_concepts_FashionMNIST(dataset, is_complex_coloring = False):
         # add an attribute to the class data
         #data.c = torch.stack([digits, colors], dim=1)
         if is_complex_coloring:
-            scales_indices = torch.argmax(data.c[:, 3:9], axis=1)
-            degrees_indices = torch.argmax(data.c[:, 9:], axis=1)
-            possible_scales_torch = torch.tensor(dataset.possible_scales)
-            possible_degrees_torch = torch.tensor(dataset.possible_degrees)
-            scales = possible_scales_torch[scales_indices]
-            degrees = possible_degrees_torch[degrees_indices]
+            scales = torch.argmax(data.c[:, 3:8], axis=1)
+            degrees = torch.argmax(data.c[:, 8:], axis=1)
             data.c = torch.stack([colors, scales, degrees], dim=1)
         else:
             data.c = torch.stack([colors], dim=1)
@@ -83,8 +79,9 @@ class FashionMNISTDataset():
         self.val_size = val_size
         self.ftune_val_size = ftune_val_size
 
-        self.possible_scales = [0.1, 0.3, 0.5, 0.7, 0.9, 1.0]
-        self.possible_degrees = [0, 60, 120, 210, 270, 330]
+
+        self.possible_scales = [0.1, 0.25, 0.5, 0.75, 1.0]
+        self.possible_degrees = [0, 60, 150, 210, 300]
         self.possible_colors = ['red', 'green', 'blue']
         
         self.coloring = coloring
@@ -108,11 +105,20 @@ class FashionMNISTDataset():
                        'cardinality': [2,2,2,2,2,2,2,2,2,2]}
         self.data = {}
 
-    def load_ground_truth_graph(self): 
-        #node_labels = self.c_info['names'][0:2] + self.y_info['names'] # number, color, parity
-        #values = to_dense_adj(torch.tensor([[0],[2]]))[0]
-        #self.adj = pd.DataFrame(values, index=node_labels, columns=node_labels, dtype=int)
-        return None
+    def load_ground_truth_graph(self):
+        node_labels = self.c_info['names'] + self.y_info['names'] 
+        if self.coloring['train'].get('mode') != 'complex':
+            raise NotImplementedError("Ground truth graph loading is not implemented for this coloring mode.")
+        else:
+            scale_index = self.c_info['names'].index('scale')
+            degree_index = self.c_info['names'].index('degree')
+            if 'color' in self.c_info['names']:
+                color_index = self.c_info['names'].index('color')
+            else:
+                color_index = len(self.c_info['names']) 
+            values = to_dense_adj(torch.tensor([[scale_index, degree_index],[degree_index,color_index]]), max_num_nodes=4)[0]
+            self.adj = pd.DataFrame(values, index=node_labels, columns=node_labels, dtype=int)
+        return self.adj
 
     def split(self):
         """ 
@@ -154,8 +160,8 @@ class _FashionMNISTDataset(FashionMNIST):
                  transform: Union[Compose, torch.nn.Module] = None,
                  target_transform: Union[Compose, torch.nn.Module] = None, 
                  download: bool = True, 
-                 possible_scales: list = [0.1, 0.3, 0.5, 0.7, 0.9, 1.0],
-                 possible_degrees: list = [0, 60, 120, 210, 270, 330],
+                 possible_scales: list = [0.1, 0.25, 0.5, 0.75, 1.0],
+                 possible_degrees: list = [0, 60, 150, 210, 300],
                  possible_colors: list = ['red', 'green', 'blue'],
                  coloring_mode: str = 'random',
                  coloring_kwargs: dict = {}):

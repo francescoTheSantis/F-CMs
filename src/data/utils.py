@@ -178,18 +178,21 @@ def change_task(dataset, task):
         - dataset: The dataset to modify.
         - task: The new task to assign to the dataset.
     '''
+    if dataset.y_info['names'][0]==task:
+        return None
 
     y_index = dataset.c_info['names'].index(task) if task in dataset.c_info['names'] else None
+
+    temp_dataset = deepcopy(dataset)
 
     if y_index is None:
         raise ValueError(f"Task {task} not found in dataset.")
     
     for split in dataset.data:
-        old_y_values = dataset.data[split].y.squeeze()
-        new_y_values = dataset.data[split].c[:, y_index]
+        old_y_values = temp_dataset.data[split].y.squeeze()
+        new_y_values = temp_dataset.data[split].c[:, y_index]
         dataset.data[split].y = new_y_values
-        dataset.data[split].c[:,y_index] = old_y_values
-
+        dataset.data[split].c[:, y_index] = old_y_values
 
     new_y_cardinality = [dataset.c_info['cardinality'][y_index]]
     old_y_cardinality = dataset.y_info['cardinality'][0]
@@ -198,6 +201,8 @@ def change_task(dataset, task):
     old_y_name = dataset.y_info['names'][0]
     dataset.y_info['names'] = [task]
     dataset.c_info['names'][y_index] = old_y_name
+
+    
 
     return None
 
@@ -239,7 +244,7 @@ def update_datasets(old_datasets, new_dataset, cfg_combined_datasets):
         for key, dataset in datasets.items():
             change_task(dataset, task)
         
-        combined_c_names = list(set(datasets[0].c_info['names']) | set(m_new_dataset.c_info['names']))
+        combined_c_names = sorted(list(set(datasets[0].c_info['names']) | set(m_new_dataset.c_info['names'])))
         combined_cardinalities = [datasets[0].c_info['cardinality'][datasets[0].c_info['names'].index(name)] 
                                   if name in datasets[0].c_info['names'] 
                                   else 0 for name in combined_c_names]
@@ -261,7 +266,7 @@ def update_datasets(old_datasets, new_dataset, cfg_combined_datasets):
 def construct_combined_true_graph(datasets, cfg_dataset, cfg_combined_datasets):
     if cfg_dataset.name=='colormnist' and cfg_combined_datasets.other_datasets[0]=='fashionmnist':
         node_labels = datasets[0].c_info['names'] + datasets[0].y_info['names']
-        edges = [[0, 4], [4, 5], [1,2]]
+        edges = [[4, 1], [1, 5], [2,3]]
         edge_index = torch.tensor(edges).t()
         values = to_dense_adj(edge_index)[0]
         adj = pd.DataFrame(values, index=node_labels, columns=node_labels, dtype=int)
@@ -269,3 +274,10 @@ def construct_combined_true_graph(datasets, cfg_dataset, cfg_combined_datasets):
         raise ValueError(f"Dataset {cfg_dataset.name} is not supported for combined true graph construction.")
 
     return adj
+
+
+
+def modify_class_values(var):
+   var_values = sorted(set(var))
+   var_mapping = {old_val: new_val for new_val, old_val in enumerate(var_values)}
+   return [var_mapping[val] for val in var]

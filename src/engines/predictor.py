@@ -3,11 +3,11 @@ import pickle
 import itertools
 
 import torch
+from copy import deepcopy
 from torch import nn
 from torchmetrics import Metric, MetricCollection
 from torchmetrics.collections import _remove_prefix
 import pytorch_lightning as pl
-from src.utils import identify_subgraph
 from src.data.generate_split import get_subgraph_dict
 from env import CACHE
 
@@ -30,7 +30,8 @@ class Predictor(pl.LightningModule):
                 c_names_ood: Optional[Mapping[str, str]] = None,
                 c_names_all: Optional[list] = None,
                 annotation_assumption: Optional[str] = None,
-                learning_modality: Optional[str] = 'localized'
+                learning_modality: Optional[str] = 'localized',
+                cid: Optional[int] = 1
                 ):
         super(Predictor, self).__init__()         
         self.model = model
@@ -59,11 +60,16 @@ class Predictor(pl.LightningModule):
         self.c_names_id = c_names_id 
         self.c_names_ood = c_names_ood 
         self.c_names_all = c_names_all
+        self.clients = range(1, len(self.c_names_ood)+2)  # +1 for the case where there are no OOD concepts
 
         self.learning_modality = learning_modality
         if metrics is None:
             metrics = dict()
         self._set_metrics(metrics)
+
+        self.cid = cid
+        self.level_intervention_id_annotations = {}
+        self.level_intervention_ood_annotations = {}
 
     def forward(self, *args, **kwargs):
         return self.model(*args, **kwargs)
@@ -141,8 +147,19 @@ class Predictor(pl.LightningModule):
             self.test_intervention_level_y = MetricCollection(
                 metrics={k: self._check_metric(m) for k, m in c_acc_levels_metrics.items()},
                 prefix="test_intervention/level/y/")
-
-            # individual child concept accuracy after 
+            
+            # task accuracy after intervention on id/ood concepts of each graph level
+            self.test_intervention_id_level_y = {}
+            self.test_intervention_ood_level_y = {}
+            for client_id in range(1,len(self.c_names_ood)+1):
+                self.test_intervention_id_level_y[f'client {client_id}'] = MetricCollection(
+                    metrics={k: self._check_metric(m) for k, m in c_acc_levels_metrics.items()},
+                    prefix=f"test_intervention/id_level/y/client_{client_id}")
+                self.test_intervention_ood_level_y[f'client {client_id}'] = MetricCollection(
+                    metrics={k: self._check_metric(m) for k, m in c_acc_levels_metrics.items()},
+                    prefix=f"test_intervention/ood_level/y/client_{client_id}")
+                
+            # individual child concept accuracy after
             # intervention on ancestors in the graph
             childs_per_level = {}
             for l in range(0, len(self.test_interv_policy)+1):
@@ -153,7 +170,51 @@ class Predictor(pl.LightningModule):
             self.test_intervention_level_c = MetricCollection(
                 metrics={k: self._check_metric(m) for k, m in childs_per_level.items()},
                 prefix="test_intervention/level/c/")
- 
+            
+            # individual child ood concept accuracy after
+            # intervention on id ancestors in the graph for each client
+            self.test_intervention_id_level_c_ood ={}
+            childs_per_level_ood = {}
+            for client_id in range(1,len(self.c_names_ood)+1):
+                ood_concepts = self.c_names_ood[client_id]
+                # create a dictionary childs
+                childs_per_level_ood[client_id] = {}
+                for l in range(0, len(self.test_interv_policy)+1):
+                    childs = list(itertools.chain(*self.test_interv_policy[l:]))
+                    # filter out IID concepts for each client
+                    # extract indices from ood_concepts
+                    ood_indices = [i for i, c in enumerate(self.c_names_all) if c in ood_concepts]
+                    childs =  [child for child in childs if child in ood_indices]
+                    if len(childs)!=0:
+                        for child in childs:
+                            child_name = self.c_names_all[child] 
+                            childs_per_level_ood[client_id][f'level {l}/child {child_name}'] = metrics.get('classification_acc')
+                self.test_intervention_id_level_c_ood[f'client {client_id}'] = MetricCollection(
+                    metrics={k: self._check_metric(m) for k, m in childs_per_level_ood[client_id].items()},
+                    prefix=f"test_intervention/id_level/c_ood/client_{client_id}/")
+                
+            
+            # individual child iid concept accuracy after
+            # intervention on ood ancestors in the graph for each client
+            self.test_intervention_ood_level_c_id ={}
+            childs_per_level_id = {}
+            for client_id in range(1,len(self.c_names_ood)+1):
+                id_concepts = self.c_names_id[client_id]
+                # create a dictionary childs
+                childs_per_level_id[client_id] = {}
+                for l in range(0, len(self.test_interv_policy)+1):
+                    childs = list(itertools.chain(*self.test_interv_policy[l:]))
+                    # filter out IID concepts for each client
+                    id_indices = [i for i, c in enumerate(self.c_names_all) if c in id_concepts]
+                    childs =  [child for child in childs if child in id_indices]
+                    if len(childs)!=0:
+                        for child in childs:
+                            child_name = self.c_names_all[child] 
+                            childs_per_level_id[client_id][f'level {l}/child {child_name}'] = metrics.get('classification_acc')
+                self.test_intervention_ood_level_c_id[f'client {client_id}'] = MetricCollection(
+                    metrics={k: self._check_metric(m) for k, m in childs_per_level_id[client_id].items()},
+                    prefix=f"test_intervention/ood_level/c_id/client_{client_id}/")
+
             # --- fairness metrics ---
             self.cace = MetricCollection(
                 metrics = {'before': self._check_metric(metrics.get('cace')),
@@ -248,42 +309,101 @@ class Predictor(pl.LightningModule):
                 # forward pass with intervention at test time
                 y_output, c_output = self.forward(**inputs)
                 y_hat, c_hat = self.model.filter_output_for_metric(y_output, c_output)
+                self.test_intervention_single_y[c_name_i].update(y_hat, y)
                 # update metric after intervention:
                 # after interveening on concept c_name_i, how well can we predict y
-                self.test_intervention_single_y[c_name_i].update(y_hat, y)
+                #self.test_intervention_single_y[c_name_i].reset()
+                #self.test_intervention_single_y[c_name_i].update(y_hat, y)
+                #value = self.test_intervention_single_y[c_name_i].compute()
+                #print(value)
+                #print(id(self.test_intervention_single_y[c_name_i]))
+                
 
 
                 
             # level intervention
             # NOTICE: if self.learning_modality== "localized", self.interv_policy has been updated to the subgraph
-            for l in range(0, len(self.test_interv_policy)+1):
-                nodes = list(itertools.chain(*self.test_interv_policy[:l]))               
-                #nodes = self._remove_node_id_ood(nodes)
-                intervention_index = get_test_intervention_index(c.shape, nodes)
-                inputs = {'x':x, 'c':c, 'intervention_index':intervention_index}
-                # forward pass with intervention at test time
-                #print("intervention_index", intervention_index[0])
-                #print("c_output",c_output["bronc"][0:5])
-                y_output, c_output = self.forward(**inputs)
-                #print("c_output", c_output[0])
-                y_hat, c_hat = self.model.filter_output_for_metric(y_output, c_output)
-                # update metric after intervention:
-                # after interveening on a level of the graph, how well can we predict y
-                self.test_intervention_level_y[f'level {l}'].update(y_hat, y)
-                # update metric after intervention:
-                # after interveening on a level of the graph, how well can we predict each child concept
-                childs = list(itertools.chain(*self.test_interv_policy[l:]))
-                for child_index in childs:
-                    c_name = self.c_names_all[child_index]
-                    self.test_intervention_level_c[f'level {l}/child {c_name}'].update(c_hat[c_name], c[:,child_index])
-                    #if c_name in self.c_names_id[1]:
-                    #    self.test_intervention_level_c[f'level {l}/child {c_name}'].update(c_hat[c_name], c[:,child_index])
-                    #else:
-                    #    # There is no improvement on the concept accuracy for OOD concepts
-                    #    self.test_intervention_level_c[f'level {l}/child {c_name}'].update(torch.Tensor([float('nan')]), 
-                    #                                                                       torch.Tensor([float('nan')]))
-                
-                # level intervention for all clients on iid and ood concepts separately
+            device = c.device
+            self.clients = range(1, len(self.c_names_ood)+2)  # +1 for the case where there are no OOD concepts
+            possible_clients = deepcopy(self.clients)  # copy the list of clients
+            # If there are multiple test sets, select only the clients with the correct one
+            if (c == -1).all(dim=0).any():
+                # extract columns of c where there are all -1
+                mask = (c == -1).all(dim=0)
+                # take indices where mask == True
+                mask_true = torch.nonzero(mask, as_tuple=True)[0].tolist()
+                # take indices in c_names_all corresponding to c_names_ood[client_id] for each client
+                client_ood_indices = {}
+                for client in possible_clients[:-1]:
+                    client_ood_indices[client] = [self.c_names_all.index(c_name) for c_name in self.c_names_ood[client]]
+
+                client_ood_indices[len(self.c_names_ood)+1] = mask_true
+                possible_clients = [client_id for client_id in possible_clients if (client_ood_indices[client_id] == mask_true)]
+                self.clients = possible_clients
+
+            for client_id in self.clients:
+                if client_id!= len(self.c_names_ood)+1:
+                    id_concepts = self.c_names_id[client_id]
+                    ood_concepts = self.c_names_ood[client_id]
+                    id_indices = [i for i, c in enumerate(self.c_names_all) if c in id_concepts]
+                    ood_indices = [i for i, c in enumerate(self.c_names_all) if c in ood_concepts]
+                # client_id == len(self.c_names_ood)+1 does not exist. It is created to calculate level intervention without difference id/ood concepts
+                for l in range(0, len(self.test_interv_policy)+1):
+                    # get the nodes to intervene on
+                    nodes = list(itertools.chain(*self.test_interv_policy[:l])) 
+
+                    if client_id == len(self.c_names_ood)+1:
+                        # intervene on all the concepts of the level
+                        intervention_index = get_test_intervention_index(c.shape, nodes)
+                        inputs = {'x':x, 'c':c, 'intervention_index':intervention_index}
+                        y_output, c_output = self.forward(**inputs)
+                        y_hat, c_hat = self.model.filter_output_for_metric(y_output, c_output)
+                        # update metric after intervention:
+                        # after interveening on a level of the graph, how well can we predict y
+                        self.test_intervention_level_y[f'level {l}'].update(y_hat, y)
+                    else:
+                        if self.learning_modality not in ["centralized", "localized"]:
+                            # intervene on id and ood concepts of the level
+                            nodes_id = [node for node in nodes if node in id_indices]
+                            nodes_ood = [node for node in nodes if node in ood_indices]
+                            if len(nodes_id)==0:
+                                self.level_intervention_id_annotations[l] ="empty"
+                            if len(nodes_ood)==0:
+                                self.level_intervention_ood_annotations[l] ="empty"                          
+                            intervention_index_id = get_test_intervention_index(c.shape, nodes_id)
+                            intervention_index_ood = get_test_intervention_index(c.shape, nodes_ood)
+                            inputs_id = {'x':x, 'c':c, 'intervention_index':intervention_index_id}
+                            inputs_ood = {'x':x, 'c':c, 'intervention_index':intervention_index_ood}
+                            y_output_id, c_output_id = self.forward(**inputs_id)
+                            y_output_ood, c_output_ood = self.forward(**inputs_ood)
+                            y_hat_id, c_hat_id = self.model.filter_output_for_metric(y_output_id, c_output_id)
+                            y_hat_ood, c_hat_ood = self.model.filter_output_for_metric(y_output_ood, c_output_ood)
+                            self.test_intervention_id_level_y[f'client {client_id}'][f'level {l}'].to(device).update(y_hat_id, y)
+                            self.test_intervention_ood_level_y[f'client {client_id}'][f'level {l}'].to(device).update(y_hat_ood, y)
+                    # update metric after intervention:
+                    # after interveening on a level of the graph, how well can we predict each child concept
+                    childs = list(itertools.chain(*self.test_interv_policy[l:]))
+                    for child_index in childs:
+                        if client_id == len(self.c_names_ood)+1:
+                            c_name = self.c_names_all[child_index]
+                            self.test_intervention_level_c[f'level {l}/child {c_name}'].update(c_hat[c_name], c[:,child_index])
+                        else:
+                            if self.learning_modality not in ["centralized", "localized"]:
+                                if child_index in id_indices:
+                                    c_name = self.c_names_all[child_index]
+                                    self.test_intervention_ood_level_c_id[f'client {client_id}'][f'level {l}/child {c_name}'].to(device).update(c_hat_ood[c_name], c[:,child_index])
+                                elif child_index in ood_indices:
+                                    c_name = self.c_names_all[child_index]
+                                    self.test_intervention_id_level_c_ood[f'client {client_id}'][f'level {l}/child {c_name}'].to(device).update(c_hat_id[c_name], c[:,child_index])
+
+                        #if c_name in self.c_names_id[1]:
+                        #    self.test_intervention_level_c[f'level {l}/child {c_name}'].update(c_hat[c_name], c[:,child_index])
+                        #else:
+                        #    # There is no improvement on the concept accuracy for OOD concepts
+                        #    self.test_intervention_level_c[f'level {l}/child {c_name}'].update(torch.Tensor([float('nan')]), 
+                        #                                                                       torch.Tensor([float('nan')]))
+                    
+                    # level intervention for all clients on iid and ood concepts separately
 
     # DA RIVEDERE
     def test_intervention_fairness(self, batch):
@@ -429,24 +549,24 @@ class Predictor(pl.LightningModule):
             pickle.dump(y_int, open(f'results/single_c_interventions_on_y.pkl', 'wb'))
 
             # if local_federated task accuracy after intervention on each individual ood concept for each client
-            if self.learning_modality == 'local_federated':
+            if self.learning_modality not in ["centralized", "localized"]:
                 if len(self.c_names_ood) != 0:          
                     y_int_OOD = dict()
-                    for client_id in range(1,len(self.c_names_ood)):
+                    for client_id in self.clients[:-1]:  # exclude the last client which is not a real client
                         y_int_OOD[client_id] = dict()
                         for c_name in self.c_names_ood[client_id]:                
                             y_int_OOD[client_id][c_name] = y_int[c_name]
                             print(f"Task accuracy for client {client_id} after intervention on ood {c_name}: {y_int_OOD[client_id][c_name]}")
-                        pickle.dump(y_int_OOD[client_id], open(f'results/client_{client_id}_single_OODc_interventions_on_y.pkl', 'wb'))
+                    pickle.dump(y_int_OOD, open(f'results/single_OODc_interventions_on_y.pkl', 'wb'))
 
                     # task accuracy after intervention on each individual id concept for each client
                     y_int_ID = dict()
-                    for client_id in range(1, len(self.c_names_ood)):
+                    for client_id in self.clients[:-1]:  # exclude the last client which is not a real client
                         y_int_ID[client_id] = dict()
                         for c_name in self.c_names_id[client_id]:
                             y_int_ID[client_id][c_name] = y_int[c_name]
                             print(f"Task accuracy for client {client_id} after intervention on id {c_name}: {y_int_ID[client_id][c_name]}")
-                        pickle.dump(y_int_ID[client_id], open(f'results/client_{client_id}_single_IDc_interventions_on_y.pkl', 'wb'))     
+                    pickle.dump(y_int_ID, open(f'results/single_IDc_interventions_on_y.pkl', 'wb'))     
 
             # task accuracy after intervention of each graph level
             y_int = {}
@@ -456,14 +576,68 @@ class Predictor(pl.LightningModule):
                 print(f"Task accuracy after intervention on {level}: {y_int[level]}")
             pickle.dump(y_int, open(f'results/level_interventions_on_y.pkl', 'wb'))
 
+            if self.learning_modality not in ["centralized", "localized"]:
+                # task accuracy after intervention on each individual id concept of each graph level for each client 
+                y_int_ID_level = {}
+                for client_id in self.clients[:-1]:  # exclude the last client which is not a real client
+                    y_int_ID_level[client_id] = {}
+                    for k, metric in self.test_intervention_id_level_y[f'client {client_id}'].items():
+                        level = _remove_prefix(k, self.test_intervention_id_level_y[f'client {client_id}'].prefix)
+                        y_int_ID_level[client_id][f'id_{level}'] = metric.compute().item()
+                        num_level = int(level.replace("level ", ""))
+                        print(f"Task accuracy for client {client_id} after intervention on id {level}{' (empty)' if num_level in self.level_intervention_id_annotations.keys() else ''}: {y_int_ID_level[client_id][f'id_{level}']}")
+                pickle.dump(y_int_ID_level, open(f'results/level_ID_interventions_on_y.pkl', 'wb'))
+
+                # task accuracy after intervention on each individual ood concept of each graph level for each client
+                y_int_OOD_level = {}
+                for client_id in self.clients[:-1]:  # exclude the last client which is not a real client
+                    y_int_OOD_level[client_id] = {}
+                    for k, metric in self.test_intervention_ood_level_y[f'client {client_id}'].items():
+                        level = _remove_prefix(k, self.test_intervention_ood_level_y[f'client {client_id}'].prefix)
+                        y_int_OOD_level[client_id][f'ood_{level}'] = metric.compute().item()
+                        num_level = int(level.replace("level ", ""))
+                        print(f"Task accuracy for client {client_id} after intervention on ood {level}{' (empty)' if num_level in self.level_intervention_ood_annotations.keys() else ''}: {y_int_OOD_level[client_id][f'ood_{level}']}")
+                pickle.dump(y_int_OOD_level, open(f'results/level_OOD_interventions_on_y.pkl', 'wb'))
+
             # individual child concept accuracy after
             # intervention on ancestors in the graph
             c_int = {}
             for k, metric in self.test_intervention_level_c.items():
-                level = _remove_prefix(k, self.test_intervention_level_c.prefix)
-                c_int[level] = metric.compute().item()
-                print(f"Concept accuracy after intervention on {level}: {c_int[level]}")
+                level_child = _remove_prefix(k, self.test_intervention_level_c.prefix)
+                c_int[level_child] = metric.compute().item()
+                print(f"Concept accuracy after intervention on {level_child}: {c_int[level_child]}")
             pickle.dump(c_int, open(f'results/level_interventions_on_c.pkl', 'wb'))
+
+            if self.learning_modality not in ["centralized", "localized"]:
+                # individual ood child concept accuracy after
+                # intervention on id ancestors in the graph, for each client
+                c_int_id_level_c_ood ={}
+
+                for client_id in self.clients[:-1]:  # exclude the last client which is not a real client
+                    c_int_id_level_c_ood[client_id] = {}
+                    for k, metric in self.test_intervention_id_level_c_ood[f'client {client_id}'].items():
+                        level_child = _remove_prefix(k, self.test_intervention_id_level_c_ood[f'client {client_id}'].prefix)
+                        c_int_id_level_c_ood[client_id][f'id_{level_child}'] = metric.compute().item()
+                        # extract "level" from level_child. It's the string before "/" in level_child
+                        level = level_child.split("/")[0]
+                        level = level.replace("level ", "")
+                        print(f"Concept accuracy for client {client_id} after intervention on id {level_child}{' (empty)' if int(level) in self.level_intervention_id_annotations.keys() else ''}: {c_int_id_level_c_ood[client_id][f'id_{level_child}']}")
+                pickle.dump(c_int_id_level_c_ood, open(f'results/level_ID_interventions_on_c_OOD.pkl', 'wb'))
+
+                # individual id child concept accuracy after
+                # intervention on ood ancestors in the graph, for each client
+                c_int_ood_level_c_id ={}
+
+                for client_id in self.clients[:-1]:  # exclude the last client which is not a real client
+                    c_int_ood_level_c_id[client_id] = {}
+                    for k, metric in self.test_intervention_ood_level_c_id[f'client {client_id}'].items():
+                        level_child = _remove_prefix(k, self.test_intervention_ood_level_c_id[f'client {client_id}'].prefix)
+                        c_int_ood_level_c_id[client_id][f'ood_{level_child}'] = metric.compute().item()
+                        level = level_child.split("/")[0]
+                        # eliminate "level " from level
+                        level = level.replace("level ", "")
+                        print(f"Concept accuracy for client {client_id} after intervention on ood {level_child}{' (empty)' if int(level) in self.level_intervention_ood_annotations.keys() else ''}: {c_int_ood_level_c_id[client_id][f'ood_{level_child}']}")
+                pickle.dump(c_int_ood_level_c_id, open(f'results/level_OOD_interventions_on_c_ID.pkl', 'wb'))
 
             # save graph and concepts
             # DA RIVEDERE
