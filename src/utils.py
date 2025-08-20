@@ -174,11 +174,11 @@ def update_config_from_data(cfg: DictConfig, datasets, subgraphs, subgraphs_conc
 
         if cfg.learning.mode=="localized":
             if len(datasets)>1:
-                dataset = datasets[cfg.client_id-1]
+                dataset = datasets[(cfg.client_id-1) % len(datasets)]
             else:
                 dataset = datasets[0]
 
-            #input_size = dataset.data["train"].X.shape[-1] if dataset.data["train"].X is not None else None
+            input_size = dataset.data["train"].X.shape[-1] if dataset.data["train"].X is not None else None
 
             original_c_names = dataset.c_info['names']
             path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
@@ -208,6 +208,8 @@ def update_config_from_data(cfg: DictConfig, datasets, subgraphs, subgraphs_conc
             c_info = datasets[0].c_info
 
             path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
+            # just initialize it with dataset[0], then I'll update configuration and model with the different clients
+            input_size = datasets[0].data["train"].X.shape[-1] if datasets[0].data["train"].X is not None else None
             #input_size = dict()
             # The list of names for in-distribution concepts (concepts that the client has in its subgraph)
             c_names_id = dict()
@@ -235,6 +237,7 @@ def update_config_from_data(cfg: DictConfig, datasets, subgraphs, subgraphs_conc
     
         else:
             dataset = datasets[0]
+            input_size = dataset.data["train"].X.shape[-1] if dataset.data["train"].X is not None else None
             #input_size = dataset.data["train"].X.shape[-1] if dataset.data["train"].X is not None else None
             c_info = dataset.c_info
             original_c_names = dataset.c_info['names']
@@ -245,7 +248,7 @@ def update_config_from_data(cfg: DictConfig, datasets, subgraphs, subgraphs_conc
             c_names_all = original_c_names  # All concepts are in-distribution
 
         cfg.engine.model.update(
-            input_size =  datasets[0].data["train"].X.shape[-1] if datasets[0].data["train"].X is not None else None,
+            input_size =  input_size,
             output_size = datasets[0].y_info['cardinality'][0], # we assume single class classification
             c_info = c_info,
             y_info = datasets[0].y_info,
@@ -569,7 +572,7 @@ def get_split_paths(cfg, path):
     
     return train_path, val_path, test_path
 
-
+# to compact with the previous one
 def get_split_paths_fl(cfg, path, client_id):
     combined_dataset = OmegaConf.select(cfg, 'combined_datasets.other_datasets', default=None)
     for file in os.listdir(path):

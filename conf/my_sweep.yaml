@@ -2,7 +2,7 @@ defaults:
   - default
   - _self_
 
-client_id: 1
+client_id: 3
 
 hydra:
   mode: MULTIRUN
@@ -10,17 +10,18 @@ hydra:
     params:
       seed: 1
       # possible datsets are: asia, sachs, alarm, hailfinder, insurance
-      dataset: colormnist
+      dataset: sachs
       # possible models are:
       # blackbox, blackbox_multi, cbm_linear, cbm_mlp, cem, cgm, c2bm
       model: c2bm
-      learning: local_federated
+      learning: localized
       
 model:
-  hidden_size: 512
+  hidden_size: 32
+  concept_loss_weight: 0.8
 
 dataset:
-  load_embeddings: false
+  load_embeddings: true
   load_graph: false
   load_true_graph: true
   batch_size: 512
@@ -28,10 +29,10 @@ dataset:
    noise: 0.5  # for bndatasets only
 
 combined_datasets:
-  other_datasets: ['fashionmnist']
+  other_datasets: Null
   common_task: color
   fashionmnist:
-    load_embeddings: false
+    load_embeddings: true
 
 engine:
   intervention_prob: 0.8
@@ -42,8 +43,8 @@ engine:
 trainer:
   # logger: wandb
   devices: [0]
-  max_epochs: 200 #200
-  patience: 40 #40
+  max_epochs: 2 #200
+  patience: 1 #40
 
 rag:
   verbose: false

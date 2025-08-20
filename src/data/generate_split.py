@@ -168,7 +168,7 @@ def generate_split(cfg, datasets, graph, y_index):
     n = cfg.learning.n_clients
 
     if len(datasets)>1:
-        # Create a subgraph for each client containing all the variables from one dataset
+        # Create a subgraph for each client containing all the variables and values from one dataset
         subgraphs = {}
         subgraphs_concept_names = {}
         for i, dataset in enumerate(datasets.values()):
@@ -186,6 +186,9 @@ def generate_split(cfg, datasets, graph, y_index):
                                     modality=cfg.learning.subgraphs.modality,
                                     concept_in_common=cfg.learning.subgraphs.concept_in_common,
                                     task_in_common=cfg.learning.subgraphs.task_in_common)
+        
+
+
     # Check on the subgraphs
     assert len(subgraphs) < n, "Number of subgraphs must be lower than n"
 

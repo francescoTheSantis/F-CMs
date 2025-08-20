@@ -264,7 +264,8 @@ def update_datasets(old_datasets, new_dataset, cfg_combined_datasets):
     return datasets
 
 def construct_combined_true_graph(datasets, cfg_dataset, cfg_combined_datasets):
-    if cfg_dataset.name=='colormnist' and cfg_combined_datasets.other_datasets[0]=='fashionmnist':
+    if (cfg_dataset.name=='colormnist' and cfg_combined_datasets.other_datasets[0]=='fashionmnist') or \
+        (cfg_dataset.name=='fashionmnist' and cfg_combined_datasets.other_datasets[0]=='colormnist'):
         node_labels = datasets[0].c_info['names'] + datasets[0].y_info['names']
         edges = [[4, 1], [1, 5], [2,3]]
         edge_index = torch.tensor(edges).t()

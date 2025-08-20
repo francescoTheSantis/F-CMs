@@ -159,7 +159,11 @@ def main(cfg: DictConfig) -> None:
     # edge can only be directed at this stage, the following function is just here in 
     # case the CD + LLM + RAG pipeline is modified and could produce bidirected or undirected edges
     #graph, dataset = remove_problematic_edges(graph, dataset)
-    y_index = len(graph)-1
+    maybe_plot_graph(graph, 'graph')
+
+    y_index = graph.columns.get_loc(datasets[0].y_info['names'][0])  # it is ok also for multimodal because c_info and y_info contain all the variables of the datasets
+        # insert
+    #y_index = len(graph)-1
     
     ## (part 2): remove cycles
     #graph = remove_cycles(graph, y_index)
@@ -167,8 +171,7 @@ def main(cfg: DictConfig) -> None:
     #if true_graph is not None:
         #hamming = hamming_distance(true_graph, graph)
         #print('(after fix) structural hamming distance: ', hamming)
-    maybe_plot_graph(graph, 'graph')
-
+    
     #partitions = get_partitions(graph, y_index, n_clients = 5)
     #col_to_index = {col: idx for idx, col in enumerate(graph.columns)}    
     #partitions_named = {
@@ -208,7 +211,8 @@ def main(cfg: DictConfig) -> None:
         #    pickle.dump(test_dataloader, f)
 
     # Load the test dataloader for the specific client
-    #path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
+    path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
+    
     #test_path = get_split_paths(cfg, path, True)
     #with open(test_path, 'rb') as f:
     #    test_dataloader = pickle.load(f)
@@ -217,7 +221,7 @@ def main(cfg: DictConfig) -> None:
     if cfg.learning.mode in ['centralized', 'localized']:
         
         if cfg.learning.mode == 'localized':
-            path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
+            #path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
             print("\033[93mLocalized training\033[0m")
             # Load only the training and validation split specified by the local training parameters
             # From cache get the dataloader
@@ -262,7 +266,7 @@ def main(cfg: DictConfig) -> None:
         patience = cfg.learning.settings.patience
         cfg.trainer.max_epochs = cfg.learning.settings.local_epochs
         cfg.trainer.patience = 0
-        path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
+        
         num_threads = cfg.learning.settings.num_threads
         print(f"\033[93mLocal Federated training with {n_clients} clients\033[0m")
         
