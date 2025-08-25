@@ -45,12 +45,13 @@ def maybe_intervene(c_pred_probs, c, intervention_index):
         if torch.any(torch.isnan(c)): raise ValueError("Intervention with nan ground truth is not allowed")
         concept_cardinality = c_pred_probs.shape[1]
         index = intervention_index.bool().unsqueeze(1).repeat(1,concept_cardinality)
+        index = index.to(c_pred_probs.device)
         # TODO: take a look here
         # print("c min:", c.min().item(), "c max:", c.max().item())
         # print("Concept cardinality:", concept_cardinality)
         c = c.clamp(min=0)
         # (you have negative values in c)
-        c_one_hot = one_hot(c.long(), concept_cardinality)
+        c_one_hot = one_hot(c.long(), concept_cardinality)   
         c_pred_probs = torch.where(index, c_one_hot, c_pred_probs)
     return c_pred_probs
 
