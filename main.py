@@ -37,8 +37,13 @@ from src.utils import (
     evaluate_privacy,
     initialize_mia_results,
     run_sia_attack,
+    flat_trainable_params_tensor,
 )
 
+from src.dra import (
+    run_dra_attack,
+    summarize_dra_results,
+)
 
 # data loading
 from src.data.dataset_block import get_dataset
@@ -326,18 +331,25 @@ def main(cfg: DictConfig) -> None:
                 # collect weights for aggregation
                 client_params.append((get_parameters(local_engine), n_samples))
 
-            '''
+            
             # ------------------------------------------------------------
             # Privacy Attack: MIA
             # ------------------------------------------------------------
             if cfg.learning.settings.mia:
                 print(f"\033[93mRunning Membership Inference Attack (MIA)\033[0m")
                 
+                set_parameters(local_engine, global_params)
+                global_vec = flat_trainable_params_tensor(local_engine.model, cfg.device)
+
                 for cid in range(n_clients):
                     # normalize client update vector
                     true_in_out = true_in_outs[cid].float().numpy()
-                    client_update = parameters_to_1d(client_params[cid][0]) - parameters_to_1d(global_params)
-                    client_update = torch.tensor(client_update / np.linalg.norm(client_update), device=cfg.device)
+                    # client_update = parameters_to_1d(client_params[cid][0]) - parameters_to_1d(global_params) # I can use this one with project_update_to_trainable in score_whitebox_batch
+                    # client_update = torch.tensor(client_update / np.linalg.norm(client_update), device=cfg.device)
+                    set_parameters(local_engine, client_params[cid][0])
+                    client_vec = flat_trainable_params_tensor(local_engine.model, cfg.device)
+                    client_update = client_vec - global_vec
+                    client_update = client_update / np.linalg.norm(client_update) 
                     
                     # white box attack
                     set_parameters(local_engine, global_params)
@@ -374,7 +386,7 @@ def main(cfg: DictConfig) -> None:
                     cfg=cfg,
                 ))
                 print(f"\033[92mSIA accuracy this round: {sia_accuracies[-1]:.4f}\033[0m")  
-            '''
+            
 
             # ------------------------------------------------------------
             # FedAvg aggregation
@@ -435,7 +447,7 @@ def main(cfg: DictConfig) -> None:
             test_dataloader = test_dataloaders[testid]   
             trainer.test(local_engine, test_dataloader)        
         print(f"\033[90mFinished! Training time: {round((time.time() - t0)/60, 2)} minutes\033[0m")
-
+    
         # Evaluate the model on the client datasets
         #test_losses, sizes = [], []
     #{'val/c/asia': 0.0, 'val/c/bronc': 0.0, 'val/c/either': 0.0, 'val/c/lung': 0.0, 'val/c/smoke': 0.0, 'val/c/tub': 0.0, 'val/c/xray': 0.0, 'val_loss': nan}
@@ -447,7 +459,7 @@ def main(cfg: DictConfig) -> None:
 
         print(f"\033[90mFinished! Training time: {round((time.time() - t0)/60, 2)} minutes\033[0m")
         
-        '''
+        
         # save mia results
         if cfg.learning.settings.mia:
             print(f"Saving MIA results: {os.getcwd() + '/mia_results.json'}")
@@ -472,8 +484,35 @@ def main(cfg: DictConfig) -> None:
             
             # plot SIA results
             plot_and_save_max_sia(out_json="sia_max.json", show=False)
-        '''
         
+
+        # ------------------------------------------------------------
+        # Run DRA attacks
+        # ------------------------------------------------------------ 
+        if cfg.learning.settings.dra:
+            
+            # Perform DRA on each client test set for n_samples
+            for testid in range(len(test_dataloaders)):
+                test_dataloader = test_dataloaders[testid]  
+                dra_results = run_dra_attack(
+                    test_dataloader=test_dataloaders[testid],
+                    device=cfg.device,
+                    methods=("DLG","iDLG"),
+                    max_attacks_per_loader=min(cfg.learning.settings.dra_samples_per_loader, len(test_dataloaders[testid].dataset)),
+                    iters=300,
+                    lr=1.0,
+                    optimizer_name="LBFGS",
+                    weight_decay_on_dummy=1e-6,
+                    early_stop_tol=1e-6,
+                    log_every=50,
+                    cfg=cfg,
+                )
+                # save the dict dra_results 
+                with open(f"dra_results_client_{testid}.json", "w") as fp:
+                    json.dump(dra_results, fp, indent=2)
+                summarize_dra_results(f"dra_results_client_{testid}.json", metrics=("mse", "loss"))
+
+  
     elif cfg.learning.mode == 'federated':
 
         # Add path to cfg

@@ -745,6 +745,32 @@ def score_blackbox_batch(batch, model, cfg):
         return -losses.cpu().numpy()  
 
 
+# def project_update_to_trainable(client_update: torch.Tensor, model: torch.nn.Module, device=None):
+#     """
+#     Slice a full 1D update vector (all params) down to only the segments
+#     corresponding to trainable (requires_grad=True) parameters, in the same
+#     order used by model.parameters(). Re-normalises the result.
+#     """
+#     if device is None:
+#         device = client_update.device
+#     pieces = []
+#     offset = 0
+#     for p in model.parameters():
+#         n = p.numel()
+#         if p.requires_grad:
+#             pieces.append(client_update[offset:offset + n])
+#         offset += n
+#     if not pieces:
+#         raise ValueError("Model has no trainable parameters (requires_grad=True).")
+#     v = torch.cat(pieces).to(device)
+#     v = v / (torch.linalg.norm(v) + 1e-12)
+#     return v
+
+
+def flat_trainable_params_tensor(model, device):
+    parts = [p.detach().to(device).flatten() for p in model.parameters() if p.requires_grad]
+    return torch.cat(parts) if parts else torch.tensor([], device=device)
+
 def score_whitebox_batch(batch, model, client_update, cfg):
     '''
     Computes membership inference attack scores for a batch by 
@@ -752,6 +778,10 @@ def score_whitebox_batch(batch, model, client_update, cfg):
     represented by each client update and the true gradients
     for each sample in the batch.
     '''
+
+    # --- project update to trainable params & normalise ---
+    # client_update = project_update_to_trainable(client_update, model, device=cfg.device)
+
     # Move data
     x = batch['x'].to(cfg.device)
     y = batch['y'].to(cfg.device)
@@ -766,10 +796,13 @@ def score_whitebox_batch(batch, model, client_update, cfg):
     y_hat_loss, c_hat_loss = model.filter_output_for_loss(y_hat, c_hat)
     losses = model.loss(y_hat_loss, y, c_hat_loss, c, reduction='none')  # Use 'none' to get per-sample losses
     
+    params = [p for p in model.parameters() if p.requires_grad] # ADDED line because some parameters may be frozen
+
     for i, loss in enumerate(losses):
         grad_vector = torch.autograd.grad(
             loss, 
-            model.parameters(),
+            # model.parameters(),
+            params,
             retain_graph=True,
             allow_unused=True # Allow unused gradients, otherwise an error is raised while computing the gradients.
         )
@@ -778,7 +811,8 @@ def score_whitebox_batch(batch, model, client_update, cfg):
         # we replace them with zero vectors.
         grad_vector = [
             g if g is not None else torch.zeros_like(p)
-            for g, p in zip(grad_vector, model.parameters())
+            # for g, p in zip(grad_vector, model.parameters())
+            for g, p in zip(grad_vector, params)
         ]
         
         # Flatten and concatenate gradients

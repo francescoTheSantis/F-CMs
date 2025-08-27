@@ -20,3 +20,6 @@ settings:
 
   sia: True
   sia_samples_per_client: 30
+
+  dra: True
+  dra_samples_per_loader: 60

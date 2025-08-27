@@ -15,7 +15,8 @@ class BlackBox(BaseModel):
                  c_info={},
                  y_info={},
                  name: str = 'BlackBox',
-                 c_name_index=None):
+                 c_name_index=None,
+                 concept_loss_weight=None):
         
         super(BlackBox, self).__init__(
             input_size=input_size,
