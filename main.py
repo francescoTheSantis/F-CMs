@@ -282,7 +282,9 @@ def main(cfg: DictConfig) -> None:
         # read client data
         train_dataloaders, val_dataloaders, test_dataloaders = load_dataloaders(cfg, path, n_clients)
         train_dataloaders, canary_loaders, true_in_outs, sia_loader = dataprocess_auditing(train_dataloaders, cfg) # NOTE: for the moment we are reducing the training data size
-
+        print("Number of samples per client:")
+        for i in range(len(train_dataloaders)):
+            print(f"Client {i}: {len(train_dataloaders[i].dataset)} samples")
 
         # try with and without these two lines
         engine = instantiate(cfg.engine)
@@ -493,19 +495,16 @@ def main(cfg: DictConfig) -> None:
             
             # Perform DRA on each client test set for n_samples
             for testid in range(len(test_dataloaders)):
-                test_dataloader = test_dataloaders[testid]  
                 dra_results = run_dra_attack(
                     test_dataloader=test_dataloaders[testid],
+                    model=instantiate(cfg.engine).model,
                     device=cfg.device,
                     methods=("DLG","iDLG"),
                     max_attacks_per_loader=min(cfg.learning.settings.dra_samples_per_loader, len(test_dataloaders[testid].dataset)),
                     iters=300,
                     lr=1.0,
-                    optimizer_name="LBFGS",
-                    weight_decay_on_dummy=1e-6,
                     early_stop_tol=1e-6,
-                    log_every=50,
-                    cfg=cfg,
+                    log_every=2000,
                 )
                 # save the dict dra_results 
                 with open(f"dra_results_client_{testid}.json", "w") as fp:

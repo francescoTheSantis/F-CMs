@@ -10,10 +10,10 @@ hydra:
     params:
       seed: 1
       # possible datsets are: asia, sachs, alarm, hailfinder, insurance
-      dataset: hailfinder
+      dataset: asia
       # possible models are:
       # blackbox, blackbox_multi, cbm_linear, cbm_mlp, cem, cgm, c2bm
-      model: blackbox, blackbox_multi, cbm_linear, c2bm
+      model: blackbox, cbm_linear
       learning: local_federated
       
 model:

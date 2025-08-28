@@ -16,8 +16,8 @@ plt.style.use(['science', 'ieee', 'no-latex'])
 # List the paths containing the results
 paths = [
     "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2025-08-26/18-31-14",
-    "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2025-08-26/22-32-35",
-
+    # "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2025-08-26/22-32-35",
+    # "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2025-08-28/11-02-38"
 ]
 
 # maximum number of clients
