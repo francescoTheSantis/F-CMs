@@ -9,13 +9,20 @@ from matplotlib.ticker import FuncFormatter
 import pickle
 import math
 from src.plot_utils import *
+import argparse
+
+parser = argparse.ArgumentParser(description="Process some integers.")
+parser.add_argument("--mia_metric", type=str, default="max", choices=["max", "mean"],
+                    help="Metric to use for MIA results (default: max)")
+args = parser.parse_args()
 
 warnings.filterwarnings("ignore")
 plt.style.use(['science', 'ieee', 'no-latex'])
 
 # List the paths containing the results
 paths = [
-    "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2025-08-26/18-31-14",
+    "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2025-08-28/16-57-44" #2000 samples
+    # "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2025-08-28/16-05-53", # 1000 samples
     # "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2025-08-26/22-32-35",
     # "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2025-08-28/11-02-38"
 ]
@@ -214,10 +221,14 @@ for exp in exps_path:
                 """Return a single accuracy for `key` ('whitebox'|'blackbox'), preferring worst_case.max_mia_accuracy then mean_across_clients.max_mia_accuracy."""
                 try:
                     if key in mia_json:
-                        if 'worst_case' in mia_json[key] and 'max_mia_accuracy' in mia_json[key]['worst_case']:
-                            return float(mia_json[key]['worst_case']['max_mia_accuracy'])
-                        if 'mean_across_clients' in mia_json[key] and 'max_mia_accuracy' in mia_json[key]['mean_across_clients']:
-                            return float(mia_json[key]['mean_across_clients']['max_mia_accuracy'])
+                        if args.mia_metric == "max":
+                            if 'worst_case' in mia_json[key] and 'max_mia_accuracy' in mia_json[key]['worst_case']:
+                                return float(mia_json[key]['worst_case']['max_mia_accuracy'])
+                        elif args.mia_metric == "mean":
+                            if 'mean_across_clients' in mia_json[key] and 'max_mia_accuracy' in mia_json[key]['mean_across_clients']:
+                                return float(mia_json[key]['mean_across_clients']['max_mia_accuracy'])
+                        else:
+                            raise ValueError(f"Unknown MIA metric: {args.mia_metric}")
                 except Exception:
                     return np.nan
                 return np.nan

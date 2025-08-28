@@ -282,9 +282,9 @@ def main(cfg: DictConfig) -> None:
         # read client data
         train_dataloaders, val_dataloaders, test_dataloaders = load_dataloaders(cfg, path, n_clients)
         train_dataloaders, canary_loaders, true_in_outs, sia_loader = dataprocess_auditing(train_dataloaders, cfg) # NOTE: for the moment we are reducing the training data size
-        print("Number of samples per client:")
+        print("\033[94mNumber of samples per client:\033[0m")
         for i in range(len(train_dataloaders)):
-            print(f"Client {i}: {len(train_dataloaders[i].dataset)} samples")
+            print(f"\033[94mClient {i}: {len(train_dataloaders[i].dataset)} samples\033[0m")
 
         # try with and without these two lines
         engine = instantiate(cfg.engine)

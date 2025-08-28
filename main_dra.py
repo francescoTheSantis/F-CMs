@@ -150,7 +150,7 @@ def main(cfg: DictConfig) -> None:
         engine = instantiate(cfg.engine)
         engine.model.to(cfg.device)
                 
-        # freeze if required
+        # freeze if required (DIFFERENCE: with this on, less leakage for our models for DRA)
         # maybe_freeze_parameters(
         #     c=train_dataloaders[0].dataset.c,
         #     model=local_engine.model,
