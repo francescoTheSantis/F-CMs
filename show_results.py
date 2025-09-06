@@ -21,10 +21,19 @@ plt.style.use(['science', 'ieee', 'no-latex'])
 
 # List the paths containing the results
 paths = [
-    "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2025-08-28/16-57-44" #2000 samples
-    # "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2025-08-28/16-05-53", # 1000 samples
+    "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2025-09-05/22-13-56" # no concept infor for mia e sia
+    # "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2025-09-05/17-16-48" # same as the next but with no concept info for mia
+    # "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2025-09-05/15-00-18" # same as the next but with correct shadow results for cmb, multi_output is enabled
+    # "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2025-09-05/10-02-00" # same as the next but with whitebox score in shadow attack
+    # "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2025-09-04/15-42-45" # good results asia 3 folds, shared with others
+    # "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2025-09-03/22-52-33" # good results asia 1 fold
+    # "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2025-08-29/16-35-07" # 2000 con 20 epochs
+    # "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2025-08-29/14-48-26" # 6000
+    # "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2025-08-29/11-23-47_asia1000_samples" #1000 samples asia
+    # "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2025-08-29/13-33-07" #4000 samples asia
     # "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2025-08-26/22-32-35",
     # "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2025-08-28/11-02-38"
+    # "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2025-08-26/18-31-14_good_asia"
 ]
 
 # maximum number of clients
@@ -194,6 +203,7 @@ for exp in exps_path:
             d['sia_acc'] = np.nan
             d['mia_whitebox_acc'] = np.nan
             d['mia_blackbox_acc'] = np.nan
+            d['mia_shadow_acc'] = np.nan
             d['dra_dlg_mse_mean'] = np.nan
             d['dra_dlg_mse_ci'] = np.nan
             d['dra_idlg_mse_mean'] = np.nan
@@ -250,6 +260,7 @@ for exp in exps_path:
             if isinstance(mia_json, dict):
                 d['mia_whitebox_acc'] = _get_mia_acc(mia_json, 'whitebox')
                 d['mia_blackbox_acc'] = _get_mia_acc(mia_json, 'blackbox')
+                d['mia_shadow_acc'] = _get_mia_acc(mia_json, 'blackbox_shadow')
 
             # --- DRA (MSE) recomputed on COMMON kept indices across experiments ---
             raw_dra_path = os.path.join(exp, 'dra_results_client_0.json')
@@ -581,7 +592,7 @@ for learning in performance['learning'].unique():
     privacy_cols = [
         'model', 'dataset', 'learning',
         'sia_acc',
-        'mia_whitebox_acc', 'mia_blackbox_acc',
+        'mia_whitebox_acc', 'mia_blackbox_acc', 'mia_shadow_acc',
         'dra_dlg_mse_mean',
         'dra_idlg_mse_mean',
     ]
@@ -606,12 +617,13 @@ for learning in performance['learning'].unique():
             ('SIA (acc)', 'sia_acc', 'sia_acc'),
             ('MIA WB (acc)', 'mia_whitebox_acc', 'mia_whitebox_acc'),
             ('MIA BB (acc)', 'mia_blackbox_acc', 'mia_blackbox_acc'),
+            ('MIA Shadow (acc)', 'mia_shadow_acc', 'mia_shadow_acc'),
             ('DRA DLG (MSE)', 'dra_dlg_mse_mean', 'dra_dlg_mse_mean'),
             ('DRA iDLG (MSE)', 'dra_idlg_mse_mean', 'dra_idlg_mse_mean'),
         ]
 
         # Which metrics are accuracies
-        acc_metrics = {'sia_acc', 'mia_whitebox_acc', 'mia_blackbox_acc'}
+        acc_metrics = {'sia_acc', 'mia_whitebox_acc', 'mia_blackbox_acc', 'mia_shadow_acc'}
 
         # Helper to format cells as mean ± std
         def _fmt_cell(mean_val, std_val, is_accuracy=False):

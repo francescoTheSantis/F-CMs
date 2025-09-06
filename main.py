@@ -1,5 +1,7 @@
 import numpy as np
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 import os
 import warnings
 import hydra
@@ -11,6 +13,8 @@ from src.trainer import Trainer
 from src.plots_mia import plot_and_save_max_mia, plot_and_save_max_sia
 import subprocess
 import json
+import matplotlib.pyplot as plt
+from typing import Dict, List, Any
 
 from hydra.utils import instantiate, call
 from omegaconf import DictConfig, open_dict, OmegaConf
@@ -28,9 +32,7 @@ from src.utils import (
     aggregate, 
     get_parameters, 
     set_parameters, 
-    remove_checkpoints, 
     load_dataloaders,
-    parameters_to_1d,
     score_blackbox_batch,
     score_whitebox_batch,
     dataprocess_auditing,
@@ -38,6 +40,10 @@ from src.utils import (
     initialize_mia_results,
     run_sia_attack,
     flat_trainable_params_tensor,
+    plot_training_metrics,
+    compute_validation_loss,
+    shadow_mlp_scores_loader,
+    score_blackbox_loss_loader,
 )
 
 from src.dra import (
@@ -73,7 +79,7 @@ import shutil
 
 # Suppress specific warning
 warnings.filterwarnings("ignore", message="When grouping with a length-1 list-like")
-    
+   
 
 @hydra.main(config_path="conf", config_name="my_sweep", version_base="1.3")
 def main(cfg: DictConfig) -> None:
@@ -271,6 +277,7 @@ def main(cfg: DictConfig) -> None:
         patience = cfg.learning.settings.patience
         cfg.trainer.max_epochs = cfg.learning.settings.local_epochs
         cfg.trainer.patience = 0
+        use_concepts = True # whether to use concept information in the MIA attacks
         
         num_threads = cfg.learning.settings.num_threads
         print(f"\033[93mLocal Federated training with {n_clients} clients\033[0m")
@@ -295,7 +302,9 @@ def main(cfg: DictConfig) -> None:
         best_round = 0
         no_improvement_count = 0
         sia_accuracies = []
-        history = {"round": [], "loss_val_avg": []}
+        history = {"round": [], "loss_val_avg": [], "loss_val_client": {}}
+        for cid in range(n_clients):
+            history["loss_val_client"][cid] = []
         mia_accuracies, mia_epsilons = initialize_mia_results(n_clients)
         global_params = get_parameters(instantiate(cfg.engine))
         for rnd in range(1, n_rounds + 1):
@@ -329,7 +338,12 @@ def main(cfg: DictConfig) -> None:
                 trainer.logger.log_hyperparams(parse_hyperparams(cfg)) 
                 trainer.fit(local_engine, train_dataloaders[cid])
                 n_samples = len(train_dataloaders[cid].dataset)
-
+                    
+                # local validation
+                if val_dataloaders[cid] is not None:
+                    avg_loss = compute_validation_loss(local_engine.model, val_dataloaders[cid], cfg)
+                    history["loss_val_client"][cid].append(avg_loss)
+    
                 # collect weights for aggregation
                 client_params.append((get_parameters(local_engine), n_samples))
 
@@ -346,34 +360,65 @@ def main(cfg: DictConfig) -> None:
                 for cid in range(n_clients):
                     # normalize client update vector
                     true_in_out = true_in_outs[cid].float().numpy()
-                    # client_update = parameters_to_1d(client_params[cid][0]) - parameters_to_1d(global_params) # I can use this one with project_update_to_trainable in score_whitebox_batch
-                    # client_update = torch.tensor(client_update / np.linalg.norm(client_update), device=cfg.device)
                     set_parameters(local_engine, client_params[cid][0])
                     client_vec = flat_trainable_params_tensor(local_engine.model, cfg.device)
                     client_update = client_vec - global_vec
                     client_update = client_update / np.linalg.norm(client_update) 
-                    
-                    # white box attack
+
+                    # white-box attack (accumulate over the whole canary loader)
                     set_parameters(local_engine, global_params)
                     client_model = local_engine.model.to(cfg.device)
+                    scores_whitebox_list = []
                     for batch in canary_loaders[cid]:
-                        scores_whitebox = score_whitebox_batch(batch, client_model, client_update, cfg)
+                        scores_whitebox_list.append(score_whitebox_batch(batch, client_model, client_update, cfg, use_concepts=use_concepts))
+                    scores_whitebox = np.concatenate(scores_whitebox_list, axis=0)
                     set_parameters(local_engine, client_params[cid][0])
 
-                    # black box attack
+                    # black-box baseline (negative loss) accumulated over loader
                     client_model = local_engine.model.to(cfg.device)
-                    for batch in canary_loaders[cid]:
-                        scores_blackbox = score_blackbox_batch(batch, client_model, cfg)
+                    scores_blackbox_loss = score_blackbox_loss_loader(canary_loaders[cid], client_model, cfg, use_concepts=use_concepts)
 
-                    # convert scores to MIA accuracy and epsilon privacy budget
+                    # black-box concept-entropy (uses ONLY concepts if available, else falls back to label entropy)
+                    # scores_blackbox_concept = score_blackbox_concept_entropy_loader(canary_loaders[cid], client_model, cfg)
+
+                    # black-box shadow MLP (features = label confidences/margins/entropy/-loss + concept stats if available)
+                    shadow_epochs = getattr(getattr(cfg, "learning").settings, "mia_shadow_epochs", 100)
+                    scores_blackbox_shadow = shadow_mlp_scores_loader(
+                        canary_loaders[cid],
+                        client_model,
+                        cfg,
+                        y_mem_labels=true_in_out,
+                        use_concepts=use_concepts,
+                        epochs=shadow_epochs,
+                        batch_size=64,
+                        lr=1e-4,
+                        k_folds=10,
+                        scores_whitebox_list=None,  # no need to use them.. no effect observed in practice on asia
+                    )
+
+                    # evaluate white-box
                     accuracy_mia, privacy_estimate = evaluate_privacy(scores_whitebox, true_in_out, cfg)
                     print(f"Client {cid} - MIA accuracy (whitebox): {accuracy_mia:.4f}, epsilon: {privacy_estimate:.4f}")
-                    mia_accuracies["whitebox"][cid].append(accuracy_mia)
-                    mia_epsilons["whitebox"][cid].append(privacy_estimate)
-                    accuracy_mia, privacy_estimate = evaluate_privacy(scores_blackbox, true_in_out, cfg)
-                    print(f"Client {cid} - MIA accuracy (blackbox): {accuracy_mia:.4f}, epsilon: {privacy_estimate:.4f}")
-                    mia_accuracies["blackbox"][cid].append(accuracy_mia)
-                    mia_epsilons["blackbox"][cid].append(privacy_estimate)
+                    mia_accuracies['whitebox'][cid].append(accuracy_mia)
+                    mia_epsilons['whitebox'][cid].append(privacy_estimate)
+
+                    # evaluate black-box baseline (loss)
+                    accuracy_mia, privacy_estimate = evaluate_privacy(scores_blackbox_loss, true_in_out, cfg)
+                    print(f"Client {cid} - MIA accuracy (blackbox-loss): {accuracy_mia:.4f}, epsilon: {privacy_estimate:.4f}")
+                    mia_accuracies['blackbox'][cid].append(accuracy_mia)
+                    mia_epsilons['blackbox'][cid].append(privacy_estimate)
+
+                    # evaluate black-box concept-entropy
+                    # accuracy_mia, privacy_estimate = evaluate_privacy(scores_blackbox_concept, true_in_out, cfg)
+                    # print(f"Client {cid} - MIA accuracy (blackbox-concept): {accuracy_mia:.4f}, epsilon: {privacy_estimate:.4f}")
+                    # mia_accuracies['blackbox_concept'][cid].append(accuracy_mia)
+                    # mia_epsilons['blackbox_concept'][cid].append(privacy_estimate)
+
+                    # evaluate black-box shadow MLP
+                    accuracy_mia, privacy_estimate = evaluate_privacy(scores_blackbox_shadow, true_in_out, cfg)
+                    print(f"Client {cid} - MIA accuracy (blackbox-shadow): {accuracy_mia:.4f}, epsilon: {privacy_estimate:.4f}")
+                    mia_accuracies['blackbox_shadow'][cid].append(accuracy_mia)
+                    mia_epsilons['blackbox_shadow'][cid].append(privacy_estimate)
             
             # ------------------------------------------------------------
             # Privacy Attack: SIA
@@ -386,6 +431,7 @@ def main(cfg: DictConfig) -> None:
                     sia_loader=sia_loader,          # returned by dataprocess_auditing
                     client_params=client_params,    # local models from this round
                     cfg=cfg,
+                    use_concepts=use_concepts,
                 ))
                 print(f"\033[92mSIA accuracy this round: {sia_accuracies[-1]:.4f}\033[0m")  
             
@@ -433,6 +479,48 @@ def main(cfg: DictConfig) -> None:
                 print(f"\033[91mEarly stopping triggered at round {rnd}.\033[0m")
                 break
 
+
+        # ------------------------------------------------------------
+        # Trim logged metrics up to the best round (drop overfitting tail)
+        # ------------------------------------------------------------
+        try:
+            # Find index of best_round within history["round"], fallback to argmin
+            if len(history["round"]) == 0:
+                keep_upto = 0
+            else:
+                if best_round in history["round"]:
+                    keep_upto = history["round"].index(best_round)
+                else:
+                    keep_upto = int(np.argmin(history["loss_val_avg"]))
+            n_keep = keep_upto + 1
+
+            # Trim history
+            history["round"] = history["round"][:n_keep]
+            history["loss_val_avg"] = history["loss_val_avg"][:n_keep]
+            for cid in range(n_clients):
+                if cid in history["loss_val_client"]:
+                    history["loss_val_client"][cid] = history["loss_val_client"][cid][:n_keep]
+
+            # Trim SIA (per-round)
+            if isinstance(sia_accuracies, list) and len(sia_accuracies) > 0:
+                sia_accuracies[:] = sia_accuracies[:n_keep]
+
+            # Trim MIA (per-round, per-client, per-variant)
+            if isinstance(mia_accuracies, dict):
+                for variant, per_client in mia_accuracies.items():
+                    for cid in range(len(per_client)):
+                        per_client[cid] = per_client[cid][:n_keep]
+            if isinstance(mia_epsilons, dict):
+                for variant, per_client in mia_epsilons.items():
+                    for cid in range(len(per_client)):
+                        per_client[cid] = per_client[cid][:n_keep]
+
+            print(f"\033[96mTrimmed metrics to best round {best_round} (keeping {n_keep} rounds, removed {max(0, len(history['loss_val_avg']) - n_keep)}).\033[0m")
+        except Exception as e:
+            print(f"\033[91m[WARN] Failed trimming metrics: {e}\033[0m")
+
+
+        plot_training_metrics(history)
         # ------------------------------------------------------------
         # Final evaluation on the test set
         # ------------------------------------------------------------

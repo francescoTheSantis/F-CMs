@@ -25,7 +25,44 @@ class GradientMonitor_afterB(pl.Callback):
         for p in pl_module.parameters():
             if p.grad is not None:
                 norms.append(p.grad.norm().item())
-        print(f"Gradient Norms after backward: {norms}")       
+        # print(f"Gradient Norms after backward: {norms}")       
+
+
+# ------------------------ EpochLossPrinter callback ------------------------
+class EpochLossPrinter(pl.Callback):
+    """Prints train/val loss at the end of each training epoch.
+    Relies on metrics logged in the LightningModule via self.log(...).
+    It tries common keys like 'train_loss', 'train_loss_epoch', 'val_loss', 'val_loss_epoch'.
+    """
+    def on_train_epoch_end(self, trainer, pl_module):
+        metrics = trainer.callback_metrics
+
+        def _to_float(x):
+            if x is None:
+                return None
+            try:
+                import torch
+                if isinstance(x, torch.Tensor):
+                    return x.detach().cpu().item()
+            except Exception:
+                pass
+            try:
+                return float(x)
+            except Exception:
+                return None
+
+        train_loss = metrics.get("train_loss_epoch", metrics.get("train_loss", None))
+        val_loss = metrics.get("val_loss", metrics.get("val_loss_epoch", None))
+
+        train_loss_f = _to_float(train_loss)
+        val_loss_f = _to_float(val_loss)
+
+        train_str = f"{train_loss_f:.6f}" if isinstance(train_loss_f, (int, float)) else "N/A"
+        val_str = f"{val_loss_f:.6f}" if isinstance(val_loss_f, (int, float)) else "N/A"
+
+        epoch = getattr(trainer, "current_epoch", None)
+        epoch_str = str(epoch) if epoch is not None else "?"
+        print(f"\n[Epoch {epoch_str}] train_loss={train_str} | val_loss={val_str}")
         
 def _get_logger(cfg: DictConfig):
     name = f"seed{cfg.get('seed', '')}.{int(time())}"
@@ -95,6 +132,7 @@ class Trainer(_Trainer_):
                 )
             )
         callbacks.append(GradientMonitor_afterB())
+        callbacks.append(EpochLossPrinter())
 
         if torch.cuda.is_available():
             accelerator = "gpu"

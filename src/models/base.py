@@ -278,7 +278,8 @@ class BaseModel(nn.Module, ABC):
              c_hat_dict: Dict[str, torch.Tensor],
              c: torch.Tensor,
              reduction: str = "mean",
-             ignore_index: int = -1) -> torch.Tensor:
+             ignore_index: int = -1,
+             multi_output: bool = False) -> torch.Tensor:
         """
         Compute the loss function for Concept-based models.
         
@@ -308,4 +309,7 @@ class BaseModel(nn.Module, ABC):
         else:
             total_loss = self._mix_losses(task_loss, concept_loss, reduction)
 
-        return total_loss
+        if multi_output:
+            return task_loss, concept_loss, total_loss
+        else:   
+            return total_loss

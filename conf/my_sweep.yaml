@@ -10,10 +10,10 @@ hydra:
     params:
       seed: 1
       # possible datsets are: asia, sachs, alarm, hailfinder, insurance
-      dataset: asia, sachs, alarm
+      dataset: asia
       # possible models are:
       # blackbox, blackbox_multi, cbm_linear, cbm_mlp, cem, cgm, c2bm
-      model: blackbox, blackbox_multi, cbm_linear, cbm_mlp, cem, cgm, c2bm
+      model: blackbox
       learning: local_federated
       
 model:
@@ -21,10 +21,10 @@ model:
   concept_loss_weight: 0.8
 
 dataset:
-  load_embeddings: false
+  load_embeddings: true
   load_graph: false
   load_true_graph: true
-  batch_size: 512
+  batch_size: 16 # 512
   autoencoder:
    noise: 0.5  # for bndatasets only
 
@@ -38,13 +38,13 @@ engine:
   intervention_prob: 0.8
   test_interv_noise: 0.8   # for bndatasets only
   optim_kwargs:
-    lr: 0.00075
+    lr: 0.001 # 0.00075
 
 trainer:
   # logger: wandb
   devices: [0]
-  max_epochs: 300 #200
-  patience: 40 #40
+  max_epochs: 100 #200
+  patience: 1 #40
 
 rag:
   verbose: false
