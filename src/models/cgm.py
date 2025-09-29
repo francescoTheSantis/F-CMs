@@ -73,57 +73,74 @@ class CGM(BaseModel):
         graph_labels = sorted(self.graph_labels)
         assert c2bm_graph == graph_labels
 
-        # Concept encoders, one for each concept
-        self.concept_encoders = nn.ModuleDict()
-        for name in self.combo_info['names']:
-            # concept_idx = self.combo_info['names'].index(name)
-            # concept_idx = self.c_name_index[name]
-            self.concept_encoders[name] = ConceptBlock(
-                input_size=self.hidden_size,
-                hidden_size=self.concept_hidden_size,
-                n_layers=self.n_layers_concept_encoder,
-                activation=self.activation,
-                c_cardinality=[c for n, c in zip(self.combo_info['names'], self.combo_info['cardinality']) if n==name][0] #self.combo_info['cardinality'][concept_idx]
-            )
-
+        # indentify levels and roots
         # get levels
         task_index = self.combo_info['names'].index(self.y_names[0])
-        graph_levels = get_graph_levels(self.graph, task_index)
-        self.roots = graph_levels[0]
+        self.graph_levels = get_graph_levels(self.graph, task_index)
+        self.roots = self.graph_levels[0]
         self.roots_info = {'names': [name for i, name in enumerate(self.combo_info['names']) 
                                      if i in self.roots], 
                            'cardinality': [card for i, card in enumerate(self.combo_info['cardinality']) 
                                            if i in self.roots]}
         if self.y_names[0] in self.roots_info['names']:
             raise ValueError('The target variable cannot be a root concept')
+
+        # create the dictionary of concept encoders
+        self.concept_encoders = nn.ModuleDict()
+        for name in self.combo_info['names']:
+            if name in self.roots_info['names']:
+                self.concept_encoders[name] = ConceptBlock(
+                    input_size=self.hidden_size,
+                    hidden_size=self.concept_hidden_size,
+                    n_layers=self.n_layers_concept_encoder,
+                    activation=self.activation,
+                    c_cardinality=[c for n, c in zip(self.combo_info['names'], self.combo_info['cardinality']) if n==name][0] #self.combo_info['cardinality'][concept_idx]
+                )   
+            else:
+                node_idx = self.combo_info['names'].index(name)
+                parents = get_parents(self.graph, node_idx).tolist()
+                self.concept_encoders[name] = ConceptBlock(
+                    input_size=len(parents) * self.concept_hidden_size,
+                    hidden_size=self.concept_hidden_size,
+                    n_layers=self.n_layers_concept_encoder,
+                    activation=self.activation,
+                    c_cardinality=[c for n, c in zip(self.combo_info['names'], self.combo_info['cardinality']) if n==name][0] #self.combo_info['cardinality'][concept_idx]
+                )               
+
+
+
+        # # Concept encoders, one for each concept
+        # self.concept_encoders = nn.ModuleDict()
+        # for name in self.combo_info['names']:
+        #     # concept_idx = self.combo_info['names'].index(name)
+        #     # concept_idx = self.c_name_index[name]
+        #     self.concept_encoders[name] = ConceptBlock(
+        #         input_size=self.hidden_size,
+        #         hidden_size=self.concept_hidden_size,
+        #         n_layers=self.n_layers_concept_encoder,
+        #         activation=self.activation,
+        #         c_cardinality=[c for n, c in zip(self.combo_info['names'], self.combo_info['cardinality']) if n==name][0] #self.combo_info['cardinality'][concept_idx]
+        #     )
+
         
-        # get list of propagators
-        self.propagators = nn.ModuleDict()
-        for i in range(1, len(graph_levels)):
-            level = graph_levels[i]
-            self.propagators[str(i)] = nn.ModuleDict()
-            for node in level:
-                node_name = self.combo_info['names'][node]
-                parents = get_parents(self.graph, node).tolist()
-                node_cardinality = self.combo_info['cardinality'][node]
-                parents_cardinality = [self.combo_info['cardinality'][p] for p in parents]
+        # # get list of propagators
+        # self.propagators = nn.ModuleDict()
+        # for i in range(1, len(graph_levels)):
+        #     level = graph_levels[i]
+        #     self.propagators[str(i)] = nn.ModuleDict()
+        #     for node in level:
+        #         node_name = self.combo_info['names'][node]
+        #         parents = get_parents(self.graph, node).tolist()
+        #         node_cardinality = self.combo_info['cardinality'][node]
+        #         parents_cardinality = [self.combo_info['cardinality'][p] for p in parents]
                 
-                if self.prop_type == 'embeddings':
-                    self.propagators[str(i)][node_name] = MLP(
-                        input_size=node_cardinality*self.concept_hidden_size,
-                        hidden_size=self.concept_hidden_size,
-                        output_size=node_cardinality,
-                        n_layers=self.n_layers_propagation,
-                        activation=self.activation
-                    )
-                elif self.prop_type == 'equations':
-                    self.propagators[str(i)][node_name] = MLP(
-                        input_size=node_cardinality*self.concept_hidden_size,
-                        hidden_size=self.concept_hidden_size,
-                        output_size=sum(parents_cardinality)*node_cardinality,
-                        n_layers=self.n_layers_propagation,
-                        activation=self.activation
-                    )   
+        #         self.propagators[str(i)][node_name] = MLP(
+        #             input_size=node_cardinality*self.concept_hidden_size,
+        #             hidden_size=self.concept_hidden_size,
+        #             output_size=node_cardinality,
+        #             n_layers=self.n_layers_propagation,
+        #             activation=self.activation
+        #         )
 
     def forward(self, x, c=None, intervention_index=None):
         """
@@ -143,72 +160,39 @@ class CGM(BaseModel):
         # Update intervention_index according to the annotation availability
         intervention_index = self._concept_availability_checker(c, intervention_index)
 
-        c_embs, c_probs, c_values_emb = {}, {}, {}
+        c_embs, c_probs = {}, {}
 
-        for name in self.combo_info['names']:
+        for level in self.graph_levels: # skip the task level
+            for i in level:
+                name = self.combo_info['names'][i]
 
-            # The concept annotation tensor c has shape (B, #total_concepts).
-            # For this reason we need the self.c_name_index to access the position related
-            # to the i-th concept
-            i = self.c_name_index[name]
-            
-            # create embeddings and probabilities for each root concept
-            # this assumes the task is last in the name list
-            if name in self.roots_info['names']:
-                c_input = c[:,i] if c is not None else None
-                intervention_input = intervention_index[:,i] if intervention_index is not None else None
+                if name in self.roots_info['names']:
+                    concept_encoder_input = x_encoded
+                    c_int = c[:,i] if c is not None else None
+                    int_idx = intervention_index[:,i] if intervention_index is not None else None
+                elif name in self.c_names:
+                    p_indices = get_parents(self.graph, i).tolist()
+                    p_names = [self.combo_info['names'][p] for p in p_indices]
+                    concept_encoder_input = torch.cat([c_embs[p_name] for p_name in p_names], dim=1)
+                    c_int = c[:,i] if c is not None else None
+                    int_idx = intervention_index[:,i] if intervention_index is not None else None
+                else: # it's the task variable
+                    p_indices = get_parents(self.graph, i).tolist()
+                    p_names = [self.combo_info['names'][p] for p in p_indices]
+                    concept_encoder_input = torch.cat([c_embs[p_name] for p_name in p_names], dim=1)
+                    c_int = None
+                    int_idx = None
+
                 c_embs[name], c_probs[name] = self.concept_encoders[name](
-                    x_encoded, 
-                    c_input, 
-                    intervention_input,
+                    concept_encoder_input, 
+                    c_int, 
+                    int_idx,
                     to_return=['embs', 'probs']
                 )
-            elif name in self.c_names:
-                # create latent for each non-root concept    
-                # remember not to intervene on the task
-                c_input = c[:,i] if name in self.c_names and c is not None else None
-                intervention_input = intervention_index[:,i] if name in self.c_names and intervention_index is not None else None
-                c_values_emb[name] = self.concept_encoders[name](
-                    x_encoded, 
-                    c_input, 
-                    intervention_input,
-                    to_return=['values_embs']
-                )
-            else: # it's the task variable
-                c_values_emb[name] = self.concept_encoders[name](
-                    x_encoded, 
-                    None, 
-                    None,
-                    to_return=['values_embs']
-                )
 
-        # propagate the information through the causal graph
-        for _, level in self.propagators.items():
-            # update all nodes in the level
-            for c_name, propagator in level.items():
-                # Concept's index in the dictionary of the ID concepts of the client.
-                c_index = self.combo_info['names'].index(c_name)
-                p_indices = get_parents(self.graph, c_index).tolist()
-                p_names = [self.combo_info['names'][p] for p in p_indices]
-                
-                c_cardinality = self.combo_info['cardinality'][c_index]
-                p_cardinality = [self.combo_info['cardinality'][p] for p in p_indices]
-
-                # Concept's index in the dictionary of ALL concepts.
-                c_index = self.c_name_index[c_name]
-
-                # propagate embeddings
-                c_prop_parents = torch.cat([c_probs[p_name] for p_name in p_names], dim=1).unsqueeze(-1)
-                if self.prop_type == 'embeddings':
-                    logits = propagator(c_values_emb[c_name]) # shape: (batch_size, c_cardinality)
-                    c_probs[c_name] = torch.softmax(logits, dim=1)
-                elif self.prop_type == 'equations':
-                    weights = propagator(c_values_emb[c_name])
-                    weights = weights.reshape(-1, c_cardinality, sum(p_cardinality))
-                    c_probs[c_name] = torch.softmax(torch.matmul(weights, c_prop_parents).squeeze(-1), dim=1)
-
-                if c_name not in self.y_names and c is not None and intervention_index is not None:
-                    c_probs[c_name] = maybe_intervene(c_probs[c_name], c[:,c_index], intervention_index[:,c_index]) 
+                # Update the probabilities if there is an intervention
+                if name not in self.y_names and c is not None and intervention_index is not None:
+                    c_probs[name] = maybe_intervene(c_probs[name], c[:,i], intervention_index[:,i]) 
 
         # Decode, get task logits
         y_hat_probs = c_probs[self.y_names[0]]

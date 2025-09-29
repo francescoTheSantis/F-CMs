@@ -42,8 +42,8 @@ dependencies:
     - langchain_core
     - langchain_huggingface
     - accelerate>=0.26.0
-    - bnlearn==0.10.2
-    - pgmpy==0.1.18
+    - bnlearn==0.12.0
+    - pgmpy==0.1.25
     - nltk
     - mistralai
     - openai

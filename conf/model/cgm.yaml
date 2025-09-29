@@ -7,3 +7,4 @@ n_layers_propagation: 1
 activation: leaky_relu
 concept_loss_weight: 0.5
 cat_latent: false
+name: 'cgm'
