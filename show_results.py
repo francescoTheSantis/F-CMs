@@ -1,14 +1,20 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
-import scienceplots
 import warnings
 import os
 import yaml
+import json
 from matplotlib.ticker import FuncFormatter
 import pickle
 import math
 from src.plot_utils import *
+import argparse
+
+parser = argparse.ArgumentParser(description="Process some integers.")
+parser.add_argument("--mia_metric", type=str, default="max", choices=["max", "mean"],
+                    help="Metric to use for MIA results (default: max)")
+args = parser.parse_args()
 
 warnings.filterwarnings("ignore")
 plt.style.use(['science', 'ieee', 'no-latex'])
@@ -33,6 +39,118 @@ lmr_paths = []
 for path in paths:
     exps = os.listdir(path)
     exps_path += [os.path.join(path, exp) for exp in exps if 'multirun' not in exp]
+
+# ---------- DRA: compute common kept indices across experiments ----------
+def _is_finite_number(x):
+    try:
+        return isinstance(x, (int, float)) and math.isfinite(float(x))
+    except Exception:
+        return False
+
+def _derive_excluded_from_raw(raw_json_path, methods=('DLG', 'iDLG'), metrics=('mse','loss')):
+    """
+    Fallback: compute excluded indices by scanning the raw per-sample results,
+    excluding any sample with non-finite metric in ANY requested method/metric.
+    Returns (excluded_indices_set, n_total_aligned)
+    """
+    if not os.path.exists(raw_json_path):
+        return set(), 0
+    try:
+        with open(raw_json_path, 'r') as f:
+            data = json.load(f)
+        # ensure lists for methods; skip missing methods
+        method_lists = [data[m] for m in methods if m in data and isinstance(data[m], list)]
+        if not method_lists:
+            return set(), 0
+        n_total = min(len(lst) for lst in method_lists)
+        excluded = set()
+        for i in range(n_total):
+            ok = True
+            for m in methods:
+                lst = data.get(m, [])
+                if i >= len(lst) or not isinstance(lst[i], dict):
+                    ok = False
+                    break
+                for met in metrics:
+                    if not _is_finite_number(lst[i].get(met, None)):
+                        ok = False
+                        break
+                if not ok:
+                    break
+            if not ok:
+                excluded.add(i)
+        return excluded, n_total
+    except Exception:
+        return set(), 0
+
+def compute_common_kept_indices(experiment_paths, methods=('DLG','iDLG'), metrics=('mse','loss')):
+    """
+    From all 'dra_results_summary.json' (or raw files if summary missing), take the UNION
+    of excluded indices, restricted to the minimum aligned length across experiments.
+    Return the sorted list of kept indices common to all experiments.
+    """
+    union_excluded = set()
+    min_n_total = None
+
+    for exp in experiment_paths:
+        sum_path = os.path.join(exp, 'dra_results_summary.json')
+        if os.path.exists(sum_path):
+            try:
+                with open(sum_path, 'r') as f:
+                    summ = json.load(f)
+                n_total = int(summ.get('counts', {}).get('n_total_aligned', 0))
+                excl = set(int(i) for i in summ.get('counts', {}).get('excluded_indices', []))
+                min_n_total = n_total if (min_n_total is None) else min(min_n_total, n_total)
+                union_excluded |= excl
+                continue
+            except Exception:
+                pass
+
+        # Fallback to raw client results if summary is missing/broken
+        raw_path = os.path.join(exp, 'dra_results_client_0.json')
+        if not os.path.exists(raw_path):
+            raw_path = os.path.join(exp, 'dra_results.json')
+        excl, n_total = _derive_excluded_from_raw(raw_path, methods=methods, metrics=metrics)
+        if n_total > 0:
+            min_n_total = n_total if (min_n_total is None) else min(min_n_total, n_total)
+            union_excluded |= excl
+
+    if min_n_total is None:
+        # Nothing found; return empty (=no common indices)
+        return []
+
+    # Restrict union to valid range [0, min_n_total)
+    union_excluded = {i for i in union_excluded if 0 <= i < min_n_total}
+    kept = sorted(set(range(min_n_total)) - union_excluded)
+    print(f"[DRA] Common kept indices across experiments: {len(kept)} / {min_n_total} (excluded union size={len(union_excluded)})")
+    return kept
+
+# Precompute once for this run
+common_kept_indices = compute_common_kept_indices(exps_path, methods=('DLG','iDLG'), metrics=('mse','loss'))
+
+def _dra_mean_over_indices(raw_json_path, method, metric, indices):
+    """
+    Compute mean of `metric` for `method` using only `indices`.
+    Returns np.nan if unavailable.
+    """
+    if not os.path.exists(raw_json_path) or not indices:
+        return np.nan
+    try:
+        with open(raw_json_path, 'r') as f:
+            data = json.load(f)
+        lst = data.get(method, [])
+        vals = []
+        for i in indices:
+            if i < 0 or i >= len(lst) or not isinstance(lst[i], dict):
+                continue
+            v = lst[i].get(metric, None)
+            if _is_finite_number(v):
+                vals.append(float(v))
+        if not vals:
+            return np.nan
+        return float(np.mean(vals))
+    except Exception:
+        return np.nan
 
 performance = []
 
@@ -67,6 +185,78 @@ for exp in exps_path:
                 task_results = pickle.load(file)
 
             d['task_acc'] = task_results['_baseline']
+
+            # ------------------ Privacy attacks: SIA, MIA, DRA ------------------
+            # Defaults
+            d['sia_acc'] = np.nan
+            d['mia_whitebox_acc'] = np.nan
+            d['mia_blackbox_acc'] = np.nan
+            d['mia_shadow_acc'] = np.nan
+            d['dra_dlg_mse_mean'] = np.nan
+            d['dra_dlg_mse_ci'] = np.nan
+            d['dra_idlg_mse_mean'] = np.nan
+            d['dra_idlg_mse_ci'] = np.nan
+
+            # Paths
+            sia_path = os.path.join(exp, 'sia_max.json')
+            mia_summary_path = os.path.join(exp, 'mia_summary.json')
+            mia_max_path = os.path.join(exp, 'mia_max.json')  # optional alt name
+            dra_summary_path = os.path.join(exp, 'dra_results_summary.json')
+
+            # --- SIA (accuracy) ---
+            if os.path.exists(sia_path):
+                try:
+                    with open(sia_path, 'r') as f:
+                        sia_json = json.load(f)
+                    # expect {"max_sia_accuracy": float}
+                    if 'max_sia_accuracy' in sia_json:
+                        d['sia_acc'] = float(sia_json['max_sia_accuracy'])
+                except Exception:
+                    pass
+
+            # --- MIA (accuracy) ---
+            def _get_mia_acc(mia_json, key):
+                """Return a single accuracy for `key` ('whitebox'|'blackbox'), preferring worst_case.max_mia_accuracy then mean_across_clients.max_mia_accuracy."""
+                try:
+                    if key in mia_json:
+                        if args.mia_metric == "max":
+                            if 'worst_case' in mia_json[key] and 'max_mia_accuracy' in mia_json[key]['worst_case']:
+                                return float(mia_json[key]['worst_case']['max_mia_accuracy'])
+                        elif args.mia_metric == "mean":
+                            if 'mean_across_clients' in mia_json[key] and 'max_mia_accuracy' in mia_json[key]['mean_across_clients']:
+                                return float(mia_json[key]['mean_across_clients']['max_mia_accuracy'])
+                        else:
+                            raise ValueError(f"Unknown MIA metric: {args.mia_metric}")
+                except Exception:
+                    return np.nan
+                return np.nan
+
+            mia_json = None
+            if os.path.exists(mia_summary_path):
+                try:
+                    with open(mia_summary_path, 'r') as f:
+                        mia_json = json.load(f)
+                except Exception:
+                    mia_json = None
+            elif os.path.exists(mia_max_path):
+                try:
+                    with open(mia_max_path, 'r') as f:
+                        mia_json = json.load(f)
+                except Exception:
+                    mia_json = None
+
+            if isinstance(mia_json, dict):
+                d['mia_whitebox_acc'] = _get_mia_acc(mia_json, 'whitebox')
+                d['mia_blackbox_acc'] = _get_mia_acc(mia_json, 'blackbox')
+                d['mia_shadow_acc'] = _get_mia_acc(mia_json, 'blackbox_shadow')
+
+            # --- DRA (MSE) recomputed on COMMON kept indices across experiments ---
+            raw_dra_path = os.path.join(exp, 'dra_results_client_0.json')
+            if not os.path.exists(raw_dra_path):
+                raw_dra_path = os.path.join(exp, 'dra_results.json')
+
+            d['dra_dlg_mse_mean']  = _dra_mean_over_indices(raw_dra_path, 'DLG',  'mse', common_kept_indices)
+            d['dra_idlg_mse_mean'] = _dra_mean_over_indices(raw_dra_path, 'iDLG', 'mse', common_kept_indices)
 
             try:
                 # Collect graph
@@ -383,6 +573,105 @@ for learning in performance['learning'].unique():
     if not os.path.exists(os.path.dirname(result_file)):
         os.makedirs(os.path.dirname(result_file))
     final_table.to_csv(result_file, index=True)
+
+
+    ########## Privacy Attack Tables ##########
+    # Keep only required columns if present
+    privacy_cols = [
+        'model', 'dataset', 'learning',
+        'sia_acc',
+        'mia_whitebox_acc', 'mia_blackbox_acc', 'mia_shadow_acc',
+        'dra_dlg_mse_mean',
+        'dra_idlg_mse_mean',
+    ]
+    available_cols = [c for c in privacy_cols if c in performance.columns]
+    privacy_df = performance[available_cols].copy()
+
+    # Drop rows where everything is NaN for privacy metrics
+    metric_cols = [c for c in available_cols if c not in ['model','dataset','learning']]
+    if metric_cols:
+        privacy_df = privacy_df.dropna(subset=metric_cols, how='all')
+
+    if not privacy_df.empty and metric_cols:
+        # Aggregate across folds (runs) → mean and std per (model, dataset, learning)
+        mean_agg = {c: 'mean' for c in metric_cols}
+        std_agg  = {c: 'std'  for c in metric_cols}
+        grp = ['model', 'dataset', 'learning']
+        privacy_mean = privacy_df.groupby(grp, as_index=False).agg(mean_agg)
+        privacy_std  = privacy_df.groupby(grp, as_index=False).agg(std_agg).fillna(0)
+
+        # For each learning method and dataset, create a table:
+        attack_columns = [
+            ('SIA (acc)', 'sia_acc', 'sia_acc'),
+            ('MIA WB (acc)', 'mia_whitebox_acc', 'mia_whitebox_acc'),
+            ('MIA BB (acc)', 'mia_blackbox_acc', 'mia_blackbox_acc'),
+            ('MIA Shadow (acc)', 'mia_shadow_acc', 'mia_shadow_acc'),
+            ('DRA DLG (MSE)', 'dra_dlg_mse_mean', 'dra_dlg_mse_mean'),
+            ('DRA iDLG (MSE)', 'dra_idlg_mse_mean', 'dra_idlg_mse_mean'),
+        ]
+
+        # Which metrics are accuracies
+        acc_metrics = {'sia_acc', 'mia_whitebox_acc', 'mia_blackbox_acc', 'mia_shadow_acc'}
+
+        # Helper to format cells as mean ± std
+        def _fmt_cell(mean_val, std_val, is_accuracy=False):
+            if np.isnan(mean_val):
+                return "N/A"
+            if is_accuracy:
+                m = mean_val * 100.0
+                s = 0.0 if (std_val is None or np.isnan(std_val)) else std_val * 100.0
+                return f"{m:.2f} ± {s:.2f}"
+            else:
+                s = 0.0 if (std_val is None or np.isnan(std_val)) else std_val
+                return f"{mean_val:.3f} ± {s:.3f}"
+
+        # Order models by model_styles if possible (after earlier rename to pretty names)
+        preferred_model_order = [model_styles[k]['name'] for k in model_styles]
+
+        for learning in sorted(privacy_mean['learning'].unique()):
+            for dataset_name in custom_order:
+                sub_m = privacy_mean[(privacy_mean['learning'] == learning) & (privacy_mean['dataset'] == dataset_name)]
+                if sub_m.empty:
+                    continue
+                sub_s = privacy_std[(privacy_std['learning'] == learning) & (privacy_std['dataset'] == dataset_name)]
+
+                # index by model
+                sub_m = sub_m.set_index('model')
+                sub_s = sub_s.set_index('model')
+
+                # Build the printable table with formatted strings
+                table_rows = {}
+                for model_name in sub_m.index.unique():
+                    row = {}
+                    for col_title, mean_key, std_key in attack_columns:
+                        is_acc = mean_key in acc_metrics
+                        mean_val = sub_m.loc[model_name, mean_key] if mean_key in sub_m.columns else np.nan
+                        std_val  = sub_s.loc[model_name, std_key] if std_key in sub_s.columns else np.nan
+                        # Handle duplicated index (multiple rows) by taking mean again
+                        if isinstance(mean_val, pd.Series):
+                            mean_val = float(mean_val.mean())
+                        if isinstance(std_val, pd.Series):
+                            std_val = float(std_val.mean())
+                        row[col_title] = _fmt_cell(mean_val, std_val, is_accuracy=is_acc)
+                    table_rows[model_name] = row
+
+                privacy_table = pd.DataFrame.from_dict(table_rows, orient='index')
+                # Reindex rows by preferred model order if names match
+                existing_models = [m for m in preferred_model_order if m in privacy_table.index]
+                remaining = [m for m in privacy_table.index if m not in existing_models]
+                privacy_table = privacy_table.reindex(existing_models + remaining)
+
+                print(f"\n\nPrivacy Attacks Table — Learning: {learning} — Dataset: {dataset_name}")
+                print('------------------------------------------------------------')
+                print(privacy_table)
+
+                # Save to CSV
+                result_file = f"{visualization_folder}/{learning}/privacy_{dataset_name}.csv"
+                if not os.path.exists(os.path.dirname(result_file)):
+                    os.makedirs(os.path.dirname(result_file))
+                privacy_table.to_csv(result_file, index=True)
+    else:
+        print("\n[INFO] No privacy metrics found to tabulate.")
 
 
 

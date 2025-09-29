@@ -1,4 +1,6 @@
 import torch
+from torch import nn
+import torch.nn.functional as F
 import random
 import numpy as np
 import pandas as pd
@@ -10,7 +12,7 @@ import os
 import random
 from src.data.generate_split import get_subgraph_dict
 import matplotlib.pyplot as plt
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Any, Optional
 
 import re
 from functools import reduce
@@ -728,7 +730,7 @@ def parameters_to_1d(parameters):
     return np.concatenate([x.flatten() for x in parameters])
 
 
-def score_blackbox_batch(batch, model, cfg):
+def score_blackbox_batch(batch, model, cfg, use_concepts=True):
     '''
     Computes membership inference attack scores for a batch by 
     computing the negative log-likelihood of the model's predictions.
@@ -741,17 +743,50 @@ def score_blackbox_batch(batch, model, cfg):
         # Forward pass
         y_hat, c_hat = model(x)
         y_hat_loss, c_hat_loss = model.filter_output_for_loss(y_hat, c_hat)
-        losses = model.loss(y_hat_loss, y, c_hat_loss, c, reduction='none') 
-        return -losses.cpu().numpy()  
+        if not use_concepts: # supervision only on y, no concepts
+            losses = model._compute_task_loss(y_hat_loss, y, reduction='none')
+        else:
+            losses = model.loss(y_hat_loss, y, c_hat_loss, c, reduction='none')
+        return -losses.cpu().numpy()
 
 
-def score_whitebox_batch(batch, model, client_update, cfg):
+# def project_update_to_trainable(client_update: torch.Tensor, model: torch.nn.Module, device=None):
+#     """
+#     Slice a full 1D update vector (all params) down to only the segments
+#     corresponding to trainable (requires_grad=True) parameters, in the same
+#     order used by model.parameters(). Re-normalises the result.
+#     """
+#     if device is None:
+#         device = client_update.device
+#     pieces = []
+#     offset = 0
+#     for p in model.parameters():
+#         n = p.numel()
+#         if p.requires_grad:
+#             pieces.append(client_update[offset:offset + n])
+#         offset += n
+#     if not pieces:
+#         raise ValueError("Model has no trainable parameters (requires_grad=True).")
+#     v = torch.cat(pieces).to(device)
+#     v = v / (torch.linalg.norm(v) + 1e-12)
+#     return v
+
+
+def flat_trainable_params_tensor(model, device):
+    parts = [p.detach().to(device).flatten() for p in model.parameters() if p.requires_grad]
+    return torch.cat(parts) if parts else torch.tensor([], device=device)
+
+def score_whitebox_batch(batch, model, client_update, cfg, use_concepts=True):
     '''
     Computes membership inference attack scores for a batch by 
     computing the inner product between the 'pseudogradient'
     represented by each client update and the true gradients
     for each sample in the batch.
     '''
+
+    # --- project update to trainable params & normalise ---
+    # client_update = project_update_to_trainable(client_update, model, device=cfg.device)
+
     # Move data
     x = batch['x'].to(cfg.device)
     y = batch['y'].to(cfg.device)
@@ -764,12 +799,18 @@ def score_whitebox_batch(batch, model, client_update, cfg):
     # Forward pass
     y_hat, c_hat = model(x)
     y_hat_loss, c_hat_loss = model.filter_output_for_loss(y_hat, c_hat)
-    losses = model.loss(y_hat_loss, y, c_hat_loss, c, reduction='none')  # Use 'none' to get per-sample losses
+    if not use_concepts: # supervision only on y, no concepts
+        losses = model._compute_task_loss(y_hat_loss, y, reduction='none')
+    else:
+        losses = model.loss(y_hat_loss, y, c_hat_loss, c, reduction='none')  # Use 'none' to get per-sample losses
     
+    params = [p for p in model.parameters() if p.requires_grad] # ADDED line because some parameters may be frozen
+
     for i, loss in enumerate(losses):
         grad_vector = torch.autograd.grad(
             loss, 
-            model.parameters(),
+            # model.parameters(),
+            params,
             retain_graph=True,
             allow_unused=True # Allow unused gradients, otherwise an error is raised while computing the gradients.
         )
@@ -778,7 +819,8 @@ def score_whitebox_batch(batch, model, client_update, cfg):
         # we replace them with zero vectors.
         grad_vector = [
             g if g is not None else torch.zeros_like(p)
-            for g, p in zip(grad_vector, model.parameters())
+            # for g, p in zip(grad_vector, model.parameters())
+            for g, p in zip(grad_vector, params)
         ]
         
         # Flatten and concatenate gradients
@@ -1009,20 +1051,24 @@ def initialize_mia_results(n_clients):
     """ Initialize dictionaries to store MIA results for each client """
     if n_clients <= 0:
         raise ValueError("Number of clients must be greater than 0")
-    
-    mia_accuracies = {"whitebox": {}, "blackbox": {}}
-    mia_epsilons = {"whitebox": {}, "blackbox": {}}
+
+    mia_accuracies = {"whitebox": {}, "blackbox": {}, "blackbox_shadow": {}} # "blackbox_concept": {}
+    mia_epsilons = {"whitebox": {}, "blackbox": {}, "blackbox_shadow": {}} #  "blackbox_concept": {}
     for cid in range(n_clients):
         mia_accuracies["whitebox"][cid] = []
         mia_accuracies["blackbox"][cid] = []
+        # mia_accuracies["blackbox_concept"][cid] = []
+        mia_accuracies["blackbox_shadow"][cid] = []
         mia_epsilons["whitebox"][cid] = []
         mia_epsilons["blackbox"][cid] = []
-        
+        # mia_epsilons["blackbox_concept"][cid] = []
+        mia_epsilons["blackbox_shadow"][cid] = []
+
     return mia_accuracies, mia_epsilons
 
 
 @torch.no_grad()
-def _sia_batch_loss(batch, model, cfg):
+def _sia_batch_loss(batch, model, cfg, use_concepts=True):
     """
     Returns the per-sample task&concept loss for a batch, **CPU numpy**.
     Accepts either tuple- or dict-style batches produced by `sia_loader`.
@@ -1041,9 +1087,10 @@ def _sia_batch_loss(batch, model, cfg):
     # ------------- forward & loss -----------------------------------------
     y_hat, c_hat = model(x)
     y_hat_loss, c_hat_loss = model.filter_output_for_loss(y_hat, c_hat)
-    losses = model.loss(
-        y_hat_loss, y, c_hat_loss, c, reduction="none", ignore_index=-1
-    )  # shape = (B,)
+    if not use_concepts: # supervision only on y, no concepts
+        losses = model._compute_task_loss(y_hat_loss, y, reduction="none", ignore_index=-1)
+    else:
+        losses = model.loss(y_hat_loss, y, c_hat_loss, c, reduction="none", ignore_index=-1)  # shape = (B,)
 
     return losses.detach().cpu().numpy() 
 
@@ -1064,6 +1111,7 @@ def run_sia_attack(
     sia_loader: torch.utils.data.DataLoader,
     client_params: List[Tuple[List[torch.Tensor], int]],
     cfg,
+    use_concepts: bool = True,
 ) -> float:
     """
     Args
@@ -1091,7 +1139,7 @@ def run_sia_attack(
         # collect losses for *all* SIA samples with this client’s model
         losses_client = []
         for batch in sia_loader:            # the loader is NOT shuffled
-            losses_client.append(_sia_batch_loss(batch, local_engine.model, cfg))
+            losses_client.append(_sia_batch_loss(batch, local_engine.model, cfg, use_concepts=use_concepts))
         losses_all[:, cid] = np.concatenate(losses_client)
 
     # ----------- prediction & accuracy -------------------------------------
@@ -1102,3 +1150,457 @@ def run_sia_attack(
 
     return accuracy
 
+
+# --------------------- BLACK-BOX MIA HELPERS (concept-entropy + shadow MLP) ---------------------
+def _as_label_probs(y_like: torch.Tensor) -> torch.Tensor:
+    """
+    Ensure we have class probabilities on the last dimension.
+    If the last dim already (approximately) sums to 1, treat as probs; else softmax.
+    """
+    s = y_like.sum(dim=-1, keepdim=True)
+    if torch.allclose(s.mean(), torch.ones_like(s.mean()), atol=1e-3, rtol=1e-3):
+        p = y_like
+    else:
+        p = torch.softmax(y_like, dim=-1)
+    return p.clamp(1e-12, 1 - 1e-12)
+
+def _iter_concept_probs(c_hat) -> list[torch.Tensor]:
+    """
+    Yield a list of concept probability tensors, each shaped (B, C_k),
+    without assuming equal cardinality across concepts. Accepts:
+      - dict[str, Tensor] where each Tensor is (B, C_k)
+      - Tensor of shape (B, K, C) → K concepts with C categories each
+      - list/tuple of Tensors [(B, C_k), ...]
+    We ensure probabilities per concept using softmax if needed.
+    """
+    if c_hat is None:
+        return []
+    outs = []
+    if isinstance(c_hat, dict):
+        for _, v in sorted(c_hat.items(), key=lambda kv: kv[0]):
+            if not isinstance(v, torch.Tensor):
+                continue
+            outs.append(_as_label_probs(v))
+    elif isinstance(c_hat, (list, tuple)):
+        for v in c_hat:
+            if isinstance(v, torch.Tensor):
+                outs.append(_as_label_probs(v))
+    elif isinstance(c_hat, torch.Tensor):
+        if c_hat.ndim == 3:  # (B, K, C)
+            B, K, C = c_hat.shape
+            v = _as_label_probs(c_hat)              # (B, K, C)
+            outs = [v[:, k, :] for k in range(K)]   # list of (B, C)
+        elif c_hat.ndim == 2:  # (B, C) single concept
+            outs = [_as_label_probs(c_hat)]
+        else:
+            outs = []
+    else:
+        outs = []
+    return outs
+
+@torch.no_grad()
+def score_blackbox_concept_entropy_loader(loader, model, cfg):
+    """
+    Compute a black-box score using ONLY concept outputs:
+      score = - mean categorical entropy across concepts (higher → more likely IN).
+    Falls back to -entropy(label probs) if concepts are unavailable.
+    Returns a NumPy array of length len(loader.dataset) in loader order.
+    """
+    scores = []
+    model.eval()
+    for batch in loader:
+        x = batch['x'].to(cfg.device)
+        y_hat, c_hat = model(x)
+        # try concept path first
+        concept_list = _iter_concept_probs(c_hat)
+        if len(concept_list) > 0:
+            ents = []
+            for p_k in concept_list:  # (B, C_k)
+                ent_k = -(p_k * torch.log(p_k)).sum(dim=-1)  # (B,)
+                ents.append(ent_k)
+            ent_mat = torch.stack(ents, dim=-1)              # (B, K)
+            ent_mean = ent_mat.mean(dim=-1)                  # (B,)
+            scores.append((-ent_mean).detach().cpu().numpy())
+        else:
+            # fallback: label entropy
+            y_probs = _as_label_probs(y_hat)
+            ent = -(y_probs * torch.log(y_probs)).sum(dim=-1)  # (B,)
+            scores.append((-ent).detach().cpu().numpy())
+    return np.concatenate(scores, axis=0)
+
+@torch.no_grad()
+def score_blackbox_loss_loader(loader, model, cfg, use_concepts=True):
+    """
+    Wrapper around score_blackbox_batch that accumulates over the whole loader
+    and returns a concatenated NumPy vector in loader order.
+    """
+    all_scores = []
+    for batch in loader:
+        all_scores.append(score_blackbox_batch(batch, model, cfg, use_concepts=use_concepts))
+    return np.concatenate(all_scores, axis=0)
+
+def _extract_bb_features_from_loader(
+    loader,
+    model,
+    cfg,
+    use_concepts: bool = True,
+    raw_concept_probs: bool = False,
+):
+    """
+    Build per-sample features for a shadow attacker, in loader order.
+
+    Always includes LABEL-HEAD features (computed from probabilities):
+      - y_conf (top1 prob), y_margin (p1 - p2), y_entropy, y_brier, -loss_task, y_correct(0/1)
+
+    If concept outputs are available and use_concepts=True, also include:
+      - concept confidence stats: mean/std over concepts of max-prob per concept
+      - concept entropy   stats: mean/std over concepts of categorical entropy
+      - fraction of concepts with conf >= 0.9
+      - -loss_concept
+      - (optional) raw concatenated concept probabilities (may overfit when data is small)
+
+    Returns
+    -------
+    X : np.ndarray of shape (N, D)
+    y_true : np.ndarray of shape (N,)
+    """
+    X = []
+    y_true_all = []
+    model.eval()
+    
+    for batch in loader:
+        x = batch['x'].to(cfg.device)
+        y = batch['y'].to(cfg.device)                   # (B,)
+        c = batch.get('c')
+        c = c.to(cfg.device) if c is not None else None
+
+        # forward
+        y_hat, c_hat = model(x)                         # probabilities already
+        y_probs = _as_label_probs(y_hat)
+
+        # base label features
+        y_sorted, _ = torch.sort(y_probs, dim=-1, descending=True)
+        y_conf   = y_sorted[:, 0]                                           # (B,)
+        y_margin = (y_sorted[:, 0] - y_sorted[:, 1]) if y_probs.shape[-1] > 1 else y_sorted[:, 0]
+        y_ent    = -(y_probs * torch.log(y_probs)).sum(dim=-1)              # (B,)
+        y_onehot = F.one_hot(y.long(), num_classes=y_probs.shape[-1]).float()
+        y_brier  = ((y_probs - y_onehot) ** 2).sum(dim=-1)                  # (B,)
+        y_pred   = y_probs.argmax(dim=-1)
+        y_corr   = (y_pred == y).float()                                    # (B,)
+
+        # losses from model (task, concept, mixed)
+        y_hat_loss, c_hat_loss = model.filter_output_for_loss(y_hat, c_hat)
+        # ask for multi_output=True if supported; otherwise fall back gracefully
+        try:
+            loss_task, loss_concept, loss_mixed = model.loss(
+                y_hat_loss, y, c_hat_loss, c, reduction='none', multi_output=True
+            )
+        except TypeError:
+            loss = model.loss(y_hat_loss, y, c_hat_loss, c, reduction='none')
+            loss_task, loss_concept, loss_mixed = loss, torch.zeros_like(loss), loss
+
+        feats = [
+            y_conf, y_margin, y_ent, y_brier,
+            -loss_task, y_corr
+        ]
+
+        # use_concepts = False
+        if use_concepts:
+            concept_list = _iter_concept_probs(c_hat)  # list of (B, C_k)
+            if len(concept_list) > 0:
+                # per-concept confidence (max prob) and entropy
+                confs = [p_k.max(dim=-1).values for p_k in concept_list]              # list of (B,)
+                ents  = [-(p_k * torch.log(p_k)).sum(dim=-1) for p_k in concept_list] # list of (B,)
+                confs_mat = torch.stack(confs, dim=-1)     # (B, K)
+                ents_mat  = torch.stack(ents,  dim=-1)     # (B, K)
+                near_bin  = (confs_mat >= 0.9).float().mean(dim=-1)  # (B,)
+
+                feats += [
+                    confs_mat.mean(dim=-1),   # (B,)
+                    confs_mat.std(dim=-1),    # (B,)
+                    ents_mat.mean(dim=-1),    # (B,)
+                    ents_mat.std(dim=-1),     # (B,)
+                    near_bin,                 # (B,)
+                    -loss_concept,            # (B,)
+                ]
+
+                if raw_concept_probs:
+                    # concatenate raw probs in a fixed order
+                    concat = torch.cat(concept_list, dim=-1)   # (B, sum_k C_k)
+                    feats.append(concat)
+
+        # stack along feature dim
+        F_batch = torch.cat([f.float().unsqueeze(-1) if f.dim() == 1 else f.float() for f in feats], dim=-1)  # (B, D)
+        X.append(F_batch.detach().cpu())
+        y_true_all.append(y.detach().cpu())
+
+    X = torch.cat(X, dim=0).numpy()
+    y_true = torch.cat(y_true_all, dim=0).long().numpy()
+    return X, y_true
+
+class _ShadowMLP(nn.Module):
+    def __init__(self, d, hidden=64, dropout=0.1):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(d, hidden), nn.ReLU(), nn.Dropout(dropout),
+            nn.Linear(hidden, 1)
+        )
+    def forward(self, x):
+        return self.net(x).squeeze(-1)
+
+def shadow_mlp_scores_loader(
+    loader,
+    model,
+    cfg,
+    y_mem_labels: np.ndarray,
+    use_concepts: bool = True,
+    epochs: int = 100,
+    batch_size: int = 64,
+    lr: float = 1e-3,
+    k_folds: int = 10,
+    class_conditional: bool = True,
+    weight_decay: float = 1e-3,
+    dropout: float = 0.1,
+    standardize: bool = True,
+    raw_concept_probs: bool = False,
+    scores_whitebox_list: list = None
+):
+    """
+    Train a shadow MLP with K-fold CV and return out-of-fold membership scores
+    for ALL samples in loader order (sigmoid logits).
+
+    If class_conditional=True, we train one attacker per true label and
+    use the class-specific attacker to score samples of that class.
+
+    Optionally, scores_whitebox_list (white-box scores) can be appended as an additional feature
+    to the attacker; they are concatenated and aligned in loader order and added as a new column to the features.
+    """
+    # Create a single-batch dataloader to avoid feature dimension mismatches
+    dataset = loader.dataset
+    single_batch_loader = torch.utils.data.DataLoader(
+        dataset, 
+        batch_size=len(dataset),  # Process all samples in one batch
+        shuffle=False,  # Preserve order
+        collate_fn=loader.collate_fn if hasattr(loader, 'collate_fn') else None
+    )
+    
+    # extract features (+ y_true labels for class-conditional training)
+    X, y_true = _extract_bb_features_from_loader(
+        single_batch_loader, model, cfg,
+        use_concepts=use_concepts,
+        raw_concept_probs=raw_concept_probs
+    )
+    # ---- Optional: append white-box scores as an additional feature ----
+    y_mem_np = np.asarray(y_mem_labels)  # we'll possibly trim this if needed
+    if scores_whitebox_list is not None and len(scores_whitebox_list) > 0:
+        if isinstance(scores_whitebox_list, np.ndarray):
+            wb_scores = scores_whitebox_list.reshape(-1)
+        else:
+            wb_scores = np.concatenate([np.asarray(s).reshape(-1) for s in scores_whitebox_list], axis=0)
+        # align lengths if needed
+        if wb_scores.shape[0] != X.shape[0]:
+            min_n = min(wb_scores.shape[0], X.shape[0], y_true.shape[0], y_mem_np.shape[0])
+            print(f"\033[93m[shadow-mlp] Warning: length mismatch (X={X.shape[0]}, wb={wb_scores.shape[0]}). Trimming to {min_n}.\033[0m")
+            wb_scores = wb_scores[:min_n]
+            X = X[:min_n]
+            y_true = y_true[:min_n]
+            y_mem_np = y_mem_np[:min_n]
+        # append as a feature column
+        X = np.concatenate([X, wb_scores.astype(np.float32)[:, None]], axis=1)
+    y_mem = torch.from_numpy(y_mem_np.astype(np.float32))
+    n = len(y_mem)
+    scores = torch.zeros(n, dtype=torch.float32)
+
+    # helper to run CV for a given subset of indices
+    def _cv_scores_for_indices(indices: np.ndarray) -> torch.Tensor:
+        if len(indices) == 0:
+            return torch.zeros(0, dtype=torch.float32)
+        # create stratified folds across membership labels within the subset
+        idx0 = indices[y_mem_labels[indices] == 0]
+        idx1 = indices[y_mem_labels[indices] == 1]
+        # guard for tiny splits
+        folds0 = np.array_split(idx0, k_folds) if len(idx0) >= k_folds else [idx0]
+        folds1 = np.array_split(idx1, k_folds) if len(idx1) >= k_folds else [idx1]
+
+        out = torch.zeros(len(indices), dtype=torch.float32)
+        # map from absolute indices to local positions for writing back
+        abs_to_local = {abs_i: j for j, abs_i in enumerate(indices)}
+
+        num_folds = max(len(folds0), len(folds1))
+        for k in range(num_folds):
+            val_idx_abs = np.concatenate([
+                folds0[k % len(folds0)] if len(folds0) > 0 else np.array([], dtype=int),
+                folds1[k % len(folds1)] if len(folds1) > 0 else np.array([], dtype=int),
+            ])
+            train_idx_abs = np.setdiff1d(indices, val_idx_abs)
+
+            X_train = torch.from_numpy(X[train_idx_abs]).float().to(cfg.device)
+            y_train = y_mem[train_idx_abs].to(cfg.device)
+            X_val   = torch.from_numpy(X[val_idx_abs]).float().to(cfg.device)
+
+            # standardize per fold
+            if standardize and X_train.numel() > 0:
+                mu = X_train.mean(dim=0, keepdim=True)
+                sd = X_train.std(dim=0, keepdim=True).clamp_min(1e-6)
+                X_train = (X_train - mu) / sd
+                X_val   = (X_val   - mu) / sd
+
+            attacker = _ShadowMLP(X_train.shape[1], hidden=64, dropout=dropout).to(cfg.device)
+            pos = y_train.sum()
+            neg = len(y_train) - pos
+            pos_weight = (neg / (pos + 1e-8)).clamp(min=0.0, max=1e6)
+            criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+            optim = torch.optim.Adam(attacker.parameters(), lr=lr, weight_decay=weight_decay)
+
+            ds = torch.utils.data.TensorDataset(X_train, y_train)
+            dl = torch.utils.data.DataLoader(ds, batch_size=batch_size, shuffle=True)
+
+            attacker.train()
+            best_val = float('inf')
+            patience_counter = 0
+            for _ in range(epochs):
+                for xb, yb in dl:
+                    optim.zero_grad()
+                    logits = attacker(xb)
+                    loss = criterion(logits, yb)
+                    loss.backward()
+                    optim.step()
+
+                with torch.no_grad():
+                    attacker.eval()
+                    if len(X_val) > 0:
+                        val_logits = attacker(X_val)
+                        val_loss = criterion(val_logits, y_mem[val_idx_abs].to(cfg.device))
+                        if val_loss < best_val - 1e-5:
+                            best_val = val_loss
+                            patience_counter = 0
+                        else:
+                            patience_counter += 1
+                        attacker.train()
+                        if patience_counter >= 5:
+                            break
+
+            attacker.eval()
+            with torch.no_grad():
+                s = torch.sigmoid(attacker(X_val)).detach().cpu()   # (|val_idx_abs|,)
+            # write back to out-of-fold vector
+            for j, abs_i in enumerate(val_idx_abs):
+                out_idx = abs_to_local[abs_i]
+                out[out_idx] = s[j]
+
+        return out
+
+    if class_conditional:
+        classes = np.unique(y_true)
+        for cls in classes:
+            cls_indices = np.where(y_true == cls)[0]
+            out_scores = _cv_scores_for_indices(cls_indices)
+            scores[cls_indices] = out_scores
+    else:
+        all_indices = np.arange(n)
+        scores[:] = _cv_scores_for_indices(all_indices)
+
+    return scores.numpy()
+# -------------------------------------------------------------------------------------------------
+
+def compute_validation_loss(model, val_loader, cfg) -> float:
+    """
+    Compute average *task* validation loss for a given model and validation loader.
+
+    - Assumes forward returns (y_hat, c_hat) (already probs in your code).
+    - Uses model.filter_output_for_loss(...) and model.loss(...).
+    - If model.loss does not support multi_output=True, falls back gracefully.
+
+    Returns:
+        float: average loss over all samples, or +inf if loader is None/empty.
+    """
+    if val_loader is None:
+        return float('inf')
+
+    model.eval()
+    total_loss, total_samples = 0.0, 0
+    with torch.no_grad():
+        for batch in val_loader:
+            x = batch['x'].to(cfg.device)
+            y = batch['y'].to(cfg.device)
+            c = batch.get('c')
+            c = c.to(cfg.device) if c is not None else None
+
+            y_hat, c_hat = model(x)
+            y_hat_loss, c_hat_loss = model.filter_output_for_loss(y_hat, c_hat)
+
+            try:
+                loss_task, loss_concept, loss_mixed = model.loss(
+                    y_hat_loss, y, c_hat_loss, c,
+                    reduction='mean', multi_output=True
+                )
+                loss_value = loss_task
+            except TypeError:
+                loss_value = model.loss(
+                    y_hat_loss, y, c_hat_loss, c,
+                    reduction='mean'
+                )
+
+            bs = y.shape[0]
+            total_loss += float(loss_value) * bs
+            total_samples += bs
+
+    return (total_loss / total_samples) if total_samples > 0 else float('inf')
+
+def plot_training_metrics(history: Dict[str, Any], save_dir: str = ".") -> None:
+    """
+    Create two figures:
+    1. A figure with subplots showing the validation loss trend for each client
+    2. A figure showing the average validation loss trend across all clients
+    
+    Args:
+        history: Dictionary containing training history with keys:
+            - "round": List of round numbers
+            - "loss_val_avg": List of average validation losses per round
+            - "loss_val_client": Dict mapping client IDs to lists of validation losses
+        save_dir: Directory to save the plots
+    """
+    os.makedirs(save_dir, exist_ok=True)
+    rounds = history["round"]
+    
+    # 1. Per-client validation loss plot
+    n_clients = len(history["loss_val_client"])
+    fig_height = max(4, min(12, 2 * n_clients))
+    fig, axes = plt.subplots(n_clients, 1, figsize=(10, fig_height), sharex=True)
+    
+    # Ensure axes is always a list-like object even with one client
+    if n_clients == 1:
+        axes = [axes]
+    
+    for cid, ax in enumerate(axes):
+        client_losses = history["loss_val_client"][cid]
+        ax.plot(rounds, client_losses, 'o-', label=f'Client {cid}')
+        ax.set_ylabel('Validation Loss')
+        ax.set_title(f'Client {cid}')
+        ax.grid(True, linestyle='--', alpha=0.7)
+        
+    axes[-1].set_xlabel('Round')
+    plt.tight_layout()
+    plt.savefig(f"{save_dir}/client_validation_losses.png", dpi=300)
+    
+    # 2. Average validation loss across clients
+    plt.figure(figsize=(10, 6))
+    avg_loss = np.mean([history["loss_val_client"][cid] for cid in range(n_clients)], axis=0)
+    plt.plot(rounds, avg_loss, 'o-', color='red', 
+             linewidth=2, label='Average Validation Loss')
+    
+    # Optionally overlay individual client trends for comparison
+    for cid in range(n_clients):
+        client_losses = history["loss_val_client"][cid]
+        plt.plot(rounds, client_losses, '--', alpha=0.3, label=f'Client {cid}')
+    
+    plt.xlabel('Round')
+    plt.ylabel('Validation Loss')
+    plt.title('Average Validation Loss Across Clients')
+    plt.legend()
+    plt.grid(True, linestyle='--', alpha=0.7)
+    plt.tight_layout()
+    plt.savefig(f"{save_dir}/average_validation_loss.png", dpi=300)
+    
+    plt.close('all')
+    print(f"Training plots saved to {save_dir}/")

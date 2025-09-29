@@ -96,7 +96,8 @@ class BlackBox_Multi(BaseModel):
              c_hat_dict: Dict[str, torch.Tensor],
              c: torch.Tensor,
              reduction: str = "mean",
-             ignore_index: int = -1) -> torch.Tensor:
+             ignore_index: int = -1,
+             multi_output: bool = False) -> torch.Tensor:
         """
         Compute the loss function for BlackBox_Multi model.
         """
@@ -107,7 +108,8 @@ class BlackBox_Multi(BaseModel):
             c_hat_dict,
             c,
             reduction,
-            ignore_index
+            ignore_index,
+            multi_output=multi_output
         )
 
         return loss

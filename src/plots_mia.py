@@ -25,7 +25,7 @@ def plot_and_save_max_mia(out_json="mia_summary.json", show=False):
     max_eps_worst_list = []
     max_acc_mean_list = []
     max_eps_mean_list = []
-    for attack_type in ["whitebox", "blackbox"]:
+    for attack_type in ["whitebox", "blackbox", "blackbox_shadow"]: #"blackbox_concept",
         acc_data = raw["accuracies"][attack_type]            # dict[str -> list]
         eps_data = raw["epsilons"][attack_type]
 
@@ -155,7 +155,27 @@ def plot_and_save_max_mia(out_json="mia_summary.json", show=False):
                 "max_mia_accuracy": float(max_acc_mean_list[1]),
                 "max_epsilon": float(max_eps_mean_list[1]),
             },
-        }
+        },
+        # "blackbox_concept": {
+        #     "worst_case": {
+        #         "max_mia_accuracy": float(max_acc_worst_list[2]),
+        #         "max_epsilon": float(max_eps_worst_list[2]),
+        #     },
+        #     "mean_across_clients": {
+        #         "max_mia_accuracy": float(max_acc_mean_list[2]),
+        #         "max_epsilon": float(max_eps_mean_list[2]),
+        #     },
+        # },
+        "blackbox_shadow": {
+            "worst_case": {
+                "max_mia_accuracy": float(max_acc_worst_list[2]),
+                "max_epsilon": float(max_eps_worst_list[2]),
+            },
+            "mean_across_clients": {
+                "max_mia_accuracy": float(max_acc_mean_list[2]),
+                "max_epsilon": float(max_eps_mean_list[2]),
+            },
+        },
     }
     with out_json.open("w") as fp:
         json.dump(summary, fp, indent=2)
