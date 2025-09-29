@@ -15,8 +15,7 @@ plt.style.use(['science', 'ieee', 'no-latex'])
 
 # List the paths containing the results
 paths = [
-    "/home/bigdata-01QYD/s280037/Projects/Federated-C2BM/outputs/multirun/2025-08-11/20-44-33",
-    "/home/bigdata-01QYD/s280037/Projects/Federated-C2BM/outputs/multirun/2025-08-11/20-46-06",
+    "/home/fdesantis/projects/Federated-C2BM/outputs/multirun/2025-08-25/22-51-17",
 ]
 
 # maximum number of clients
@@ -405,12 +404,10 @@ plot_single_c_on_y(performance, custom_order, model_styles, visualization_folder
 plot_single_id_ood_on_y(performance, custom_order, model_styles, visualization_folder, id=True)
 
 ### Intervention plot for single OOD interventions on y ###
-#plot_single_id_ood_on_y(performance, custom_order, model_styles, visualization_folder, id=False)
+plot_single_id_ood_on_y(performance, custom_order, model_styles, visualization_folder, id=False)
 
 ### Intervention plot for level interventions on c ###
 #plot_level_interventions_on_c(performance, custom_order, model_styles, visualization_folder)
-
-
 
 
 

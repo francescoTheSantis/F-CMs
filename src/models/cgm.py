@@ -8,9 +8,9 @@ from src.utils import get_graph_levels, get_parents
 from typing import Dict, Optional, Tuple
 
 
-class GraphCBM(BaseModel):
+class CGM(BaseModel):
     """
-    Graph CBM: It propagates the information through a predefined graph of concepts.
+    CGM: It propagates the information through a predefined graph of concepts.
     """
     def __init__(self, 
                  input_size, 
@@ -26,12 +26,11 @@ class GraphCBM(BaseModel):
                  y_info={},
                  graph=None,
                  graph_labels=None,
-                 prop_type='linear',
                  cat_latent=False,
                  c_name_index=None,
-                 name: str = 'GraphCBM'):
+                 name: str = 'CGM'):
         
-        super(GraphCBM, self).__init__(
+        super(CGM, self).__init__(
             input_size=input_size,
             hidden_size=hidden_size,
             output_size=output_size,
@@ -43,7 +42,7 @@ class GraphCBM(BaseModel):
             name=name
         )
         
-        # C2BM specific properties
+        # CGM specific properties
         self.has_concepts = True
         self.is_causal = True
         self.concept_hidden_size = concept_hidden_size
@@ -51,7 +50,6 @@ class GraphCBM(BaseModel):
         self.n_layers_propagation = n_layers_propagation
         self.graph = torch.Tensor(graph).int() if graph is not None else None
         self.graph_labels = graph_labels
-        self.prop_type = prop_type
         self.cat_latent = cat_latent
         
         # Setup concept loss weight
@@ -61,7 +59,7 @@ class GraphCBM(BaseModel):
         self._build_model()
 
     def _build_model(self):
-        """Build the C2BM model architecture."""
+        """Build the CGM model architecture."""
         # Encoder is already created in BaseModel
         
         # define concepts info parameters

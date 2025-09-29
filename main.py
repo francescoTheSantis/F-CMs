@@ -70,7 +70,7 @@ import shutil
 warnings.filterwarnings("ignore", message="When grouping with a length-1 list-like")
     
 
-@hydra.main(config_path="conf", config_name="my_sweep", version_base="1.3")
+@hydra.main(config_path="conf", config_name="sweep", version_base="1.3")
 def main(cfg: DictConfig) -> None:
     # various preliminaries, it set the seed for reproducibility
     torch.set_num_threads(cfg.get("num_threads", 1))
