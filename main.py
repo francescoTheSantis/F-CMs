@@ -1,4 +1,6 @@
 import numpy as np
+if not hasattr(np, "product"):
+    np.product = np.prod
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -363,6 +365,7 @@ def main(cfg: DictConfig) -> None:
                     set_parameters(local_engine, client_params[cid][0])
                     client_vec = flat_trainable_params_tensor(local_engine.model, cfg.device)
                     client_update = client_vec - global_vec
+                    client_update = client_update.cpu().numpy()
                     client_update = client_update / np.linalg.norm(client_update) 
 
                     # white-box attack (accumulate over the whole canary loader)
@@ -370,7 +373,8 @@ def main(cfg: DictConfig) -> None:
                     client_model = local_engine.model.to(cfg.device)
                     scores_whitebox_list = []
                     for batch in canary_loaders[cid]:
-                        scores_whitebox_list.append(score_whitebox_batch(batch, client_model, client_update, cfg, use_concepts=use_concepts))
+                        client_update_tensor = torch.from_numpy(client_update).to(cfg.device)
+                        scores_whitebox_list.append(score_whitebox_batch(batch, client_model, client_update_tensor, cfg, use_concepts=use_concepts))
                     scores_whitebox = np.concatenate(scores_whitebox_list, axis=0)
                     set_parameters(local_engine, client_params[cid][0])
 

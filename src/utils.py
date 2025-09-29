@@ -1517,6 +1517,7 @@ def compute_validation_loss(model, val_loader, cfg) -> float:
     if val_loader is None:
         return float('inf')
 
+    model.to(cfg.device)
     model.eval()
     total_loss, total_samples = 0.0, 0
     with torch.no_grad():
