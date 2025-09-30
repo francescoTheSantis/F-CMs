@@ -107,41 +107,6 @@ class CGM(BaseModel):
                     c_cardinality=[c for n, c in zip(self.combo_info['names'], self.combo_info['cardinality']) if n==name][0] #self.combo_info['cardinality'][concept_idx]
                 )               
 
-
-
-        # # Concept encoders, one for each concept
-        # self.concept_encoders = nn.ModuleDict()
-        # for name in self.combo_info['names']:
-        #     # concept_idx = self.combo_info['names'].index(name)
-        #     # concept_idx = self.c_name_index[name]
-        #     self.concept_encoders[name] = ConceptBlock(
-        #         input_size=self.hidden_size,
-        #         hidden_size=self.concept_hidden_size,
-        #         n_layers=self.n_layers_concept_encoder,
-        #         activation=self.activation,
-        #         c_cardinality=[c for n, c in zip(self.combo_info['names'], self.combo_info['cardinality']) if n==name][0] #self.combo_info['cardinality'][concept_idx]
-        #     )
-
-        
-        # # get list of propagators
-        # self.propagators = nn.ModuleDict()
-        # for i in range(1, len(graph_levels)):
-        #     level = graph_levels[i]
-        #     self.propagators[str(i)] = nn.ModuleDict()
-        #     for node in level:
-        #         node_name = self.combo_info['names'][node]
-        #         parents = get_parents(self.graph, node).tolist()
-        #         node_cardinality = self.combo_info['cardinality'][node]
-        #         parents_cardinality = [self.combo_info['cardinality'][p] for p in parents]
-                
-        #         self.propagators[str(i)][node_name] = MLP(
-        #             input_size=node_cardinality*self.concept_hidden_size,
-        #             hidden_size=self.concept_hidden_size,
-        #             output_size=node_cardinality,
-        #             n_layers=self.n_layers_propagation,
-        #             activation=self.activation
-        #         )
-
     def forward(self, x, c=None, intervention_index=None):
         """
         Forward pass of the C2BM model.
