@@ -551,54 +551,54 @@ def main(cfg: DictConfig) -> None:
         print(f"\033[90mFinished! Training time: {round((time.time() - t0)/60, 2)} minutes\033[0m")
         
         
-        # save mia results
-        if cfg.learning.settings.mia:
-            print(f"Saving MIA results: {os.getcwd() + '/mia_results.json'}")
-            with open("mia_results.json", "w") as fp:
-                json.dump(
-                    {
-                        "accuracies": mia_accuracies,  
-                        "epsilons":   mia_epsilons,
-                    }, fp, indent=2)
+        # # save mia results
+        # if cfg.learning.settings.mia:
+        #     print(f"Saving MIA results: {os.getcwd() + '/mia_results.json'}")
+        #     with open("mia_results.json", "w") as fp:
+        #         json.dump(
+        #             {
+        #                 "accuracies": mia_accuracies,  
+        #                 "epsilons":   mia_epsilons,
+        #             }, fp, indent=2)
             
-            # plot MIA results
-            plot_and_save_max_mia(show=False)
+        #     # plot MIA results
+        #     plot_and_save_max_mia(show=False)
         
-        # save sia results
-        if cfg.learning.settings.sia:
-            print(f"Saving SIA results: {os.getcwd() + '/sia_results.json'}")
-            with open("sia_results.json", "w") as fp:
-                json.dump(
-                    {
-                        "accuracies": sia_accuracies,
-                    }, fp, indent=2)
+        # # save sia results
+        # if cfg.learning.settings.sia:
+        #     print(f"Saving SIA results: {os.getcwd() + '/sia_results.json'}")
+        #     with open("sia_results.json", "w") as fp:
+        #         json.dump(
+        #             {
+        #                 "accuracies": sia_accuracies,
+        #             }, fp, indent=2)
             
-            # plot SIA results
-            plot_and_save_max_sia(out_json="sia_max.json", show=False)
+        #     # plot SIA results
+        #     plot_and_save_max_sia(out_json="sia_max.json", show=False)
         
 
-        # ------------------------------------------------------------
-        # Run DRA attacks
-        # ------------------------------------------------------------ 
-        if cfg.learning.settings.dra:
+        # # ------------------------------------------------------------
+        # # Run DRA attacks
+        # # ------------------------------------------------------------ 
+        # if cfg.learning.settings.dra:
             
-            # Perform DRA on each client test set for n_samples
-            for testid in range(len(test_dataloaders)):
-                dra_results = run_dra_attack(
-                    test_dataloader=test_dataloaders[testid],
-                    model=instantiate(cfg.engine).model,
-                    device=cfg.device,
-                    methods=("DLG","iDLG"),
-                    max_attacks_per_loader=min(cfg.learning.settings.dra_samples_per_loader, len(test_dataloaders[testid].dataset)),
-                    iters=300,
-                    lr=1.0,
-                    early_stop_tol=1e-6,
-                    log_every=2000,
-                )
-                # save the dict dra_results 
-                with open(f"dra_results_client_{testid}.json", "w") as fp:
-                    json.dump(dra_results, fp, indent=2)
-                summarize_dra_results(f"dra_results_client_{testid}.json", metrics=("mse", "loss"))
+        #     # Perform DRA on each client test set for n_samples
+        #     for testid in range(len(test_dataloaders)):
+        #         dra_results = run_dra_attack(
+        #             test_dataloader=test_dataloaders[testid],
+        #             model=instantiate(cfg.engine).model,
+        #             device=cfg.device,
+        #             methods=("DLG","iDLG"),
+        #             max_attacks_per_loader=min(cfg.learning.settings.dra_samples_per_loader, len(test_dataloaders[testid].dataset)),
+        #             iters=300,
+        #             lr=1.0,
+        #             early_stop_tol=1e-6,
+        #             log_every=2000,
+        #         )
+        #         # save the dict dra_results 
+        #         with open(f"dra_results_client_{testid}.json", "w") as fp:
+        #             json.dump(dra_results, fp, indent=2)
+        #         summarize_dra_results(f"dra_results_client_{testid}.json", metrics=("mse", "loss"))
 
   
     elif cfg.learning.mode == 'federated':
