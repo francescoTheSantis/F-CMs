@@ -2,7 +2,7 @@ from os import environ as env
 from pathlib import Path
 
 PROJECT_NAME = "federated_c2bm"
-WANDB_ENTITY = "federated_c2bm" # specify your wandb identity
+WANDB_ENTITY = "" # specify your wandb identity
 CACHE = Path(
     env.get(
         f"{PROJECT_NAME.upper()}_CACHE",
