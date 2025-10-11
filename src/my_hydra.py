@@ -9,9 +9,7 @@ def target_classname(cfg: DictConfig):
 def parse_hyperparams(cfg: DictConfig):
     hyperparams = {
         "engine": target_classname(cfg.engine).lower(),
-        "dataset": target_classname(cfg.dataset.loader)
-        .replace("Dataset", "")
-        .lower(),
+        "dataset": cfg.dataset.name.replace("Dataset", "").lower(),
         # "causal_discovery": cfg.causal_discovery.name if cfg.causal_discovery is not None 
         #                                               else None,
         "model": target_classname(cfg.model).lower(),

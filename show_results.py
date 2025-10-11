@@ -23,7 +23,9 @@ args = parser.parse_args()
 
 # List the paths containing the sweeps' results
 paths = [
-    "/home/fdesantis/projects/Federated-C2BM/outputs/multirun/2025-09-30/18-47-27",
+    "/home/fdesantis/projects/Federated-C2BM/outputs/multirun/2025-10-09/01-41-22",
+    "/home/fdesantis/projects/Federated-C2BM/outputs/multirun/2025-10-09/01-41-30",
+    "/home/fdesantis/projects/Federated-C2BM/outputs/multirun/2025-10-09/01-42-15"
 ]
 
 # folder to save processed results

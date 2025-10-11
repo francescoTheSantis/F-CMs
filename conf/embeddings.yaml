@@ -9,11 +9,8 @@ hydra:
   mode: MULTIRUN
   sweeper:
     params:
-      seed: 1, 2, 3
-      # possible models are:
-      # blackbox, blackbox_multi, cbm_linear, cbm_mlp, cem, cgm, c2bm
-      model: blackbox, blackbox_multi, cbm_linear, cbm_mlp, cem, c2bm, cgm
-      # possible datsets are: asia, sachs, alarm, hailfinder, insurance
+      seed: 1 #, 2, 3, 4, 5
+      model: blackbox 
       dataset: asia, sachs, alarm, insurance, hailfinder
       learning: centralized
       
@@ -21,7 +18,7 @@ model:
   hidden_size: 64
 
 dataset:
-  load_embeddings: true 
+  load_embeddings: false
   load_graph: false
   load_true_graph: true
   batch_size: 512
@@ -35,8 +32,8 @@ engine:
     lr: 0.00075
 
 trainer:
-  logger: wandb
-  max_epochs: 500
+  #logger: wandb
+  max_epochs: 1
   patience: 40
 
 rag:

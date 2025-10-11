@@ -6,13 +6,13 @@ hydra:
   mode: MULTIRUN
   sweeper:
     params:
-      seed: 1, 2, 3, 4, 5
+      seed: 1, 2, 3
       # possible datsets are: asia, sachs, alarm, hailfinder, insurance
       dataset: asia, sachs, alarm, insurance, hailfinder
-      client_id: 1, 2, 3, 4, 5
+      client_id: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
       # possible models are:
       # blackbox, blackbox_multi, cbm_linear, cbm_mlp, cem, cgm, c2bm
-      model: blackbox, cbm_linear, cbm_mlp, cem, c2bm, cgm
+      model: blackbox, blackbox_multi, cbm_linear, cbm_mlp, cem, c2bm, cgm
       learning: localized
       
 model:

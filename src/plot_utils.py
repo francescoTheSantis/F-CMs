@@ -1149,7 +1149,7 @@ def load_exps(exps_path, n_clients=5, args=None):
                 d['model'] = conf['model']['name']
 
                 if 'localized' in conf['learning']['mode']:
-                    d['learning'] = conf['learning']['mode'] + '_' + str(d['seed']) # TODO: change to client_id
+                    d['learning'] = conf['learning']['mode'] + '_' + str(conf['client_id'])
                 else:
                     d['learning'] = conf['learning']['mode']
 
@@ -1330,29 +1330,32 @@ def load_exps(exps_path, n_clients=5, args=None):
                 # Use the first matching graph
                 performance.at[idx, 'graph'] = matching_rows.iloc[0]['graph']
 
-    def _format_results(row, graph, dataset, count_nan=False, task=None):
-        values = [v for k,v in row.items() if k in row]
-        if count_nan:
-            return sum([1 for x in values if math.isnan(x)]) if values else 0
+    def _format_results(row, graph, dataset, model, count_nan=False, task=None):
+        if model != 'blackbox':
+            values = [v for k,v in row.items() if k in row]
+            if count_nan:
+                return sum([1 for x in values if math.isnan(x)]) if values else 0
+            else:
+                # replace the NaN values with the performance of the worst classifier
+                if dataset is not None and dataset in c_info and c_info[dataset] is not None:
+                    for idx, c_name in enumerate(graph):
+                        concept_cardinality_idx = c_info[dataset]['names'].index(c_name)
+                        concept_cardinality = c_info[dataset]['cardinality'][concept_cardinality_idx]
+                        if math.isnan(values[idx]):
+                            values[idx] = 1.0/concept_cardinality
+                if task is not None:
+                    values = values + [task]
+                return np.mean([x for x in values if not math.isnan(x)]) if values else 0
         else:
-            # replace the NaN values with the performance of the worst classifier
-            if dataset is not None and dataset in c_info and c_info[dataset] is not None:
-                for idx, c_name in enumerate(graph):
-                    concept_cardinality_idx = c_info[dataset]['names'].index(c_name)
-                    concept_cardinality = c_info[dataset]['cardinality'][concept_cardinality_idx]
-                    if math.isnan(values[idx]):
-                        values[idx] = 1.0/concept_cardinality
-            if task is not None:
-                values = values + [task]
-            return np.mean([x for x in values if not math.isnan(x)]) if values else 0
+            return 0
 
 
     # Aggregate the results in concept_acc and task_acc for each row.
     # For the localized training we ELIMINATE the NaN values for the OOD concepts and substitute those 
     # values with the performance of the worst classifier (e.g., if binary concept, then 50% accuracy).
-    performance['concept_left_out'] = performance.apply(lambda x: _format_results(x['concept_acc'], x['graph'], x['dataset'], count_nan=True), axis=1)
-    performance['agg_concept'] = performance.apply(lambda x: _format_results(x['concept_acc'], x['graph'], x['dataset'], count_nan=False), axis=1)
-    performance['agg_label'] = performance.apply(lambda x: _format_results(x['concept_acc'], x['graph'], x['dataset'], count_nan=False, task=x['task_acc']), axis=1)
+    performance['concept_left_out'] = performance.apply(lambda x: _format_results(x['concept_acc'], x['graph'], x['dataset'], x['model'], count_nan=True), axis=1)
+    performance['agg_concept'] = performance.apply(lambda x: _format_results(x['concept_acc'], x['graph'], x['dataset'], x['model'], count_nan=False), axis=1)
+    performance['agg_label'] = performance.apply(lambda x: _format_results(x['concept_acc'], x['graph'], x['dataset'], x['model'], count_nan=False, task=x['task_acc']), axis=1)
 
     return performance, c_info
 

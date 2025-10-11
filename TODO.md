@@ -1,21 +1,8 @@
 # TODO
 
-**Fra**
-- [ ] fare in modo che sia il client_id a selezionare la partizione (porzione di dataset su cui trainare) e non il seed
-- [ ] risultati troppo ballerini per local_federated (provare diversi epochs local)
-- [ ] sistemare bug split grafi (alarm-c2bm, insurance, heilfinder)
-- [ ] aggiungere dataset toy mnist/fashion-mnist
-- [ ] aggiungere dataset real (stesso paper del precedente)
-- [ ] task excluded experiment
-
-**Ari**
-- [ ] federated causal discovery alg. 1
-- [ ] federated causal discovery alg. 2
-- [ ] (optional) federated causal discovery alg. 3
-- [ ] background knowlwdge?
-- [ ] check partizioni
-
-**Dario**
-- [ ] wip
-- [ ] privacy leakage analysis, introduce MIAs
-- [ ] design specific-concept-based attack
+- [ ] concept accuracy
+- [ ] no worst case ma coverage
+- [ ] NO "single_c_interventions_on_y_clients_perspective"
+- [ ] numero unico per quantificare la bontà degli interventi del federato w.r.t. centralized
+- [ ] unobserved concept accuracy table
+- [ ] task NON necessariamente in ogni grafo (da ri-runnare cambiando)

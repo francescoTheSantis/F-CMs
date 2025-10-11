@@ -31,7 +31,9 @@ trainer:
   # gradient_clip_algorithm: norm
   monitor: "val_loss"
   patience: 20
-  devices: [2]
+  devices: [1]
+
+client_id: 1
 
 seed: 42
 notes: null
