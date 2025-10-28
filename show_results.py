@@ -10,18 +10,197 @@ import pickle
 import math
 from src.plot_utils import *
 import argparse
+from src.utils import select_round_indices_by_accuracy
 
 parser = argparse.ArgumentParser(description="Process some integers.")
 parser.add_argument("--mia_metric", type=str, default="max", choices=["max", "mean"],
                     help="Metric to use for MIA results (default: max)")
+parser.add_argument("--metric_mode", type=str, default="train", choices=["train", "val"],
+                    help="Metric mode to use for results (default: train)")
 args = parser.parse_args()
 
 warnings.filterwarnings("ignore")
 plt.style.use(['science', 'ieee', 'no-latex'])
 
+def _extract_series(entry):
+    if isinstance(entry, dict):
+        rounds = entry.get("rounds", [])
+        values = entry.get("values", [])
+    else:
+        if isinstance(entry, (list, tuple, np.ndarray)):
+            values = list(entry)
+        else:
+            values = []
+        rounds = list(range(1, len(values) + 1))
+    return rounds, values
+
+
+def _resolve_selected_indices(meta, series_len, default_indices=None, metric_mode=None):
+    meta = meta or {}
+    if not isinstance(meta, dict):
+        meta = dict(meta)
+    original_target_metric = meta.get("target_metric")
+    if metric_mode in ("train", "val"):
+        meta["target_metric"] = metric_mode
+
+    selected = meta.get("selected_indices")
+    if isinstance(selected, list):
+        should_ignore_cached = (
+            metric_mode in ("train", "val")
+            and original_target_metric not in (None, metric_mode)
+        )
+        if not should_ignore_cached:
+            filtered = [int(idx) for idx in selected if isinstance(idx, (int, float)) and 0 <= int(idx) < series_len]
+            if filtered:
+                return filtered
+
+    target_accuracy = meta.get("target_accuracy")
+    tolerance = meta.get("tolerance", 0.01)
+    target_metric = meta.get("target_metric", "val")
+
+    if target_accuracy is None:
+        if default_indices is not None:
+            return [int(idx) for idx in default_indices if isinstance(idx, (int, float)) and 0 <= int(idx) < series_len]
+        return list(range(series_len))
+
+    accuracy_val = meta.get("accuracy_val_avg", [])
+    accuracy_train = meta.get("accuracy_train_avg", [])
+    metric_series = accuracy_train if target_metric == "train" else accuracy_val
+    round_numbers = meta.get("all_rounds", list(range(1, len(metric_series) + 1)))
+
+    try:
+        indices = select_round_indices_by_accuracy(
+            metric_series,
+            round_numbers,
+            target_accuracy=target_accuracy,
+            tolerance=tolerance,
+        )
+    except Exception:
+        indices = []
+    indices = [int(idx) for idx in indices if isinstance(idx, (int, float)) and 0 <= int(idx) < series_len]
+    if indices:
+        return indices
+    if default_indices is not None:
+        return [int(idx) for idx in default_indices if isinstance(idx, (int, float)) and 0 <= int(idx) < series_len]
+    return []
+
+
+def _aggregate_mia_attack(acc_dict, indices, mia_metric_mode):
+    if not isinstance(acc_dict, dict) or not acc_dict:
+        return np.nan
+    if not indices:
+        return np.nan
+
+    rows = []
+    for cid in sorted(acc_dict.keys(), key=lambda x: int(x) if str(x).isdigit() else str(x)):
+        _, values = _extract_series(acc_dict[cid])
+        row = []
+        for idx in indices:
+            if 0 <= idx < len(values):
+                row.append(float(values[idx]))
+            else:
+                row.append(np.nan)
+        rows.append(row)
+
+    if not rows:
+        return np.nan
+    arr = np.array(rows, dtype=float)
+    if arr.size == 0 or np.all(np.isnan(arr)):
+        return np.nan
+
+    if mia_metric_mode == "max":
+        return float(np.nanmax(arr))
+
+    mean_per_round = np.nanmean(arr, axis=0)
+    if np.all(np.isnan(mean_per_round)):
+        return np.nan
+    return float(np.nanmax(mean_per_round))
+
+
+def _compute_mia_metrics_from_results(mia_data, mia_metric_mode, metric_mode=None):
+    accuracies = mia_data.get("accuracies")
+    meta = mia_data.get("meta", {}) or {}
+    if not isinstance(accuracies, dict):
+        return None, None, meta
+
+    if not isinstance(meta, dict):
+        meta = dict(meta)
+    if metric_mode in ("train", "val"):
+        effective_metric_mode = metric_mode
+    else:
+        existing = meta.get("target_metric")
+        effective_metric_mode = existing if existing in ("train", "val") else "val"
+    meta["target_metric"] = effective_metric_mode
+
+    primary_series_key = "accuracy_train_avg" if effective_metric_mode == "train" else "accuracy_val_avg"
+    fallback_series_key = "accuracy_val_avg" if primary_series_key == "accuracy_train_avg" else "accuracy_train_avg"
+
+    series_len = len(meta.get(primary_series_key, []))
+    if series_len == 0:
+        series_len = len(meta.get(fallback_series_key, []))
+    if series_len == 0:
+        for attack_dict in accuracies.values():
+            if isinstance(attack_dict, dict) and attack_dict:
+                first_entry = next(iter(attack_dict.values()))
+                _, values = _extract_series(first_entry)
+                series_len = len(values)
+                if series_len:
+                    break
+
+    indices = _resolve_selected_indices(meta, series_len, metric_mode=effective_metric_mode)
+    metrics = {}
+    for attack in ["whitebox", "blackbox", "blackbox_shadow"]:
+        metrics[attack] = _aggregate_mia_attack(accuracies.get(attack, {}), indices, mia_metric_mode)
+
+    if isinstance(meta, dict):
+        meta["selected_indices"] = indices
+        all_rounds = meta.get("all_rounds", list(range(1, series_len + 1)))
+        selected_rounds = [all_rounds[idx] for idx in indices if 0 <= idx < len(all_rounds)]
+        if selected_rounds:
+            meta["selected_rounds"] = selected_rounds
+
+        train_series = meta.get("accuracy_train_avg", [])
+        val_series = meta.get("accuracy_val_avg", [])
+        train_values = [train_series[idx] for idx in indices if 0 <= idx < len(train_series)]
+        val_values = [val_series[idx] for idx in indices if 0 <= idx < len(val_series)]
+        if train_values:
+            meta["selected_round_train_accuracies"] = train_values
+        if val_values:
+            meta["selected_round_val_accuracies"] = val_values
+
+        metric_series = train_series if effective_metric_mode == "train" else val_series
+        metric_values = [metric_series[idx] for idx in indices if 0 <= idx < len(metric_series)]
+        if metric_values:
+            meta["selected_round_metric_values"] = metric_values
+
+    return metrics, indices, meta
+
+
+def _compute_sia_metric_from_results(sia_data, default_indices=None, default_meta=None, metric_mode=None):
+    accuracies = sia_data.get("accuracies")
+    if not isinstance(accuracies, list):
+        return np.nan
+    meta = sia_data.get("meta", {}) or {}
+    if not meta and default_meta:
+        meta = default_meta
+
+    series_len = len(accuracies)
+    indices = _resolve_selected_indices(meta, series_len, default_indices=default_indices, metric_mode=metric_mode)
+    if not indices:
+        if meta.get("target_accuracy") is not None:
+            return np.nan
+        indices = list(range(series_len))
+
+    values = [accuracies[idx] for idx in indices if 0 <= idx < series_len]
+    if not values:
+        return np.nan
+    return float(np.nanmax(values))
+
 # List the paths containing the results
 paths = [
-    "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2025-09-05/22-13-56" # no concept infor for mia e sia
+    "/home/edoardog/projects/Federated-C2BM/outputs/multirun/2025-10-27/17-27-07"
+    #"/home/edoardog/projects/Federated-C2BM/outputs/multirun/2025-10-27/14-29-24"
+    #"/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2025-09-05/22-13-56" # no concept infor for mia e sia
     # "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2025-09-05/17-16-48" # same as the next but with no concept info for mia
     # "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2025-09-05/15-00-18" # same as the next but with correct shadow results for cmb, multi_output is enabled
     # "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2025-09-05/10-02-00" # same as the next but with whitebox score in shadow attack
@@ -208,59 +387,129 @@ for exp in exps_path:
             d['dra_dlg_mse_ci'] = np.nan
             d['dra_idlg_mse_mean'] = np.nan
             d['dra_idlg_mse_ci'] = np.nan
+            d['mia_reference_rounds'] = None
+            d['mia_reference_metric'] = None
+            d['mia_target_metric'] = None
+            d['mia_target_accuracy'] = np.nan
 
             # Paths
-            sia_path = os.path.join(exp, 'sia_max.json')
+            sia_results_path = os.path.join(exp, 'sia_results.json')
+            sia_max_path = os.path.join(exp, 'sia_max.json')
+            mia_results_path = os.path.join(exp, 'mia_results.json')
             mia_summary_path = os.path.join(exp, 'mia_summary.json')
             mia_max_path = os.path.join(exp, 'mia_max.json')  # optional alt name
             dra_summary_path = os.path.join(exp, 'dra_results_summary.json')
 
-            # --- SIA (accuracy) ---
-            if os.path.exists(sia_path):
+            # --- MIA (accuracy) ---
+            mia_selected_indices = None
+            mia_meta = {}
+            mia_metrics = None
+            if os.path.exists(mia_results_path):
                 try:
-                    with open(sia_path, 'r') as f:
+                    with open(mia_results_path, 'r') as f:
+                        mia_results_data = json.load(f)
+                    mia_metrics, mia_selected_indices, mia_meta = _compute_mia_metrics_from_results(
+                        mia_results_data,
+                        args.mia_metric,
+                        metric_mode=args.metric_mode,
+                    )
+                    if mia_metrics is not None:
+                        d['mia_whitebox_acc'] = mia_metrics.get('whitebox', np.nan)
+                        d['mia_blackbox_acc'] = mia_metrics.get('blackbox', np.nan)
+                        d['mia_shadow_acc'] = mia_metrics.get('blackbox_shadow', np.nan)
+                except Exception:
+                    mia_metrics = None
+                    mia_selected_indices = None
+                    mia_meta = {}
+
+            if (mia_metrics is None) or (not isinstance(mia_metrics, dict)):
+                def _legacy_mia_acc(mia_json, key):
+                    try:
+                        if key in mia_json:
+                            if args.mia_metric == "max":
+                                if 'worst_case' in mia_json[key] and 'max_mia_accuracy' in mia_json[key]['worst_case']:
+                                    return float(mia_json[key]['worst_case']['max_mia_accuracy'])
+                            elif args.mia_metric == "mean":
+                                if 'mean_across_clients' in mia_json[key] and 'max_mia_accuracy' in mia_json[key]['mean_across_clients']:
+                                    return float(mia_json[key]['mean_across_clients']['max_mia_accuracy'])
+                            else:
+                                raise ValueError(f"Unknown MIA metric: {args.mia_metric}")
+                    except Exception:
+                        return np.nan
+                    return np.nan
+
+                mia_json = None
+                if os.path.exists(mia_summary_path):
+                    try:
+                        with open(mia_summary_path, 'r') as f:
+                            mia_json = json.load(f)
+                    except Exception:
+                        mia_json = None
+                elif os.path.exists(mia_max_path):
+                    try:
+                        with open(mia_max_path, 'r') as f:
+                            mia_json = json.load(f)
+                    except Exception:
+                        mia_json = None
+
+                if isinstance(mia_json, dict):
+                    d['mia_whitebox_acc'] = _legacy_mia_acc(mia_json, 'whitebox')
+                    d['mia_blackbox_acc'] = _legacy_mia_acc(mia_json, 'blackbox')
+                    d['mia_shadow_acc'] = _legacy_mia_acc(mia_json, 'blackbox_shadow')
+
+            if isinstance(mia_meta, dict) and mia_meta:
+                rounds_list = mia_meta.get("selected_rounds")
+                if (not rounds_list) and mia_selected_indices is not None:
+                    all_rounds_meta = mia_meta.get("all_rounds", [])
+                    if not all_rounds_meta:
+                        all_rounds_meta = list(range(1, len(mia_meta.get("accuracy_val_avg", [])) + 1))
+                    rounds_list = []
+                    for idx in mia_selected_indices:
+                        if 0 <= idx < len(all_rounds_meta):
+                            rounds_list.append(all_rounds_meta[idx])
+                if rounds_list:
+                    d['mia_reference_rounds'] = ", ".join(str(r) for r in rounds_list)
+
+                metric_vals = mia_meta.get("selected_round_metric_values")
+                target_metric_meta = mia_meta.get("target_metric")
+                if (not metric_vals) and mia_selected_indices is not None:
+                    series = mia_meta.get("accuracy_train_avg" if target_metric_meta == "train" else "accuracy_val_avg", [])
+                    metric_vals = []
+                    for idx in mia_selected_indices:
+                        if 0 <= idx < len(series):
+                            metric_vals.append(series[idx])
+                if metric_vals:
+                    formatted_vals = [f"{val:.4f}" for val in metric_vals if isinstance(val, (int, float, np.floating))]
+                    if formatted_vals:
+                        d['mia_reference_metric'] = ", ".join(formatted_vals)
+
+                if target_metric_meta:
+                    d['mia_target_metric'] = target_metric_meta
+                target_acc_meta = mia_meta.get("target_accuracy")
+                if target_acc_meta is not None:
+                    d['mia_target_accuracy'] = target_acc_meta
+
+            # --- SIA (accuracy) ---
+            if os.path.exists(sia_results_path):
+                try:
+                    with open(sia_results_path, 'r') as f:
+                        sia_results_data = json.load(f)
+                    d['sia_acc'] = _compute_sia_metric_from_results(
+                        sia_results_data,
+                        default_indices=mia_selected_indices,
+                        default_meta=mia_meta,
+                        metric_mode=args.metric_mode,
+                    )
+                except Exception:
+                    pass
+            if np.isnan(d['sia_acc']) and os.path.exists(sia_max_path):
+                try:
+                    with open(sia_max_path, 'r') as f:
                         sia_json = json.load(f)
-                    # expect {"max_sia_accuracy": float}
                     if 'max_sia_accuracy' in sia_json:
                         d['sia_acc'] = float(sia_json['max_sia_accuracy'])
                 except Exception:
                     pass
-
-            # --- MIA (accuracy) ---
-            def _get_mia_acc(mia_json, key):
-                """Return a single accuracy for `key` ('whitebox'|'blackbox'), preferring worst_case.max_mia_accuracy then mean_across_clients.max_mia_accuracy."""
-                try:
-                    if key in mia_json:
-                        if args.mia_metric == "max":
-                            if 'worst_case' in mia_json[key] and 'max_mia_accuracy' in mia_json[key]['worst_case']:
-                                return float(mia_json[key]['worst_case']['max_mia_accuracy'])
-                        elif args.mia_metric == "mean":
-                            if 'mean_across_clients' in mia_json[key] and 'max_mia_accuracy' in mia_json[key]['mean_across_clients']:
-                                return float(mia_json[key]['mean_across_clients']['max_mia_accuracy'])
-                        else:
-                            raise ValueError(f"Unknown MIA metric: {args.mia_metric}")
-                except Exception:
-                    return np.nan
-                return np.nan
-
-            mia_json = None
-            if os.path.exists(mia_summary_path):
-                try:
-                    with open(mia_summary_path, 'r') as f:
-                        mia_json = json.load(f)
-                except Exception:
-                    mia_json = None
-            elif os.path.exists(mia_max_path):
-                try:
-                    with open(mia_max_path, 'r') as f:
-                        mia_json = json.load(f)
-                except Exception:
-                    mia_json = None
-
-            if isinstance(mia_json, dict):
-                d['mia_whitebox_acc'] = _get_mia_acc(mia_json, 'whitebox')
-                d['mia_blackbox_acc'] = _get_mia_acc(mia_json, 'blackbox')
-                d['mia_shadow_acc'] = _get_mia_acc(mia_json, 'blackbox_shadow')
 
             # --- DRA (MSE) recomputed on COMMON kept indices across experiments ---
             raw_dra_path = os.path.join(exp, 'dra_results_client_0.json')
@@ -595,22 +844,37 @@ for learning in performance['learning'].unique():
         'mia_whitebox_acc', 'mia_blackbox_acc', 'mia_shadow_acc',
         'dra_dlg_mse_mean',
         'dra_idlg_mse_mean',
+        'mia_target_metric',
+        'mia_target_accuracy',
+        'mia_reference_rounds',
+        'mia_reference_metric',
     ]
     available_cols = [c for c in privacy_cols if c in performance.columns]
     privacy_df = performance[available_cols].copy()
 
-    # Drop rows where everything is NaN for privacy metrics
-    metric_cols = [c for c in available_cols if c not in ['model','dataset','learning']]
-    if metric_cols:
-        privacy_df = privacy_df.dropna(subset=metric_cols, how='all')
+    info_columns = ['mia_target_metric', 'mia_target_accuracy', 'mia_reference_rounds', 'mia_reference_metric']
+    metric_cols = [c for c in available_cols if c not in ['model','dataset','learning'] + info_columns]
+    info_cols_present = [c for c in info_columns if c in available_cols]
 
-    if not privacy_df.empty and metric_cols:
+    drop_cols = metric_cols if metric_cols else info_cols_present
+    if drop_cols:
+        privacy_df = privacy_df.dropna(subset=drop_cols, how='all')
+
+    if not privacy_df.empty and (metric_cols or info_cols_present):
         # Aggregate across folds (runs) → mean and std per (model, dataset, learning)
         mean_agg = {c: 'mean' for c in metric_cols}
-        std_agg  = {c: 'std'  for c in metric_cols}
+        info_agg = {c: 'first' for c in info_cols_present}
+        agg_dict = {}
+        agg_dict.update(mean_agg)
+        agg_dict.update(info_agg)
         grp = ['model', 'dataset', 'learning']
-        privacy_mean = privacy_df.groupby(grp, as_index=False).agg(mean_agg)
-        privacy_std  = privacy_df.groupby(grp, as_index=False).agg(std_agg).fillna(0)
+        privacy_mean = privacy_df.groupby(grp, as_index=False).agg(agg_dict)
+
+        if metric_cols:
+            std_agg  = {c: 'std'  for c in metric_cols}
+            privacy_std  = privacy_df.groupby(grp, as_index=False).agg(std_agg).fillna(0)
+        else:
+            privacy_std = pd.DataFrame()
 
         # For each learning method and dataset, create a table:
         attack_columns = [
@@ -649,7 +913,10 @@ for learning in performance['learning'].unique():
 
                 # index by model
                 sub_m = sub_m.set_index('model')
-                sub_s = sub_s.set_index('model')
+                if not privacy_std.empty and not sub_s.empty and 'model' in sub_s.columns:
+                    sub_s = sub_s.set_index('model')
+                else:
+                    sub_s = pd.DataFrame(index=sub_m.index)
 
                 # Build the printable table with formatted strings
                 table_rows = {}
@@ -658,13 +925,44 @@ for learning in performance['learning'].unique():
                     for col_title, mean_key, std_key in attack_columns:
                         is_acc = mean_key in acc_metrics
                         mean_val = sub_m.loc[model_name, mean_key] if mean_key in sub_m.columns else np.nan
-                        std_val  = sub_s.loc[model_name, std_key] if std_key in sub_s.columns else np.nan
+                        std_val  = sub_s.loc[model_name, std_key] if (not sub_s.empty and std_key in sub_s.columns) else np.nan
                         # Handle duplicated index (multiple rows) by taking mean again
                         if isinstance(mean_val, pd.Series):
                             mean_val = float(mean_val.mean())
                         if isinstance(std_val, pd.Series):
                             std_val = float(std_val.mean())
                         row[col_title] = _fmt_cell(mean_val, std_val, is_accuracy=is_acc)
+
+                    def _scalar(value):
+                        if isinstance(value, pd.Series):
+                            return value.iloc[0]
+                        return value
+
+                    rounds_val = _scalar(sub_m.loc[model_name, 'mia_reference_rounds']) if 'mia_reference_rounds' in sub_m.columns else None
+                    metric_val = _scalar(sub_m.loc[model_name, 'mia_reference_metric']) if 'mia_reference_metric' in sub_m.columns else None
+                    target_metric_val = _scalar(sub_m.loc[model_name, 'mia_target_metric']) if 'mia_target_metric' in sub_m.columns else None
+                    target_acc_val = _scalar(sub_m.loc[model_name, 'mia_target_accuracy']) if 'mia_target_accuracy' in sub_m.columns else None
+
+                    row['MIA rounds'] = rounds_val if (isinstance(rounds_val, str) and rounds_val.strip()) else 'N/A'
+
+                    if isinstance(metric_val, str) and metric_val.strip():
+                        parts = [p.strip() for p in metric_val.split(',') if p.strip()]
+                        formatted = []
+                        for part in parts:
+                            try:
+                                formatted.append(f"{float(part)*100:.2f}")
+                            except ValueError:
+                                formatted.append(part)
+                        row['MIA ref acc (%)'] = '; '.join(formatted) if formatted else 'N/A'
+                    else:
+                        row['MIA ref acc (%)'] = 'N/A'
+
+                    row['Target metric'] = target_metric_val if (isinstance(target_metric_val, str) and target_metric_val) else 'N/A'
+                    if isinstance(target_acc_val, (int, float, np.floating)) and not np.isnan(target_acc_val):
+                        row['Target acc (%)'] = f"{float(target_acc_val)*100:.2f}"
+                    else:
+                        row['Target acc (%)'] = 'N/A'
+
                     table_rows[model_name] = row
 
                 privacy_table = pd.DataFrame.from_dict(table_rows, orient='index')

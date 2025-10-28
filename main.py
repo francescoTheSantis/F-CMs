@@ -46,6 +46,8 @@ from src.utils import (
     compute_validation_loss,
     shadow_mlp_scores_loader,
     score_blackbox_loss_loader,
+    compute_loader_accuracy,
+    select_round_indices_by_accuracy,
 )
 
 from src.dra import (
@@ -304,9 +306,19 @@ def main(cfg: DictConfig) -> None:
         best_round = 0
         no_improvement_count = 0
         sia_accuracies = []
-        history = {"round": [], "loss_val_avg": [], "loss_val_client": {}}
+        history = {
+            "round": [],
+            "loss_val_avg": [],
+            "loss_val_client": {},
+            "accuracy_val_avg": [],
+            "accuracy_val_client": {},
+            "accuracy_train_avg": [],
+            "accuracy_train_client": {},
+        }
         for cid in range(n_clients):
             history["loss_val_client"][cid] = []
+            history["accuracy_val_client"][cid] = []
+            history["accuracy_train_client"][cid] = []
         mia_accuracies, mia_epsilons = initialize_mia_results(n_clients)
         global_params = get_parameters(instantiate(cfg.engine))
         for rnd in range(1, n_rounds + 1):
@@ -403,14 +415,18 @@ def main(cfg: DictConfig) -> None:
                     # evaluate white-box
                     accuracy_mia, privacy_estimate = evaluate_privacy(scores_whitebox, true_in_out, cfg)
                     print(f"Client {cid} - MIA accuracy (whitebox): {accuracy_mia:.4f}, epsilon: {privacy_estimate:.4f}")
-                    mia_accuracies['whitebox'][cid].append(accuracy_mia)
-                    mia_epsilons['whitebox'][cid].append(privacy_estimate)
+                    mia_accuracies['whitebox'][cid]["rounds"].append(rnd)
+                    mia_accuracies['whitebox'][cid]["values"].append(accuracy_mia)
+                    mia_epsilons['whitebox'][cid]["rounds"].append(rnd)
+                    mia_epsilons['whitebox'][cid]["values"].append(privacy_estimate)
 
                     # evaluate black-box baseline (loss)
                     accuracy_mia, privacy_estimate = evaluate_privacy(scores_blackbox_loss, true_in_out, cfg)
                     print(f"Client {cid} - MIA accuracy (blackbox-loss): {accuracy_mia:.4f}, epsilon: {privacy_estimate:.4f}")
-                    mia_accuracies['blackbox'][cid].append(accuracy_mia)
-                    mia_epsilons['blackbox'][cid].append(privacy_estimate)
+                    mia_accuracies['blackbox'][cid]["rounds"].append(rnd)
+                    mia_accuracies['blackbox'][cid]["values"].append(accuracy_mia)
+                    mia_epsilons['blackbox'][cid]["rounds"].append(rnd)
+                    mia_epsilons['blackbox'][cid]["values"].append(privacy_estimate)
 
                     # evaluate black-box concept-entropy
                     # accuracy_mia, privacy_estimate = evaluate_privacy(scores_blackbox_concept, true_in_out, cfg)
@@ -421,8 +437,10 @@ def main(cfg: DictConfig) -> None:
                     # evaluate black-box shadow MLP
                     accuracy_mia, privacy_estimate = evaluate_privacy(scores_blackbox_shadow, true_in_out, cfg)
                     print(f"Client {cid} - MIA accuracy (blackbox-shadow): {accuracy_mia:.4f}, epsilon: {privacy_estimate:.4f}")
-                    mia_accuracies['blackbox_shadow'][cid].append(accuracy_mia)
-                    mia_epsilons['blackbox_shadow'][cid].append(privacy_estimate)
+                    mia_accuracies['blackbox_shadow'][cid]["rounds"].append(rnd)
+                    mia_accuracies['blackbox_shadow'][cid]["values"].append(accuracy_mia)
+                    mia_epsilons['blackbox_shadow'][cid]["rounds"].append(rnd)
+                    mia_epsilons['blackbox_shadow'][cid]["values"].append(privacy_estimate)
             
             # ------------------------------------------------------------
             # Privacy Attack: SIA
@@ -453,20 +471,58 @@ def main(cfg: DictConfig) -> None:
             # ------------------------------------------------------------
             # FedAvg aggregation on client validation sets
             # ------------------------------------------------------------
-            print(f"\033[93mEvaluating on client validation sets\033[0m")
+            print(f"\033[93mEvaluating on client training/validation sets\033[0m")
             local_engine = instantiate(cfg.engine)
             set_parameters(local_engine, global_params)
             local_engine.model.to(cfg.device)
+            train_weighted_sum, train_total_samples = 0.0, 0
+            acc_weighted_sum, acc_total_samples = 0.0, 0
             for cid in range(n_clients):
-                val_metrics = trainer.validate(local_engine, val_dataloaders[cid])[0]  #{'val/c/asia': 0.0, 'val/c/bronc': 0.0, 'val/c/either': 0.0, 'val/c/lung': 0.0, 'val/c/smoke': 0.0, 'val/c/tub': 0.0, 'val/c/xray': 0.0, 'val_loss': nan}
+                train_loader = train_dataloaders[cid]
+                train_acc_value, train_acc_samples = compute_loader_accuracy(local_engine.model, train_loader, cfg)
+                history["accuracy_train_client"][cid].append(train_acc_value)
+                if train_acc_value is not None:
+                    train_weighted_sum += train_acc_value * train_acc_samples
+                    train_total_samples += train_acc_samples
+
+                val_loader = val_dataloaders[cid]
+                if val_loader is None:
+                    history["accuracy_val_client"][cid].append(None)
+                    continue
+                val_metrics = trainer.validate(local_engine, val_loader)[0]  #{'val/c/asia': 0.0, 'val/c/bronc': 0.0, 'val/c/either': 0.0, 'val/c/lung': 0.0, 'val/c/smoke': 0.0, 'val/c/tub': 0.0, 'val/c/xray': 0.0, 'val_loss': nan}
                 val_losses.append(val_metrics['val_loss'])
-                sizes.append(len(val_dataloaders[cid].dataset))
+                sizes.append(len(val_loader.dataset))
+
+                acc_value, acc_samples = compute_loader_accuracy(local_engine.model, val_loader, cfg)
+                history["accuracy_val_client"][cid].append(acc_value)
+                if acc_value is not None:
+                    acc_weighted_sum += acc_value * acc_samples
+                    acc_total_samples += acc_samples
 
             # log aggregated val metrics (weighted)
-            w_loss = sum(l * s for l, s in zip(val_losses, sizes)) / sum(sizes)
+            if sizes:
+                w_loss = sum(l * s for l, s in zip(val_losses, sizes)) / sum(sizes)
+            else:
+                w_loss = float("nan")
             history["round"].append(rnd)
             history["loss_val_avg"].append(w_loss)
             print(f"\033[92m✅ aggregated  val_loss={w_loss:.4f}\033[0m")
+
+            if train_total_samples > 0:
+                w_train_acc = train_weighted_sum / train_total_samples
+                history["accuracy_train_avg"].append(w_train_acc)
+                print(f"\033[92m✅ aggregated train_accuracy={w_train_acc:.4f}\033[0m")
+            else:
+                history["accuracy_train_avg"].append(None)
+                print(f"\033[93m⚠️  skipped aggregated train_accuracy (no labelled samples)\033[0m")
+
+            if acc_total_samples > 0:
+                w_acc = acc_weighted_sum / acc_total_samples
+                history["accuracy_val_avg"].append(w_acc)
+                print(f"\033[92m✅ aggregated  val_accuracy={w_acc:.4f}\033[0m")
+            else:
+                history["accuracy_val_avg"].append(None)
+                print(f"\033[93m⚠️  skipped aggregated val_accuracy (no labelled samples)\033[0m")
 
             # check improvement
             if w_loss < best_loss:
@@ -501,9 +557,15 @@ def main(cfg: DictConfig) -> None:
             # Trim history
             history["round"] = history["round"][:n_keep]
             history["loss_val_avg"] = history["loss_val_avg"][:n_keep]
+            history["accuracy_val_avg"] = history["accuracy_val_avg"][:n_keep]
+            history["accuracy_train_avg"] = history["accuracy_train_avg"][:n_keep]
             for cid in range(n_clients):
                 if cid in history["loss_val_client"]:
                     history["loss_val_client"][cid] = history["loss_val_client"][cid][:n_keep]
+                if cid in history["accuracy_val_client"]:
+                    history["accuracy_val_client"][cid] = history["accuracy_val_client"][cid][:n_keep]
+                if cid in history["accuracy_train_client"]:
+                    history["accuracy_train_client"][cid] = history["accuracy_train_client"][cid][:n_keep]
 
             # Trim SIA (per-round)
             if isinstance(sia_accuracies, list) and len(sia_accuracies) > 0:
@@ -512,12 +574,20 @@ def main(cfg: DictConfig) -> None:
             # Trim MIA (per-round, per-client, per-variant)
             if isinstance(mia_accuracies, dict):
                 for variant, per_client in mia_accuracies.items():
-                    for cid in range(len(per_client)):
-                        per_client[cid] = per_client[cid][:n_keep]
+                    for cid, series in per_client.items():
+                        if isinstance(series, dict):
+                            series["rounds"] = series.get("rounds", [])[:n_keep]
+                            series["values"] = series.get("values", [])[:n_keep]
+                        elif isinstance(series, list):
+                            per_client[cid] = series[:n_keep]
             if isinstance(mia_epsilons, dict):
                 for variant, per_client in mia_epsilons.items():
-                    for cid in range(len(per_client)):
-                        per_client[cid] = per_client[cid][:n_keep]
+                    for cid, series in per_client.items():
+                        if isinstance(series, dict):
+                            series["rounds"] = series.get("rounds", [])[:n_keep]
+                            series["values"] = series.get("values", [])[:n_keep]
+                        elif isinstance(series, list):
+                            per_client[cid] = series[:n_keep]
 
             print(f"\033[96mTrimmed metrics to best round {best_round} (keeping {n_keep} rounds, removed {max(0, len(history['loss_val_avg']) - n_keep)}).\033[0m")
         except Exception as e:
@@ -554,26 +624,97 @@ def main(cfg: DictConfig) -> None:
         print(f"\033[90mFinished! Training time: {round((time.time() - t0)/60, 2)} minutes\033[0m")
         
         
+        # Prepare round selection information for privacy summaries
+        target_accuracy = getattr(cfg.learning.settings, "mia_target_accuracy", None)
+        tolerance = getattr(cfg.learning.settings, "mia_accuracy_tolerance", 0.01)
+        target_metric = getattr(cfg.learning.settings, "mia_target_metric", "val")
+        if target_metric not in ("val", "train"):
+            print(f"\033[93m[WARN] Unknown mia_target_metric '{target_metric}', defaulting to 'val'.\033[0m")
+            target_metric = "val"
+
+        all_rounds = history["round"]
+        all_val_accuracies = history["accuracy_val_avg"]
+        all_train_accuracies = history["accuracy_train_avg"]
+        metric_series = all_train_accuracies if target_metric == "train" else all_val_accuracies
+
+        if target_accuracy is not None and len(all_rounds) > 0:
+            selected_indices = select_round_indices_by_accuracy(
+                metric_series,
+                all_rounds,
+                target_accuracy=target_accuracy,
+                tolerance=tolerance,
+            )
+            selected_indices = [int(idx) for idx in selected_indices if idx < len(all_rounds)]
+        else:
+            selected_indices = list(range(len(all_rounds)))
+
+        if target_accuracy is not None:
+            if selected_indices:
+                if len(selected_indices) == 1:
+                    idx = selected_indices[0]
+                    metric_val = metric_series[idx] if idx < len(metric_series) else None
+                    metric_val_str = f"{metric_val:.4f}" if isinstance(metric_val, (int, float)) and metric_val is not None else "N/A"
+                    rnd = all_rounds[idx] if idx < len(all_rounds) else idx + 1
+                    print(f"\033[92m✅ Using round {rnd} ({target_metric}_accuracy={metric_val_str}) for privacy comparison (target={target_accuracy}, tol={tolerance}).\033[0m")
+                else:
+                    rounds_list = [all_rounds[idx] for idx in selected_indices if idx < len(all_rounds)]
+                    print(f"\033[92m✅ Using rounds {rounds_list} for privacy comparison (target={target_accuracy}, tol={tolerance}).\033[0m")
+            else:
+                print(f"\033[93m⚠️  No {target_metric} accuracy met target {target_accuracy}; privacy summaries will still be saved for downstream filtering.\033[0m")
+
+        selected_rounds = [all_rounds[idx] for idx in selected_indices if idx < len(all_rounds)]
+        selected_metric_values = [metric_series[idx] for idx in selected_indices if idx < len(metric_series)]
+        selected_val_accuracies = [all_val_accuracies[idx] for idx in selected_indices if idx < len(all_val_accuracies)]
+        selected_train_accuracies = [all_train_accuracies[idx] for idx in selected_indices if idx < len(all_train_accuracies)]
+
         # save mia results
         if cfg.learning.settings.mia:
-            print(f"Saving MIA results: {os.getcwd() + '/mia_results.json'}")
+            mia_meta = {
+                "all_rounds": all_rounds,
+                "accuracy_val_avg": all_val_accuracies,
+                "accuracy_train_avg": all_train_accuracies,
+                "selected_indices": selected_indices,
+                "selected_rounds": selected_rounds,
+                "selected_round_metric_values": selected_metric_values,
+                "selected_round_val_accuracies": selected_val_accuracies,
+                "selected_round_train_accuracies": selected_train_accuracies,
+                "target_accuracy": target_accuracy,
+                "tolerance": tolerance,
+                "target_metric": target_metric,
+            }
+
+            print(f"Saving MIA results: {os.path.join(os.getcwd(), 'mia_results.json')}")
             with open("mia_results.json", "w") as fp:
                 json.dump(
                     {
-                        "accuracies": mia_accuracies,  
-                        "epsilons":   mia_epsilons,
-                    }, fp, indent=2)
+                        "accuracies": mia_accuracies,
+                        "epsilons": mia_epsilons,
+                        "meta": mia_meta,
+                    },
+                    fp,
+                    indent=2,
+                )
             
             # plot MIA results
             plot_and_save_max_mia(show=False)
         
         # save sia results
         if cfg.learning.settings.sia:
+            sia_meta = {
+                "all_rounds": all_rounds,
+                "selected_indices": selected_indices,
+                "target_accuracy": target_accuracy,
+                "tolerance": tolerance,
+                "target_metric": target_metric,
+                "accuracy_val_avg": all_val_accuracies,
+                "accuracy_train_avg": all_train_accuracies,
+            }
             print(f"Saving SIA results: {os.getcwd() + '/sia_results.json'}")
             with open("sia_results.json", "w") as fp:
                 json.dump(
                     {
                         "accuracies": sia_accuracies,
+                        "meta": sia_meta,
                     }, fp, indent=2)
             
             # plot SIA results

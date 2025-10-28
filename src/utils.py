@@ -1047,22 +1047,18 @@ def evaluate_privacy(scores, true_in_out, cfg):
     return accuracy_mia, privacy_estimate
 
 
-def initialize_mia_results(n_clients):
-    """ Initialize dictionaries to store MIA results for each client """
+def initialize_mia_results(n_clients: int):
+    """Initialize dictionaries to store MIA per-client metrics with explicit round tracking."""
     if n_clients <= 0:
         raise ValueError("Number of clients must be greater than 0")
 
-    mia_accuracies = {"whitebox": {}, "blackbox": {}, "blackbox_shadow": {}} # "blackbox_concept": {}
-    mia_epsilons = {"whitebox": {}, "blackbox": {}, "blackbox_shadow": {}} #  "blackbox_concept": {}
-    for cid in range(n_clients):
-        mia_accuracies["whitebox"][cid] = []
-        mia_accuracies["blackbox"][cid] = []
-        # mia_accuracies["blackbox_concept"][cid] = []
-        mia_accuracies["blackbox_shadow"][cid] = []
-        mia_epsilons["whitebox"][cid] = []
-        mia_epsilons["blackbox"][cid] = []
-        # mia_epsilons["blackbox_concept"][cid] = []
-        mia_epsilons["blackbox_shadow"][cid] = []
+    attack_keys = ["whitebox", "blackbox", "blackbox_shadow"]  # "blackbox_concept" optional
+
+    def _empty_entry():
+        return {"rounds": [], "values": []}
+
+    mia_accuracies = {attack: {cid: _empty_entry() for cid in range(n_clients)} for attack in attack_keys}
+    mia_epsilons = {attack: {cid: _empty_entry() for cid in range(n_clients)} for attack in attack_keys}
 
     return mia_accuracies, mia_epsilons
 
@@ -1547,6 +1543,141 @@ def compute_validation_loss(model, val_loader, cfg) -> float:
             total_samples += bs
 
     return (total_loss / total_samples) if total_samples > 0 else float('inf')
+
+
+def compute_loader_accuracy(model, loader, cfg) -> Tuple[Optional[float], int]:
+    """
+    Compute accuracy on a single loader.
+
+    Returns:
+        accuracy (float or None), number of evaluated samples (int)
+    """
+    if loader is None:
+        return None, 0
+
+    model.to(cfg.device)
+    model.eval()
+    total_correct, total_samples = 0, 0
+
+    with torch.no_grad():
+        for batch in loader:
+            x = batch['x'].to(cfg.device)
+            y = batch['y'].to(cfg.device).long().view(-1)
+            mask = (y != -1)
+            mask_count = int(mask.sum().item())
+            if mask_count == 0:
+                continue
+
+            y_hat, c_hat = model(x)
+            y_hat_metric, _ = model.filter_output_for_metric(y_hat, c_hat)
+            preds = torch.argmax(y_hat_metric, dim=1)
+
+            total_correct += int((preds[mask] == y[mask]).sum().item())
+            total_samples += mask_count
+
+    if total_samples == 0:
+        return None, 0
+
+    return total_correct / total_samples, total_samples
+
+
+def compute_weighted_accuracy(model, loaders: List[Optional[DataLoader]], cfg) -> Tuple[Optional[float], List[Optional[float]]]:
+    """
+    Compute weighted average accuracy across multiple loaders.
+
+    Returns:
+        weighted_accuracy (float or None), list of per-loader accuracies.
+    """
+    per_loader_acc = []
+    weighted_sum, total_samples = 0.0, 0
+
+    for loader in loaders:
+        acc, n = compute_loader_accuracy(model, loader, cfg)
+        per_loader_acc.append(acc)
+        if acc is not None:
+            weighted_sum += acc * n
+            total_samples += n
+
+    weighted_accuracy = (weighted_sum / total_samples) if total_samples > 0 else None
+    return weighted_accuracy, per_loader_acc
+
+
+def select_round_indices_by_accuracy(
+    accuracy_history: List[Optional[float]],
+    round_numbers: List[int],
+    target_accuracy: float,
+    tolerance: float,
+    fallback_to_closest: bool = True,
+) -> List[int]:
+    """
+    Pick indices of rounds whose accuracy is within tolerance of the target.
+    Optionally fall back to the closest round if none matches the tolerance.
+    """
+    if not accuracy_history or not round_numbers:
+        return []
+
+    selected = [
+        idx for idx, acc in enumerate(accuracy_history)
+        if acc is not None and abs(acc - target_accuracy) <= tolerance
+    ]
+    if selected:
+        return selected
+
+    if not fallback_to_closest:
+        return []
+
+    distances = [
+        abs(acc - target_accuracy) if acc is not None else float("inf")
+        for acc in accuracy_history
+    ]
+    finite_distances = [d for d in distances if math.isfinite(d)]
+    if not finite_distances:
+        return []
+
+    best_distance = min(finite_distances)
+    best_index = distances.index(best_distance)
+    return [best_index]
+
+
+def filter_mia_results_by_indices(
+    mia_metrics: Dict[str, Dict[str, Any]],
+    selected_indices: List[int],
+    round_numbers: List[int],
+) -> Dict[str, Dict[str, Any]]:
+    """
+    Filter MIA metrics to keep only the entries corresponding to selected round indices.
+    Ensures that each client entry is stored as {'rounds': [...], 'values': [...]}.
+    """
+    if not selected_indices:
+        return mia_metrics
+
+    selected_indices = sorted(set(selected_indices))
+
+    for attack_type, client_dict in mia_metrics.items():
+        for cid, payload in client_dict.items():
+            if isinstance(payload, dict):
+                rounds = list(payload.get("rounds", []))
+                values = list(payload.get("values", []))
+            else:
+                values = list(payload)
+                rounds = round_numbers[:len(values)]
+
+            filtered_rounds, filtered_values = [], []
+            for idx in selected_indices:
+                if idx >= len(values):
+                    continue
+                actual_round = round_numbers[idx] if idx < len(round_numbers) else (
+                    rounds[idx] if idx < len(rounds) else idx + 1
+                )
+                filtered_rounds.append(actual_round)
+                filtered_values.append(values[idx])
+
+            client_dict[cid] = {
+                "rounds": filtered_rounds,
+                "values": filtered_values,
+            }
+
+    return mia_metrics
 
 def plot_training_metrics(history: Dict[str, Any], save_dir: str = ".") -> None:
     """

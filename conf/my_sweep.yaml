@@ -13,7 +13,7 @@ hydra:
       dataset: asia
       # possible models are:
       # blackbox, blackbox_multi, cbm_linear, cbm_mlp, cem, cgm, c2bm
-      model: blackbox
+      model: blackbox, blackbox_multi, cbm_linear, cbm_mlp, cem, cgm, c2bm
       learning: local_federated
       
 model:
@@ -21,7 +21,7 @@ model:
   concept_loss_weight: 0.8
 
 dataset:
-  load_embeddings: true
+  load_embeddings: false
   load_graph: false
   load_true_graph: true
   batch_size: 16 # 512

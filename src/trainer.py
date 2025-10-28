@@ -1,6 +1,6 @@
 from time import time
 
-from omegaconf import DictConfig
+from omegaconf import DictConfig, ListConfig
 import pytorch_lightning as pl
 from pytorch_lightning import Trainer as _Trainer_
 from pytorch_lightning.callbacks import (
@@ -146,8 +146,16 @@ class Trainer(_Trainer_):
             if dev_cfg in (None, "auto"):
                 devices = None           
             else:
-                devices = int(dev_cfg)
-                if devices <= 0:        
+                if isinstance(dev_cfg, ListConfig):
+                    dev_cfg = list(dev_cfg)
+                if isinstance(dev_cfg, (list, tuple)):
+                    devices = max(1, len(dev_cfg))
+                else:
+                    try:
+                        devices = int(dev_cfg)
+                    except (TypeError, ValueError):
+                        devices = 1
+                if devices <= 0:
                     devices = 1
         
         if cfg.trainer.get("logger") is not None:
@@ -159,6 +167,7 @@ class Trainer(_Trainer_):
             for k, v in cfg.trainer.items()
             if k not in ["monitor", "patience", "logger"]
         }
+        trainer_kwargs["devices"] = devices
         super().__init__(
             callbacks=callbacks,
             accelerator=accelerator,
