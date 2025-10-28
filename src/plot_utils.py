@@ -1135,6 +1135,31 @@ def load_exps(exps_path, n_clients=5, args=None):
 
     # Precompute once for this run
     common_kept_indices = compute_common_kept_indices(exps_path, methods=('DLG','iDLG'), metrics=('mse','loss'))
+    valid_concepts = []
+
+    # search if there is 'c2bm' in the config files of the run, if it is save the name of the concepts
+    valid_concepts = {}
+
+    for exp in exps_path:
+        conf_file = os.path.join(exp, '.hydra/config.yaml')      
+        if os.path.exists(conf_file):
+            with open(conf_file, 'r') as file:
+                conf = yaml.safe_load(file)
+                dataset = conf['dataset']['name']
+                seed = conf['seed']
+                key = dataset + '_' + str(seed)
+                if key not in valid_concepts.keys():
+                    valid_concepts[key]= []
+                if conf['model']['name'] == 'c2bm':
+                    result_file = os.path.join(exp, 'results') 
+                    concept_file = os.path.join(result_file, 'c_accuracy.pkl')
+                    with open(concept_file, 'rb') as file:
+                        # save in valid concepts the name of the concepts in concept file
+                        concept_results = pickle.load(file)
+                    valid_concepts[key] = [k for k, v in concept_results.items() if _is_finite_number(v)]
+
+                
+                    
 
     for exp in exps_path:
         d = {}
@@ -1147,6 +1172,7 @@ def load_exps(exps_path, n_clients=5, args=None):
                 d['seed'] = conf['seed']
                 d['dataset'] = conf['dataset']['name']
                 d['model'] = conf['model']['name']
+                key = d['dataset'] + '_' + str(d['seed'])
 
                 if 'localized' in conf['learning']['mode']:
                     d['learning'] = conf['learning']['mode'] + '_' + str(conf['client_id'])
@@ -1159,6 +1185,9 @@ def load_exps(exps_path, n_clients=5, args=None):
                     concept_results = pickle.load(file)
 
                 # Select the last row of the dataframe where we test the model
+                if len(valid_concepts[key]) > 0:
+                    # filter only the valid concepts
+                    concept_results = {k:v for k,v in concept_results.items() if k in valid_concepts[key]}
                 d['concept_acc'] = concept_results
 
                 # Task results
@@ -1178,10 +1207,12 @@ def load_exps(exps_path, n_clients=5, args=None):
                     d['graph'] = None
 
                 ###### Collect the results for the interventions
-                single_id_on_y_files = [os.path.join(exp, 'results', f'client_{client}_single_IDc_interventions_on_y.pkl') \
-                                        for client in range(1,n_clients)] # The maximum number of clients has to be known
-                single_ood_on_y_files = [os.path.join(exp, 'results', f'client_{client}_single_OODc_interventions_on_y.pkl') \
-                                        for client in range(1,n_clients)] # The maximum number of clients has to be known
+                single_id_on_y_file =  os.path.join(exp, 'results', 'single_IDc_interventions_on_y.pkl')
+                #[os.path.join(exp, 'results', f'client_{client}_single_IDc_interventions_on_y.pkl') \
+                #                        for client in range(1,n_clients)] # The maximum number of clients has to be known
+                single_ood_on_y_file = os.path.join(exp, 'results', 'single_OODc_interventions_on_y.pkl')
+                #single_ood_on_y_files = [os.path.join(exp, 'results', f'client_{client}_single_OODc_interventions_on_y.pkl') \
+                #                        for client in range(1,n_clients)] # The maximum number of clients has to be known
 
                 level_interventions_on_c_file = os.path.join(exp, 'results', 'level_interventions_on_c.pkl')
 
@@ -1192,14 +1223,25 @@ def load_exps(exps_path, n_clients=5, args=None):
                 # now read all those files 
                 d['single_id_on_y'] = []
                 d['single_ood_on_y'] = []
-                for client in range(1, n_clients):
-                    if os.path.exists(single_id_on_y_files[client-1]):
-                        with open(single_id_on_y_files[client-1], 'rb') as f:
-                            d['single_id_on_y'].append(pickle.load(f))
+                #for client in range(1, n_clients):
+                if os.path.exists(single_id_on_y_file):
+                    with open(single_id_on_y_file, 'rb') as f:
+                        data = pickle.load(f)
+                        for client in range(1, n_clients+1):
+                            # filter only the concepts in valid concepts
+                            if len(valid_concepts[key]) > 0:
+                                data[client] = {k:v for k,v in data[client].items() if k in valid_concepts[key] or k == "_baseline"}
+                        d['single_id_on_y'] = data
+                           
 
-                    if os.path.exists(single_ood_on_y_files[client-1]):
-                        with open(single_ood_on_y_files[client-1], 'rb') as f:
-                            d['single_ood_on_y'].append(pickle.load(f))
+                if os.path.exists(single_ood_on_y_file):
+                    with open(single_ood_on_y_file, 'rb') as f:
+                        data = pickle.load(f)
+                        for client in range(1, n_clients+1):
+                            # filter only the concepts in valid concepts
+                            if len(valid_concepts[key]) > 0:
+                                data[client] = {k:v for k,v in data[client].items() if k in valid_concepts[key] or k == "_baseline"}
+                        d['single_ood_on_y'] = data
 
                 if d['single_id_on_y'] == []:
                     d['single_id_on_y'] = None
@@ -1220,7 +1262,11 @@ def load_exps(exps_path, n_clients=5, args=None):
 
                 if os.path.exists(single_c_interventions_on_y_file):
                     with open(single_c_interventions_on_y_file, 'rb') as f:
-                        d['single_c_interventions_on_y'] = pickle.load(f)
+                        single_c_interventions_on_y = pickle.load(f)
+                    # eliminate concepts not in valid concepts
+                    if len(valid_concepts[key]) > 0:
+                        single_c_interventions_on_y = {k:v for k,v in single_c_interventions_on_y.items() if k in valid_concepts[key] or k == "_baseline"}
+                    d['single_c_interventions_on_y'] = single_c_interventions_on_y
                 else:
                     d['single_c_interventions_on_y'] = None
 
