@@ -1348,6 +1348,163 @@ class _ShadowMLP(nn.Module):
     def forward(self, x):
         return self.net(x).squeeze(-1)
 
+# def shadow_mlp_scores_loader(  # NOTA: HERE: questa funzione e' stata usata per asia
+#     loader,
+#     model,
+#     cfg,
+#     y_mem_labels: np.ndarray,
+#     use_concepts: bool = True,
+#     epochs: int = 100,
+#     batch_size: int = 64,
+#     lr: float = 1e-3,
+#     k_folds: int = 10,
+#     class_conditional: bool = True,
+#     weight_decay: float = 1e-3,
+#     dropout: float = 0.1,
+#     standardize: bool = True,
+#     raw_concept_probs: bool = False,
+#     scores_whitebox_list: list = None
+# ):
+#     """
+#     Train a shadow MLP with K-fold CV and return out-of-fold membership scores
+#     for ALL samples in loader order (sigmoid logits).
+
+#     If class_conditional=True, we train one attacker per true label and
+#     use the class-specific attacker to score samples of that class.
+
+#     Optionally, scores_whitebox_list (white-box scores) can be appended as an additional feature
+#     to the attacker; they are concatenated and aligned in loader order and added as a new column to the features.
+#     """
+#     # Create a single-batch dataloader to avoid feature dimension mismatches
+#     dataset = loader.dataset
+#     single_batch_loader = torch.utils.data.DataLoader(
+#         dataset, 
+#         batch_size=len(dataset),  # Process all samples in one batch
+#         shuffle=False,  # Preserve order
+#         collate_fn=loader.collate_fn if hasattr(loader, 'collate_fn') else None
+#     )
+    
+#     # extract features (+ y_true labels for class-conditional training)
+#     X, y_true = _extract_bb_features_from_loader(
+#         single_batch_loader, model, cfg,
+#         use_concepts=use_concepts,
+#         raw_concept_probs=raw_concept_probs
+#     )
+#     # ---- Optional: append white-box scores as an additional feature ----
+#     y_mem_np = np.asarray(y_mem_labels)  # we'll possibly trim this if needed
+#     if scores_whitebox_list is not None and len(scores_whitebox_list) > 0:
+#         if isinstance(scores_whitebox_list, np.ndarray):
+#             wb_scores = scores_whitebox_list.reshape(-1)
+#         else:
+#             wb_scores = np.concatenate([np.asarray(s).reshape(-1) for s in scores_whitebox_list], axis=0)
+#         # align lengths if needed
+#         if wb_scores.shape[0] != X.shape[0]:
+#             min_n = min(wb_scores.shape[0], X.shape[0], y_true.shape[0], y_mem_np.shape[0])
+#             print(f"\033[93m[shadow-mlp] Warning: length mismatch (X={X.shape[0]}, wb={wb_scores.shape[0]}). Trimming to {min_n}.\033[0m")
+#             wb_scores = wb_scores[:min_n]
+#             X = X[:min_n]
+#             y_true = y_true[:min_n]
+#             y_mem_np = y_mem_np[:min_n]
+#         # append as a feature column
+#         X = np.concatenate([X, wb_scores.astype(np.float32)[:, None]], axis=1)
+#     y_mem = torch.from_numpy(y_mem_np.astype(np.float32))
+#     n = len(y_mem)
+#     scores = torch.zeros(n, dtype=torch.float32)
+
+#     # helper to run CV for a given subset of indices
+#     def _cv_scores_for_indices(indices: np.ndarray) -> torch.Tensor:
+#         if len(indices) == 0:
+#             return torch.zeros(0, dtype=torch.float32)
+#         # create stratified folds across membership labels within the subset
+#         idx0 = indices[y_mem_labels[indices] == 0]
+#         idx1 = indices[y_mem_labels[indices] == 1]
+#         # guard for tiny splits
+#         folds0 = np.array_split(idx0, k_folds) if len(idx0) >= k_folds else [idx0]
+#         folds1 = np.array_split(idx1, k_folds) if len(idx1) >= k_folds else [idx1]
+
+#         out = torch.zeros(len(indices), dtype=torch.float32)
+#         # map from absolute indices to local positions for writing back
+#         abs_to_local = {abs_i: j for j, abs_i in enumerate(indices)}
+
+#         num_folds = max(len(folds0), len(folds1))
+#         for k in range(num_folds):
+#             val_idx_abs = np.concatenate([
+#                 folds0[k % len(folds0)] if len(folds0) > 0 else np.array([], dtype=int),
+#                 folds1[k % len(folds1)] if len(folds1) > 0 else np.array([], dtype=int),
+#             ])
+#             train_idx_abs = np.setdiff1d(indices, val_idx_abs)
+
+#             X_train = torch.from_numpy(X[train_idx_abs]).float().to(cfg.device)
+#             y_train = y_mem[train_idx_abs].to(cfg.device)
+#             X_val   = torch.from_numpy(X[val_idx_abs]).float().to(cfg.device)
+
+#             # standardize per fold
+#             if standardize and X_train.numel() > 0:
+#                 mu = X_train.mean(dim=0, keepdim=True)
+#                 sd = X_train.std(dim=0, keepdim=True).clamp_min(1e-6)
+#                 X_train = (X_train - mu) / sd
+#                 X_val   = (X_val   - mu) / sd
+
+#             attacker = _ShadowMLP(X_train.shape[1], hidden=64, dropout=dropout).to(cfg.device)
+#             pos = y_train.sum()
+#             neg = len(y_train) - pos
+#             pos_weight = (neg / (pos + 1e-8)).clamp(min=0.0, max=1e6)
+#             criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+#             optim = torch.optim.Adam(attacker.parameters(), lr=lr, weight_decay=weight_decay)
+
+#             ds = torch.utils.data.TensorDataset(X_train, y_train)
+#             print(ds)
+#             print(len(ds))
+#             dl = torch.utils.data.DataLoader(ds, batch_size=batch_size, shuffle=True)
+
+#             attacker.train()
+#             best_val = float('inf')
+#             patience_counter = 0
+#             for _ in range(epochs):
+#                 for xb, yb in dl:
+#                     optim.zero_grad()
+#                     logits = attacker(xb)
+#                     loss = criterion(logits, yb)
+#                     loss.backward()
+#                     optim.step()
+
+#                 with torch.no_grad():
+#                     attacker.eval()
+#                     if len(X_val) > 0:
+#                         val_logits = attacker(X_val)
+#                         val_loss = criterion(val_logits, y_mem[val_idx_abs].to(cfg.device))
+#                         if val_loss < best_val - 1e-5:
+#                             best_val = val_loss
+#                             patience_counter = 0
+#                         else:
+#                             patience_counter += 1
+#                         attacker.train()
+#                         if patience_counter >= 5:
+#                             break
+
+#             attacker.eval()
+#             with torch.no_grad():
+#                 s = torch.sigmoid(attacker(X_val)).detach().cpu()   # (|val_idx_abs|,)
+#             # write back to out-of-fold vector
+#             for j, abs_i in enumerate(val_idx_abs):
+#                 out_idx = abs_to_local[abs_i]
+#                 out[out_idx] = s[j]
+
+#         return out
+
+#     if class_conditional:
+#         classes = np.unique(y_true)
+#         for cls in classes:
+#             cls_indices = np.where(y_true == cls)[0]
+#             out_scores = _cv_scores_for_indices(cls_indices)
+#             scores[cls_indices] = out_scores
+#     else:
+#         all_indices = np.arange(n)
+#         scores[:] = _cv_scores_for_indices(all_indices)
+
+#     return scores.numpy()
+# -------------------------------------------------------------------------------------------------
+
 def shadow_mlp_scores_loader(
     loader,
     model,
@@ -1372,71 +1529,108 @@ def shadow_mlp_scores_loader(
     If class_conditional=True, we train one attacker per true label and
     use the class-specific attacker to score samples of that class.
 
-    Optionally, scores_whitebox_list (white-box scores) can be appended as an additional feature
-    to the attacker; they are concatenated and aligned in loader order and added as a new column to the features.
+    Optionally, scores_whitebox_list can be appended as a feature.
     """
-    # Create a single-batch dataloader to avoid feature dimension mismatches
+    # Build a single-batch loader to keep feature dims consistent
     dataset = loader.dataset
     single_batch_loader = torch.utils.data.DataLoader(
-        dataset, 
-        batch_size=len(dataset),  # Process all samples in one batch
-        shuffle=False,  # Preserve order
-        collate_fn=loader.collate_fn if hasattr(loader, 'collate_fn') else None
+        dataset,
+        batch_size=len(dataset),
+        shuffle=False,
+        collate_fn=getattr(loader, "collate_fn", None),
     )
-    
-    # extract features (+ y_true labels for class-conditional training)
+
+    # Extract features (+ labels for class-conditional attackers)
     X, y_true = _extract_bb_features_from_loader(
         single_batch_loader, model, cfg,
         use_concepts=use_concepts,
         raw_concept_probs=raw_concept_probs
     )
-    # ---- Optional: append white-box scores as an additional feature ----
-    y_mem_np = np.asarray(y_mem_labels)  # we'll possibly trim this if needed
+
+    # Optionally append white-box scores as a feature
+    y_mem_np = np.asarray(y_mem_labels)
     if scores_whitebox_list is not None and len(scores_whitebox_list) > 0:
-        if isinstance(scores_whitebox_list, np.ndarray):
-            wb_scores = scores_whitebox_list.reshape(-1)
-        else:
-            wb_scores = np.concatenate([np.asarray(s).reshape(-1) for s in scores_whitebox_list], axis=0)
-        # align lengths if needed
+        wb_scores = (
+            scores_whitebox_list.reshape(-1)
+            if isinstance(scores_whitebox_list, np.ndarray)
+            else np.concatenate([np.asarray(s).reshape(-1) for s in scores_whitebox_list], axis=0)
+        )
         if wb_scores.shape[0] != X.shape[0]:
             min_n = min(wb_scores.shape[0], X.shape[0], y_true.shape[0], y_mem_np.shape[0])
             print(f"\033[93m[shadow-mlp] Warning: length mismatch (X={X.shape[0]}, wb={wb_scores.shape[0]}). Trimming to {min_n}.\033[0m")
             wb_scores = wb_scores[:min_n]
-            X = X[:min_n]
-            y_true = y_true[:min_n]
+            X        = X[:min_n]
+            y_true   = y_true[:min_n]
             y_mem_np = y_mem_np[:min_n]
-        # append as a feature column
         X = np.concatenate([X, wb_scores.astype(np.float32)[:, None]], axis=1)
+
     y_mem = torch.from_numpy(y_mem_np.astype(np.float32))
     n = len(y_mem)
     scores = torch.zeros(n, dtype=torch.float32)
 
-    # helper to run CV for a given subset of indices
+    # ---------- robust CV helper ----------
     def _cv_scores_for_indices(indices: np.ndarray) -> torch.Tensor:
+        # nothing to score
         if len(indices) == 0:
             return torch.zeros(0, dtype=torch.float32)
-        # create stratified folds across membership labels within the subset
-        idx0 = indices[y_mem_labels[indices] == 0]
-        idx1 = indices[y_mem_labels[indices] == 1]
-        # guard for tiny splits
-        folds0 = np.array_split(idx0, k_folds) if len(idx0) >= k_folds else [idx0]
-        folds1 = np.array_split(idx1, k_folds) if len(idx1) >= k_folds else [idx1]
+        # if subset too small, default to 0.5
+        if len(indices) < 2:
+            return torch.full((len(indices),), 0.5, dtype=torch.float32)
+
+        # stratify by membership when possible
+        mem_sub = y_mem_np[indices]
+        idx0 = indices[mem_sub == 0]
+        idx1 = indices[mem_sub == 1]
+
+        fold_pairs = []  # list of (train_idx_abs, val_idx_abs)
+
+        if len(idx0) == 0 or len(idx1) == 0:
+            # no stratification possible → simple K-fold on the subset
+            n_folds = min(k_folds, max(2, len(indices)))
+            simple_folds = [f for f in np.array_split(indices, n_folds) if len(f) > 0]
+            for v in simple_folds:
+                t = np.setdiff1d(indices, v)
+                if len(t) == 0:
+                    # move 1 sample from val→train
+                    if len(v) > 1:
+                        t, v = v[:1], v[1:]
+                    else:
+                        continue  # still empty; skip
+                fold_pairs.append((t, v))
+        else:
+            # stratified folds with no empty splits
+            n_folds0 = min(k_folds, len(idx0))
+            n_folds1 = min(k_folds, len(idx1))
+            folds0 = np.array_split(idx0, n_folds0)
+            folds1 = np.array_split(idx1, n_folds1)
+            num_folds = max(n_folds0, n_folds1)
+            for k in range(num_folds):
+                v = np.concatenate([folds0[k % n_folds0], folds1[k % n_folds1]])
+                if len(v) == 0:
+                    continue
+                t = np.setdiff1d(indices, v)
+                if len(t) == 0:
+                    if len(v) > 1:
+                        t, v = v[:1], v[1:]
+                    else:
+                        continue
+                fold_pairs.append((t, v))
+
+        # If we still failed to build any fold, default to 0.5
+        if len(fold_pairs) == 0:
+            return torch.full((len(indices),), 0.5, dtype=torch.float32)
 
         out = torch.zeros(len(indices), dtype=torch.float32)
-        # map from absolute indices to local positions for writing back
         abs_to_local = {abs_i: j for j, abs_i in enumerate(indices)}
 
-        num_folds = max(len(folds0), len(folds1))
-        for k in range(num_folds):
-            val_idx_abs = np.concatenate([
-                folds0[k % len(folds0)] if len(folds0) > 0 else np.array([], dtype=int),
-                folds1[k % len(folds1)] if len(folds1) > 0 else np.array([], dtype=int),
-            ])
-            train_idx_abs = np.setdiff1d(indices, val_idx_abs)
-
+        for train_idx_abs, val_idx_abs in fold_pairs:
+            if len(val_idx_abs) == 0:
+                continue
+            # tensors
             X_train = torch.from_numpy(X[train_idx_abs]).float().to(cfg.device)
             y_train = y_mem[train_idx_abs].to(cfg.device)
             X_val   = torch.from_numpy(X[val_idx_abs]).float().to(cfg.device)
+            y_val   = y_mem[val_idx_abs].to(cfg.device)
 
             # standardize per fold
             if standardize and X_train.numel() > 0:
@@ -1445,15 +1639,19 @@ def shadow_mlp_scores_loader(
                 X_train = (X_train - mu) / sd
                 X_val   = (X_val   - mu) / sd
 
+            # if training set is tiny, clamp batch_size
+            ds = torch.utils.data.TensorDataset(X_train, y_train)
+            if len(ds) == 0:
+                # cannot train this fold, skip
+                continue
+            dl = torch.utils.data.DataLoader(ds, batch_size=max(1, min(batch_size, len(ds))), shuffle=True)
+
             attacker = _ShadowMLP(X_train.shape[1], hidden=64, dropout=dropout).to(cfg.device)
             pos = y_train.sum()
             neg = len(y_train) - pos
             pos_weight = (neg / (pos + 1e-8)).clamp(min=0.0, max=1e6)
-            criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-            optim = torch.optim.Adam(attacker.parameters(), lr=lr, weight_decay=weight_decay)
-
-            ds = torch.utils.data.TensorDataset(X_train, y_train)
-            dl = torch.utils.data.DataLoader(ds, batch_size=batch_size, shuffle=True)
+            criterion  = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+            optim      = torch.optim.Adam(attacker.parameters(), lr=lr, weight_decay=weight_decay)
 
             attacker.train()
             best_val = float('inf')
@@ -1470,7 +1668,7 @@ def shadow_mlp_scores_loader(
                     attacker.eval()
                     if len(X_val) > 0:
                         val_logits = attacker(X_val)
-                        val_loss = criterion(val_logits, y_mem[val_idx_abs].to(cfg.device))
+                        val_loss = criterion(val_logits, y_val)
                         if val_loss < best_val - 1e-5:
                             best_val = val_loss
                             patience_counter = 0
@@ -1483,10 +1681,8 @@ def shadow_mlp_scores_loader(
             attacker.eval()
             with torch.no_grad():
                 s = torch.sigmoid(attacker(X_val)).detach().cpu()   # (|val_idx_abs|,)
-            # write back to out-of-fold vector
             for j, abs_i in enumerate(val_idx_abs):
-                out_idx = abs_to_local[abs_i]
-                out[out_idx] = s[j]
+                out[abs_to_local[abs_i]] = s[j]
 
         return out
 
@@ -1501,7 +1697,7 @@ def shadow_mlp_scores_loader(
         scores[:] = _cv_scores_for_indices(all_indices)
 
     return scores.numpy()
-# -------------------------------------------------------------------------------------------------
+
 
 def compute_validation_loss(model, val_loader, cfg) -> float:
     """
@@ -1518,6 +1714,7 @@ def compute_validation_loss(model, val_loader, cfg) -> float:
         return float('inf')
 
     model.eval()
+    model.to(cfg.device)
     total_loss, total_samples = 0.0, 0
     with torch.no_grad():
         for batch in val_loader:

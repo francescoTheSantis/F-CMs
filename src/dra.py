@@ -569,8 +569,8 @@ def _is_finite_number(x: Any) -> bool:
     return isinstance(x, (int, float)) and math.isfinite(float(x))
 
 def summarize_dra_results(
-    input_path: str | Path,
-    output_path: Optional[str | Path] = None,
+    input_path: str,
+    output_path: Optional[str] = None,
     metrics: Iterable[str] = ("mse_model", "loss"),
     methods: Optional[Iterable[str]] = None,
 ) -> Dict[str, Any]:

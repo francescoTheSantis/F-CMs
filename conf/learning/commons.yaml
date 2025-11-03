@@ -1,4 +1,4 @@
-n_clients: 4
+n_clients: 10
 annotation_assumption: 'task_included'
 subgraphs:
   modality: 'connected_nodes'

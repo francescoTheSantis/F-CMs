@@ -338,7 +338,7 @@ def main(cfg: DictConfig) -> None:
                 trainer.logger.log_hyperparams(parse_hyperparams(cfg)) 
                 trainer.fit(local_engine, train_dataloaders[cid])
                 n_samples = len(train_dataloaders[cid].dataset)
-                    
+                                    
                 # local validation
                 if val_dataloaders[cid] is not None:
                     avg_loss = compute_validation_loss(local_engine.model, val_dataloaders[cid], cfg)
@@ -363,7 +363,7 @@ def main(cfg: DictConfig) -> None:
                     set_parameters(local_engine, client_params[cid][0])
                     client_vec = flat_trainable_params_tensor(local_engine.model, cfg.device)
                     client_update = client_vec - global_vec
-                    client_update = client_update / np.linalg.norm(client_update) 
+                    client_update = client_update / torch.tensor(np.linalg.norm(client_update.cpu()), device=cfg.device) 
 
                     # white-box attack (accumulate over the whole canary loader)
                     set_parameters(local_engine, global_params)
@@ -392,7 +392,7 @@ def main(cfg: DictConfig) -> None:
                         epochs=shadow_epochs,
                         batch_size=64,
                         lr=1e-4,
-                        k_folds=10,
+                        k_folds=5,
                         scores_whitebox_list=None,  # no need to use them.. no effect observed in practice on asia
                     )
 
