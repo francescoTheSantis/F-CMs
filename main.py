@@ -81,7 +81,7 @@ import shutil
 warnings.filterwarnings("ignore", message="When grouping with a length-1 list-like")
    
 
-@hydra.main(config_path="conf", config_name="my_sweep", version_base="1.3")
+@hydra.main(config_path="conf", config_name="test", version_base="1.3")
 def main(cfg: DictConfig) -> None:
     # various preliminaries, it set the seed for reproducibility
     torch.set_num_threads(cfg.get("num_threads", 1))
@@ -337,6 +337,7 @@ def main(cfg: DictConfig) -> None:
                 trainer = Trainer(cfg, client_id=cid)
                 trainer.logger.log_hyperparams(parse_hyperparams(cfg)) 
                 trainer.fit(local_engine, train_dataloaders[cid])
+                local_engine.model.to(cfg.device) # put back to device
                 n_samples = len(train_dataloaders[cid].dataset)
                                     
                 # local validation
@@ -348,14 +349,14 @@ def main(cfg: DictConfig) -> None:
                 client_params.append((get_parameters(local_engine), n_samples))
 
             
-            # ------------------------------------------------------------
-            # Privacy Attack: MIA
-            # ------------------------------------------------------------
-            if cfg.learning.settings.mia:
-                print(f"\033[93mRunning Membership Inference Attack (MIA)\033[0m")
+            # # ------------------------------------------------------------
+            # # Privacy Attack: MIA
+            # # ------------------------------------------------------------
+            # if cfg.learning.settings.mia:
+            #     print(f"\033[93mRunning Membership Inference Attack (MIA)\033[0m")
                 
-                set_parameters(local_engine, global_params)
-                global_vec = flat_trainable_params_tensor(local_engine.model, cfg.device)
+            #     set_parameters(local_engine, global_params)
+            #     global_vec = flat_trainable_params_tensor(local_engine.model, cfg.device)
 
                 for cid in range(n_clients):
                     # normalize client update vector
@@ -365,21 +366,21 @@ def main(cfg: DictConfig) -> None:
                     client_update = client_vec - global_vec
                     client_update = client_update / torch.tensor(np.linalg.norm(client_update.cpu()), device=cfg.device) 
 
-                    # white-box attack (accumulate over the whole canary loader)
-                    set_parameters(local_engine, global_params)
-                    client_model = local_engine.model.to(cfg.device)
-                    scores_whitebox_list = []
-                    for batch in canary_loaders[cid]:
-                        scores_whitebox_list.append(score_whitebox_batch(batch, client_model, client_update, cfg, use_concepts=use_concepts))
-                    scores_whitebox = np.concatenate(scores_whitebox_list, axis=0)
-                    set_parameters(local_engine, client_params[cid][0])
+            #         # white-box attack (accumulate over the whole canary loader)
+            #         set_parameters(local_engine, global_params)
+            #         client_model = local_engine.model.to(cfg.device)
+            #         scores_whitebox_list = []
+            #         for batch in canary_loaders[cid]:
+            #             scores_whitebox_list.append(score_whitebox_batch(batch, client_model, client_update, cfg, use_concepts=use_concepts))
+            #         scores_whitebox = np.concatenate(scores_whitebox_list, axis=0)
+            #         set_parameters(local_engine, client_params[cid][0])
 
-                    # black-box baseline (negative loss) accumulated over loader
-                    client_model = local_engine.model.to(cfg.device)
-                    scores_blackbox_loss = score_blackbox_loss_loader(canary_loaders[cid], client_model, cfg, use_concepts=use_concepts)
+            #         # black-box baseline (negative loss) accumulated over loader
+            #         client_model = local_engine.model.to(cfg.device)
+            #         scores_blackbox_loss = score_blackbox_loss_loader(canary_loaders[cid], client_model, cfg, use_concepts=use_concepts)
 
-                    # black-box concept-entropy (uses ONLY concepts if available, else falls back to label entropy)
-                    # scores_blackbox_concept = score_blackbox_concept_entropy_loader(canary_loaders[cid], client_model, cfg)
+            #         # black-box concept-entropy (uses ONLY concepts if available, else falls back to label entropy)
+            #         # scores_blackbox_concept = score_blackbox_concept_entropy_loader(canary_loaders[cid], client_model, cfg)
 
                     # black-box shadow MLP (features = label confidences/margins/entropy/-loss + concept stats if available)
                     shadow_epochs = getattr(getattr(cfg, "learning").settings, "mia_shadow_epochs", 100)
@@ -396,44 +397,44 @@ def main(cfg: DictConfig) -> None:
                         scores_whitebox_list=None,  # no need to use them.. no effect observed in practice on asia
                     )
 
-                    # evaluate white-box
-                    accuracy_mia, privacy_estimate = evaluate_privacy(scores_whitebox, true_in_out, cfg)
-                    print(f"Client {cid} - MIA accuracy (whitebox): {accuracy_mia:.4f}, epsilon: {privacy_estimate:.4f}")
-                    mia_accuracies['whitebox'][cid].append(accuracy_mia)
-                    mia_epsilons['whitebox'][cid].append(privacy_estimate)
+            #         # evaluate white-box
+            #         accuracy_mia, privacy_estimate = evaluate_privacy(scores_whitebox, true_in_out, cfg)
+            #         print(f"Client {cid} - MIA accuracy (whitebox): {accuracy_mia:.4f}, epsilon: {privacy_estimate:.4f}")
+            #         mia_accuracies['whitebox'][cid].append(accuracy_mia)
+            #         mia_epsilons['whitebox'][cid].append(privacy_estimate)
 
-                    # evaluate black-box baseline (loss)
-                    accuracy_mia, privacy_estimate = evaluate_privacy(scores_blackbox_loss, true_in_out, cfg)
-                    print(f"Client {cid} - MIA accuracy (blackbox-loss): {accuracy_mia:.4f}, epsilon: {privacy_estimate:.4f}")
-                    mia_accuracies['blackbox'][cid].append(accuracy_mia)
-                    mia_epsilons['blackbox'][cid].append(privacy_estimate)
+            #         # evaluate black-box baseline (loss)
+            #         accuracy_mia, privacy_estimate = evaluate_privacy(scores_blackbox_loss, true_in_out, cfg)
+            #         print(f"Client {cid} - MIA accuracy (blackbox-loss): {accuracy_mia:.4f}, epsilon: {privacy_estimate:.4f}")
+            #         mia_accuracies['blackbox'][cid].append(accuracy_mia)
+            #         mia_epsilons['blackbox'][cid].append(privacy_estimate)
 
-                    # evaluate black-box concept-entropy
-                    # accuracy_mia, privacy_estimate = evaluate_privacy(scores_blackbox_concept, true_in_out, cfg)
-                    # print(f"Client {cid} - MIA accuracy (blackbox-concept): {accuracy_mia:.4f}, epsilon: {privacy_estimate:.4f}")
-                    # mia_accuracies['blackbox_concept'][cid].append(accuracy_mia)
-                    # mia_epsilons['blackbox_concept'][cid].append(privacy_estimate)
+            #         # evaluate black-box concept-entropy
+            #         # accuracy_mia, privacy_estimate = evaluate_privacy(scores_blackbox_concept, true_in_out, cfg)
+            #         # print(f"Client {cid} - MIA accuracy (blackbox-concept): {accuracy_mia:.4f}, epsilon: {privacy_estimate:.4f}")
+            #         # mia_accuracies['blackbox_concept'][cid].append(accuracy_mia)
+            #         # mia_epsilons['blackbox_concept'][cid].append(privacy_estimate)
 
-                    # evaluate black-box shadow MLP
-                    accuracy_mia, privacy_estimate = evaluate_privacy(scores_blackbox_shadow, true_in_out, cfg)
-                    print(f"Client {cid} - MIA accuracy (blackbox-shadow): {accuracy_mia:.4f}, epsilon: {privacy_estimate:.4f}")
-                    mia_accuracies['blackbox_shadow'][cid].append(accuracy_mia)
-                    mia_epsilons['blackbox_shadow'][cid].append(privacy_estimate)
+            #         # evaluate black-box shadow MLP
+            #         accuracy_mia, privacy_estimate = evaluate_privacy(scores_blackbox_shadow, true_in_out, cfg)
+            #         print(f"Client {cid} - MIA accuracy (blackbox-shadow): {accuracy_mia:.4f}, epsilon: {privacy_estimate:.4f}")
+            #         mia_accuracies['blackbox_shadow'][cid].append(accuracy_mia)
+            #         mia_epsilons['blackbox_shadow'][cid].append(privacy_estimate)
             
-            # ------------------------------------------------------------
-            # Privacy Attack: SIA
-            # ------------------------------------------------------------
-            if cfg.learning.settings.sia:
-                print(f"\033[93mRunning Source Inference Attack (SIA)\033[0m")
+            # # ------------------------------------------------------------
+            # # Privacy Attack: SIA
+            # # ------------------------------------------------------------
+            # if cfg.learning.settings.sia:
+            #     print(f"\033[93mRunning Source Inference Attack (SIA)\033[0m")
 
-                sia_accuracies.append(run_sia_attack(
-                    local_engine=local_engine,  # instantiated engine
-                    sia_loader=sia_loader,          # returned by dataprocess_auditing
-                    client_params=client_params,    # local models from this round
-                    cfg=cfg,
-                    use_concepts=use_concepts,
-                ))
-                print(f"\033[92mSIA accuracy this round: {sia_accuracies[-1]:.4f}\033[0m")  
+            #     sia_accuracies.append(run_sia_attack(
+            #         local_engine=local_engine,  # instantiated engine
+            #         sia_loader=sia_loader,          # returned by dataprocess_auditing
+            #         client_params=client_params,    # local models from this round
+            #         cfg=cfg,
+            #         use_concepts=use_concepts,
+            #     ))
+            #     print(f"\033[92mSIA accuracy this round: {sia_accuracies[-1]:.4f}\033[0m")  
             
 
             # ------------------------------------------------------------
@@ -550,54 +551,54 @@ def main(cfg: DictConfig) -> None:
         print(f"\033[90mFinished! Training time: {round((time.time() - t0)/60, 2)} minutes\033[0m")
         
         
-        # save mia results
-        if cfg.learning.settings.mia:
-            print(f"Saving MIA results: {os.getcwd() + '/mia_results.json'}")
-            with open("mia_results.json", "w") as fp:
-                json.dump(
-                    {
-                        "accuracies": mia_accuracies,  
-                        "epsilons":   mia_epsilons,
-                    }, fp, indent=2)
+        # # save mia results
+        # if cfg.learning.settings.mia:
+        #     print(f"Saving MIA results: {os.getcwd() + '/mia_results.json'}")
+        #     with open("mia_results.json", "w") as fp:
+        #         json.dump(
+        #             {
+        #                 "accuracies": mia_accuracies,  
+        #                 "epsilons":   mia_epsilons,
+        #             }, fp, indent=2)
             
-            # plot MIA results
-            plot_and_save_max_mia(show=False)
+        #     # plot MIA results
+        #     plot_and_save_max_mia(show=False)
         
-        # save sia results
-        if cfg.learning.settings.sia:
-            print(f"Saving SIA results: {os.getcwd() + '/sia_results.json'}")
-            with open("sia_results.json", "w") as fp:
-                json.dump(
-                    {
-                        "accuracies": sia_accuracies,
-                    }, fp, indent=2)
+        # # save sia results
+        # if cfg.learning.settings.sia:
+        #     print(f"Saving SIA results: {os.getcwd() + '/sia_results.json'}")
+        #     with open("sia_results.json", "w") as fp:
+        #         json.dump(
+        #             {
+        #                 "accuracies": sia_accuracies,
+        #             }, fp, indent=2)
             
-            # plot SIA results
-            plot_and_save_max_sia(out_json="sia_max.json", show=False)
+        #     # plot SIA results
+        #     plot_and_save_max_sia(out_json="sia_max.json", show=False)
         
 
-        # ------------------------------------------------------------
-        # Run DRA attacks
-        # ------------------------------------------------------------ 
-        if cfg.learning.settings.dra:
+        # # ------------------------------------------------------------
+        # # Run DRA attacks
+        # # ------------------------------------------------------------ 
+        # if cfg.learning.settings.dra:
             
-            # Perform DRA on each client test set for n_samples
-            for testid in range(len(test_dataloaders)):
-                dra_results = run_dra_attack(
-                    test_dataloader=test_dataloaders[testid],
-                    model=instantiate(cfg.engine).model,
-                    device=cfg.device,
-                    methods=("DLG","iDLG"),
-                    max_attacks_per_loader=min(cfg.learning.settings.dra_samples_per_loader, len(test_dataloaders[testid].dataset)),
-                    iters=300,
-                    lr=1.0,
-                    early_stop_tol=1e-6,
-                    log_every=2000,
-                )
-                # save the dict dra_results 
-                with open(f"dra_results_client_{testid}.json", "w") as fp:
-                    json.dump(dra_results, fp, indent=2)
-                summarize_dra_results(f"dra_results_client_{testid}.json", metrics=("mse", "loss"))
+        #     # Perform DRA on each client test set for n_samples
+        #     for testid in range(len(test_dataloaders)):
+        #         dra_results = run_dra_attack(
+        #             test_dataloader=test_dataloaders[testid],
+        #             model=instantiate(cfg.engine).model,
+        #             device=cfg.device,
+        #             methods=("DLG","iDLG"),
+        #             max_attacks_per_loader=min(cfg.learning.settings.dra_samples_per_loader, len(test_dataloaders[testid].dataset)),
+        #             iters=300,
+        #             lr=1.0,
+        #             early_stop_tol=1e-6,
+        #             log_every=2000,
+        #         )
+        #         # save the dict dra_results 
+        #         with open(f"dra_results_client_{testid}.json", "w") as fp:
+        #             json.dump(dra_results, fp, indent=2)
+        #         summarize_dra_results(f"dra_results_client_{testid}.json", metrics=("mse", "loss"))
 
   
     elif cfg.learning.mode == 'federated':

@@ -1,0 +1,43 @@
+defaults:
+  - default
+  - _self_
+
+hydra:
+  mode: MULTIRUN
+  sweeper:
+    params:
+      seed: 1, 2, 3
+      # possible datsets are: asia, sachs, alarm, hailfinder, insurance
+      dataset: asia, sachs, alarm, insurance, hailfinder
+      client_id: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
+      # possible models are:
+      # blackbox, blackbox_multi, cbm_linear, cbm_mlp, cem, cgm, c2bm
+      model: blackbox, blackbox_multi, cbm_linear, cbm_mlp, cem, c2bm, cgm
+      learning: localized
+      
+model:
+  hidden_size: 64
+
+dataset:
+  load_embeddings: true 
+  load_graph: false
+  load_true_graph: true
+  batch_size: 512
+  autoencoder:
+   noise: 0.5  # for bndatasets only
+
+engine:
+  intervention_prob: 0.8
+  test_interv_noise: 0.8   # for bndatasets only
+  optim_kwargs:
+    lr: 0.00075
+
+trainer:
+  # logger: wandb
+  max_epochs: 500
+  patience: 40
+
+rag:
+  verbose: false
+
+notes: test_run

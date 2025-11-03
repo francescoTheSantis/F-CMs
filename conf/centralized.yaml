@@ -2,6 +2,7 @@ defaults:
   - default
   - _self_
 
+# useless for the centralized
 client_id: 1
 
 hydra:
@@ -9,12 +10,12 @@ hydra:
   sweeper:
     params:
       seed: 1, 2, 3
-      # possible datsets are: asia, sachs, alarm, hailfinder, insurance
-      dataset: asia, sachs, alarm, insurance, hailfinder
       # possible models are:
       # blackbox, blackbox_multi, cbm_linear, cbm_mlp, cem, cgm, c2bm
-      model: cem, cgm, c2bm
-      learning: centralized, localized, local_federated 
+      model: blackbox, blackbox_multi, cbm_linear, cbm_mlp, cem, c2bm, cgm
+      # possible datsets are: asia, sachs, alarm, hailfinder, insurance
+      dataset: asia, sachs, alarm, insurance, hailfinder
+      learning: centralized
       
 model:
   hidden_size: 64
@@ -34,9 +35,8 @@ engine:
     lr: 0.00075
 
 trainer:
-  # logger: wandb
-  devices: [0]
-  max_epochs: 200
+  logger: wandb
+  max_epochs: 500
   patience: 40
 
 rag:

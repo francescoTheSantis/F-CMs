@@ -2,7 +2,8 @@ defaults:
   - default
   - _self_
 
-client_id: 3
+# useless for the federated
+client_id: 1
 
 hydra:
   mode: MULTIRUN
@@ -10,15 +11,14 @@ hydra:
     params:
       seed: 1, 2, 3
       # possible datsets are: asia, sachs, alarm, hailfinder, insurance
-      dataset: asia
+      dataset: asia, sachs, alarm, insurance, hailfinder
       # possible models are:
       # blackbox, blackbox_multi, cbm_linear, cbm_mlp, cem, cgm, c2bm
       model: blackbox, blackbox_multi, cbm_mlp, cem, c2bm
       learning: local_federated
       
 model:
-  hidden_size: 32
-  concept_loss_weight: 0.8
+  hidden_size: 64
 
 dataset:
   load_embeddings: false
@@ -27,12 +27,6 @@ dataset:
   batch_size: 64 # original 512, working with asia 16
   autoencoder:
    noise: 0.5  # for bndatasets only
-
-combined_datasets:
-  other_datasets: Null
-  common_task: color
-  fashionmnist:
-    load_embeddings: true
 
 engine:
   intervention_prob: 0.8

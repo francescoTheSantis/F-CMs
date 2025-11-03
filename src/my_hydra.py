@@ -9,14 +9,13 @@ def target_classname(cfg: DictConfig):
 def parse_hyperparams(cfg: DictConfig):
     hyperparams = {
         "engine": target_classname(cfg.engine).lower(),
-        "dataset": target_classname(cfg.dataset.loader)
-        .replace("Dataset", "")
-        .lower(),
-        "causal_discovery": cfg.causal_discovery.name if cfg.causal_discovery is not None 
-                                                      else None,
+        "dataset": cfg.dataset.name.replace("Dataset", "").lower(),
+        # "causal_discovery": cfg.causal_discovery.name if cfg.causal_discovery is not None 
+        #                                               else None,
         "model": target_classname(cfg.model).lower(),
-        "hidden_size": cfg.model.hidden_size,
-        "lr": cfg.engine.optim_kwargs.lr,
+        "learning": cfg.learning.mode.lower(),
+        # "hidden_size": cfg.model.hidden_size,
+        # "lr": cfg.engine.optim_kwargs.lr,
         "seed": cfg.get("seed") or "none",
         "hydra_cfg": OmegaConf.to_container(cfg),
     }

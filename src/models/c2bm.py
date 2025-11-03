@@ -8,9 +8,11 @@ from src.utils import get_graph_levels, get_parents
 from typing import Dict, Optional, Tuple
 
 
-class GraphCBM(BaseModel):
+class C2BM(BaseModel):
     """
-    Graph CBM: It propagates the information through a predefined graph of concepts.
+    C2BM propagates the information through a predefined graph of concepts. 
+    It leverages the exogenous embeddings of the concepts to produce the parameters that, when combined with the 
+    concept predictions, allow to predict the state of the child concept.
     """
     def __init__(self, 
                  input_size, 
@@ -29,9 +31,9 @@ class GraphCBM(BaseModel):
                  prop_type='linear',
                  cat_latent=False,
                  c_name_index=None,
-                 name: str = 'GraphCBM'):
+                 name: str = 'C2BM'):
         
-        super(GraphCBM, self).__init__(
+        super(C2BM, self).__init__(
             input_size=input_size,
             hidden_size=hidden_size,
             output_size=output_size,
@@ -232,8 +234,7 @@ class GraphCBM(BaseModel):
              c_hat_dict: Dict[str, torch.Tensor],
              c: torch.Tensor,
              reduction: str = "mean",
-             ignore_index: int = -1,
-             multi_output: bool = False) -> torch.Tensor:
+             ignore_index: int = -1) -> torch.Tensor:
         """
         Compute the loss function for C2BM model.
         """
@@ -244,8 +245,7 @@ class GraphCBM(BaseModel):
             c_hat_dict,
             c,
             reduction,
-            ignore_index,
-            multi_output=multi_output
+            ignore_index
         )
 
         return loss

@@ -35,6 +35,11 @@ def get_dataset(dataset_cfg, device_cfg):
         with open(destination_path, 'rb') as f: 
             dataset = pickle.load(f)
     
+    # store in the cache the c_info of the dataset (it will be used by the show_results script)
+    c_info_path = os.path.join(dataset_directory, "c_info.pkl")
+    with open(c_info_path, 'wb') as f: 
+        pickle.dump(dataset.c_info, f)
+
     true_graph = dataset.load_ground_truth_graph()
     maybe_plot_graph(true_graph, 'true_graph')
     return dataset, true_graph, dataset_directory

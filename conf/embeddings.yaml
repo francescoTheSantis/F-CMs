@@ -2,25 +2,23 @@ defaults:
   - default
   - _self_
 
+# useless for the centralized
 client_id: 1
 
 hydra:
   mode: MULTIRUN
   sweeper:
     params:
-      seed: 1, 2, 3
-      # possible datsets are: asia, sachs, alarm, hailfinder, insurance
+      seed: 1 #, 2, 3, 4, 5
+      model: blackbox 
       dataset: asia, sachs, alarm, insurance, hailfinder
-      # possible models are:
-      # blackbox, blackbox_multi, cbm_linear, cbm_mlp, cem, cgm, c2bm
-      model: blackbox_multi, cbm_linear, cbm_mlp
-      learning: centralized, localized, local_federated 
+      learning: centralized
       
 model:
   hidden_size: 64
 
 dataset:
-  load_embeddings: true 
+  load_embeddings: false
   load_graph: false
   load_true_graph: true
   batch_size: 512
@@ -34,9 +32,8 @@ engine:
     lr: 0.00075
 
 trainer:
-  # logger: wandb
-  devices: [0]
-  max_epochs: 200
+  #logger: wandb
+  max_epochs: 1
   patience: 40
 
 rag:
