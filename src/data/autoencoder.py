@@ -39,6 +39,7 @@ class AutoencoderTrainer:
         self.batch_size = autoencoder_cfg.batch_size
         self.patience = autoencoder_cfg.patience
 
+
         self.model = Autoencoder(input_shape, self.latend_dim)
         self.criterion = nn.MSELoss()
         self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr)

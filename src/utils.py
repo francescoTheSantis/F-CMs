@@ -290,12 +290,16 @@ def update_intervention_policy_and_graph(cfg, interv_policy, graph, subgraphs, s
     path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
 
     # Get the subgraph given the client id
-    for file in os.listdir(path):
-        if ('trainset_'+str(cfg.client_id)) in file:
+    #for file in os.listdir(path):
+    #    if ('trainset_'+str(cfg.client_id)) in file:
             # Get the substring between "subgraph_" and "."
-            subgraph_id = file.split('subgraph_')[1].split('.')[0]
-    c_index = subgraphs['subgraph_'+subgraph_id]  
-    c_names = subgraphs_concept_names['subgraph_'+subgraph_id] 
+    #        subgraph_id = file.split('subgraph_')[1].split('.')[0]
+    #c_index = subgraphs['subgraph_'+subgraph_id]  
+    #c_names = subgraphs_concept_names['subgraph_'+subgraph_id] 
+
+    path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
+    c_names = cfg.model.c_info['names']
+    c_index = [cfg.model.c_name_index[name] for name in c_names]
 
     # Update policy
     updated_policy = []

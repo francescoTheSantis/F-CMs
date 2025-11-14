@@ -1,5 +1,5 @@
 _target_: "src.models.c2bm.C2BM"
-hidden_size: 64
+hidden_size: ${dataset.hidden_size}
 concept_hidden_size: 8
 n_layers_encoder: 2
 n_layers_concept_encoder: 2

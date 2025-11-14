@@ -69,8 +69,8 @@ class CGM(BaseModel):
                            'cardinality': self.c_info['cardinality'] + self.y_info['cardinality']}
         
         # sort c_names and graph_labels
-        c2bm_graph = sorted(self.c_names + self.y_names)
-        graph_labels = sorted(self.graph_labels)
+        c2bm_graph = self.c_names + self.y_names
+        graph_labels = self.graph_labels
         assert c2bm_graph == graph_labels
 
         # indentify levels and roots
@@ -109,7 +109,7 @@ class CGM(BaseModel):
 
     def forward(self, x, c=None, intervention_index=None):
         """
-        Forward pass of the C2BM model.
+        Forward pass of the CGM model.
         
         Args:
             x: Input data tensor
@@ -130,17 +130,18 @@ class CGM(BaseModel):
         for level in self.graph_levels: # skip the task level
             for i in level:
                 name = self.combo_info['names'][i]
+                c_index = self.c_name_index[name]
 
                 if name in self.roots_info['names']:
                     concept_encoder_input = x_encoded
-                    c_int = c[:,i] if c is not None else None
-                    int_idx = intervention_index[:,i] if intervention_index is not None else None
+                    c_int = c[:,c_index] if c is not None else None
+                    int_idx = intervention_index[:,c_index] if intervention_index is not None else None
                 elif name in self.c_names:
                     p_indices = get_parents(self.graph, i).tolist()
                     p_names = [self.combo_info['names'][p] for p in p_indices]
                     concept_encoder_input = torch.cat([c_embs[p_name] for p_name in p_names], dim=1)
-                    c_int = c[:,i] if c is not None else None
-                    int_idx = intervention_index[:,i] if intervention_index is not None else None
+                    c_int = c[:,c_index] if c is not None else None
+                    int_idx = intervention_index[:,c_index] if intervention_index is not None else None
                 else: # it's the task variable
                     p_indices = get_parents(self.graph, i).tolist()
                     p_names = [self.combo_info['names'][p] for p in p_indices]
@@ -157,7 +158,7 @@ class CGM(BaseModel):
 
                 # Update the probabilities if there is an intervention
                 if name not in self.y_names and c is not None and intervention_index is not None:
-                    c_probs[name] = maybe_intervene(c_probs[name], c[:,i], intervention_index[:,i]) 
+                    c_probs[name] = maybe_intervene(c_probs[name], c[:,c_index], intervention_index[:,c_index]) 
 
         # Decode, get task logits
         y_hat_probs = c_probs[self.y_names[0]]

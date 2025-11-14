@@ -20,6 +20,8 @@ loader:
             mode: false
             kwargs: {}
 
+hidden_size: 256
+
 autoencoder:
   noise: 0.
   latent_dim: 64

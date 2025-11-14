@@ -184,10 +184,10 @@ class BaseModel(nn.Module, ABC):
                           y: torch.Tensor, 
                           reduction: str = "mean", 
                           ignore_index: int = -1) -> torch.Tensor:
-        y = y.flatten().long()
+        #y = y.flatten().long()
 
         # ----- task loss --------------------------------------------------------
-        y_hat_log = torch.log_softmax(y_hat, dim=1)
+        y_hat_log = torch.log(y_hat + 1e-6)
         task_loss = None
         if (y != ignore_index).any():  # at least one labelled sample
             task_loss = self._compute_nll_loss(y_hat_log, y, reduction, ignore_index)
@@ -232,8 +232,8 @@ class BaseModel(nn.Module, ABC):
             # Skip if all labels are missing
             if (label != ignore_index).sum() == 0:
                 continue
-            
-            c_hat_log = torch.log_softmax(c_hat, dim=1)
+
+            c_hat_log = torch.log(c_hat + 1e-6)
             concept_loss_i = self._compute_nll_loss(c_hat_log, label, reduction, ignore_index)
             
             if reduction == "none":
