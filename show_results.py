@@ -10,7 +10,7 @@ import pickle
 import math
 from src.plot_utils import *
 import argparse
-from env import CACHE
+#from env import CACHE
 
 warnings.filterwarnings("ignore")
 plt.style.use(['science', 'ieee', 'no-latex'])
@@ -23,9 +23,14 @@ args = parser.parse_args()
 
 # List the paths containing the sweeps' results
 paths = [
-    "/home/fdesantis/projects/Federated-C2BM/outputs/multirun/2025-10-09/01-41-22",
-    "/home/fdesantis/projects/Federated-C2BM/outputs/multirun/2025-10-09/01-41-30",
-    "/home/fdesantis/projects/Federated-C2BM/outputs/multirun/2025-10-09/01-42-15"
+    #"/home/admin/Federated-C2BM/outputs/multirun/2025-11-10/18-57-50",
+    #"/home/admin/Federated-C2BM/outputs/multirun/2025-11-11/18-33-54",
+    "/home/admin/Federated-C2BM/outputs/multirun/2025-11-12/07-57-37",
+    "/home/admin/Federated-C2BM/outputs/multirun/2025-11-12/08-22-54",
+    "/home/admin/Federated-C2BM/outputs/multirun/2025-11-12/09-30-44",
+    "/home/admin/Federated-C2BM/outputs/multirun/2025-11-12/13-18-41",
+    "/home/admin/Federated-C2BM/outputs/multirun/2025-11-12/16-46-58",
+    "/home/admin/Federated-C2BM/outputs/multirun/2025-12-01/03-26-27"
 ]
 
 # folder to save processed results

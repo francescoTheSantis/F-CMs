@@ -11,7 +11,7 @@ settings:
   freezing: true
   patience: ${trainer.patience}
 
-  mia: True
+  mia: False
   canary_fraction: 0.5
   k_plus: 0.333333
   k_min: 0.333333

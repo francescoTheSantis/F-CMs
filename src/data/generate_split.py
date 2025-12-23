@@ -8,51 +8,337 @@ import pickle
 import os
 import random
 import shutil
+import random
+import math
 
-
-
-def get_connected_subgraph(graph, task_index):
-    from src.utils import get_parents
+def dfs_forward(torch_graph, start_node, end_node, visited=None, randomize=True, nodes_not_allowed = []):
     """
-    This function generate a connected subgraph from a graph, which could be the original graph or a subgraph.
+    DFS forward traversal to find a path from start_node to end_node.
+    
     Args:
-        graph: The graph.
-        task_index: The index of the task for the subgraph.
+        torch_graph: torch tensor adjacency matrix
+        start_node: current node index
+        end_node: target node index
+        visited: set of visited nodes
+        randomize: if True, shuffle successors to get different paths
+    
     Returns:
-        subgraph: A list of nodes in the subgraph.
+        List of node indices representing the path, or None if no path exists
     """
-    torch_graph = torch.tensor(graph.values)
-    nodes = [task_index]
-    subgraph = [task_index]
-    while True:
-        # partition the graph starting from the task node
-        # get the parents of the nodes
-        parents = [get_parents(torch_graph, node) for node in nodes]
-        # eliminate empty tensors
-        parents = [t for t in parents if t.numel() > 0]
-        # if there are no parents, break the loop
-        if len(parents) == 0:
-            break
-        # Choose randomly between the two options for number_of_parents_to_keep
-        number_of_parents_to_keep = random.choices([
-            max((len(parents) + 1) // 2, 1),
-            max((len(parents) + 1) // 2, 2)],
-            weights= [0.6,0.4],
-            k=1
-        )[0]
-        # select, for each node, at least a random parent
-        parents = [list({random.choice(nodes) for _ in range(number_of_parents_to_keep)}) for nodes in parents]
-        # remove duplicates and flatten the list
-        parents = [int(item) for sublist in parents for item in sublist]
-        parents = list(set(parents))
-        subgraph.extend(parents)
-        nodes = parents
-    # flatten the list and obtain unique values
-    subgraph = sorted(list(set(subgraph)))
+    if visited is None:
+        visited = set()
+    
+    if start_node == end_node:
+        return [start_node]
+    
+    if start_node in visited :
+        return None
+    
+    visited.add(start_node)
 
+    if start_node in nodes_not_allowed:
+        return None
+    
+
+    # Get successors: nodes where torch_graph[start_node][neighbor] == 1
+    successors = torch.where(torch_graph[start_node] == 1)[0].tolist()
+    
+    # Randomize order of exploration
+    if randomize:
+        random.shuffle(successors)
+
+    if end_node is None and len(successors) == 0:
+        return [start_node]
+    
+    for neighbor in successors:
+        if neighbor not in visited:
+            result = dfs_forward(torch_graph, neighbor, end_node, visited, randomize, nodes_not_allowed=nodes_not_allowed)
+            if result is not None:
+                return [start_node] + result
+    
+    return None
+
+def dfs_backward(torch_graph, start_node, visited=None, randomize=True, nodes_not_allowed = []):
+    """
+    DFS backward traversal to find a root node (node with no parents).
+    Can include multiple parents to create branching paths.
+    
+    Args:
+        torch_graph: torch tensor adjacency matrix
+        start_node: current node index
+        visited: set of visited nodes
+        randomize: if True, shuffle parents to get different roots
+        branch_probability: probability of including additional branches (0.0 to 1.0)
+    
+    Returns:
+        Root node index, or None if no root is found
+    """
+    if visited is None:
+        visited = set()
+
+    if start_node in visited:
+        return None
+
+    visited.add(start_node)
+    
+    if start_node in nodes_not_allowed:
+        return None
+    
+    # Get parents: nodes where torch_graph[parent][start_node] == 1
+    parents = torch.where(torch_graph[:, start_node] == 1)[0].tolist()
+    
+    # If no parents, this is a root
+    if len(parents) == 0:
+        return [start_node]
+    
+    # Randomize order of exploration
+    if randomize:
+        random.shuffle(parents)
+    
+    # Recursively search parents
+    for parent in parents:
+        if parent not in visited:
+            result = dfs_backward(torch_graph, parent, visited, randomize, nodes_not_allowed=nodes_not_allowed)
+            if result is not None:
+                return [start_node] + result
+    
+    return None
+
+
+def find_all_parent_child_pairs(graph, y_index_graph):
+    """
+    Find all parent-child node pairs in the graph and retain only thos who belong to y_index_graph.
+    
+    Args:
+        graph: pandas DataFrame representing adjacency matrix where graph[i][j] = 1 means i -> j (i is parent of j)
+    
+    Returns:
+        List of tuples (parent, child) representing all parent-child relationships in the graph
+    """
+    # Convert to torch tensor
+    torch_graph = torch.tensor(graph.values)
+    
+    parent_child_pairs = []
+    parents = range(torch_graph.size(0))
+    # eliminate from parent those not in y_index_graph
+    parents = [p for p in parents if p in y_index_graph]
+    
+    # Iterate through all nodes
+    for parent in parents:
+        # Find all children of the current parent (where graph[parent][child] == 1)
+        children = torch.where(torch_graph[parent] == 1)[0].tolist()
+        
+        # Eliminate from children those not in y_index_graph
+        children = [c for c in children if c in y_index_graph]
+        for child in children:
+            parent_child_pairs.append((parent, child))
+    
+    return parent_child_pairs
+
+
+def find_path_to_target_or_leaf(graph, start_node, end_node=None, randomize=False, nodes_not_allowed = []):
+    """
+    Find a path from start_node to end_node (or to a leaf if end_node is None).
+    Can include multiple branches.
+    
+    Args:
+        graph: pandas DataFrame representing adjacency matrix
+        start_node: Starting node index
+        end_node: Target node index (if None, find path to any leaf)
+        randomize: if True, return a random path (non-deterministic)
+        branch_probability: probability of including additional branches (0.0 to 1.0)
+    
+    Returns:
+        List of node indices representing the path, or None if no path exists
+    """
+    # Convert to torch tensor
+    torch_graph = torch.tensor(graph.values)
+
+    if start_node in nodes_not_allowed or end_node in nodes_not_allowed:
+        return None
+    
+    if start_node >= torch_graph.size(0):
+        return None
+    
+    if end_node is not None and end_node >= torch_graph.size(0):
+        return None
+    
+    if end_node is not None and start_node == end_node:
+        return [start_node]
+    
+    return dfs_forward(torch_graph, start_node, end_node, randomize=randomize, nodes_not_allowed=nodes_not_allowed)
+
+
+def find_path_to_root(graph, start_node, randomize=True, nodes_not_allowed = []):
+    """
+    Find the root node that connects to start_node by traversing backwards.
+    A root is a node with no incoming edges.
+    
+    Args:
+        graph: pandas DataFrame representing adjacency matrix
+        start_node: Starting node index
+        randomize: if True, return a random root (non-deterministic)
+    
+    Returns:
+        Root node index, or None if no root is found
+    """
+    # Convert to torch tensor
+    torch_graph = torch.tensor(graph.values)
+    
+    if start_node >= torch_graph.size(0):
+        return None
+    
+    # Check if start_node is already a root (no parents)
+    parents = torch.where(torch_graph[:, start_node] == 1)[0]
+    if parents.numel() == 0:
+        return [start_node]
+    
+    return dfs_backward(torch_graph, start_node, randomize=randomize, nodes_not_allowed=nodes_not_allowed)
+
+def generate_base_subgraph(graph, task_indices, randomize = True, nodes_not_allowed = []):
+    """
+    Generate a base subgraph connecting roots to task nodes.
+    
+    Args:
+        graph: pandas DataFrame representing adjacency matrix
+        task_indices: list of task node indices
+        randomize: if True, randomize path selection
+    
+    Returns:
+        List of node indices forming the subgraph
+    """
+    # nodes are numeric, graph.index are the names of the concepts
+    # find nodes of the graph
+    
+    if any(i not in list(range(len(graph))) for i in task_indices):
+        raise ValueError("One or more task indices are not in the graph.")
+ 
+    subgraph = []
+    
+    for i in task_indices:
+
+        # calculate number of childrens of nodes
+        max_n_childrens = 0
+        for node in range(len(graph)):
+            childrens = torch.where(torch.tensor(graph.values)[node,:] == 1)[0].tolist()
+            if len(childrens) > max_n_childrens:
+                max_n_childrens = len(childrens)
+
+        max_random_paths = max(1, round(((len(graph) + max_n_childrens) / 10) ** 0.9))
+        random_node = random.randint(1, max_random_paths)
+        task_path = []
+
+        for attempt in range(random_node):
+
+            path_to_root = find_path_to_root(graph, start_node=i, randomize=randomize, nodes_not_allowed=nodes_not_allowed)
+            # reverse path to have from root to node
+            path_to_root= path_to_root[::-1] if path_to_root is not None else []
+            root = path_to_root[0] if path_to_root is not None else None
+            if root is None:
+                raise ValueError(f"No root found for node {i}")
+ 
+            #current_path = find_path_to_target_or_leaf(graph, start_node=root, end_node=i, randomize=True, nodes_not_allowed=nodes_not_allowed)
+            #if path_to_root is not None:
+            task_path = list(set(task_path + path_to_root))
+
+            if task_path is None or len(task_path) == 0:
+                raise ValueError(f"No path found from root {root} to node {i}")
+        
+        subgraph = list(set(subgraph + task_path))
+    
     return subgraph
 
-def get_subgraphs(graph, y_index, n_subgraphs, modality = 'random_nodes', concept_in_common = False, task_in_common= True):
+def generate_add_nodes_values(graph, torch_graph, y_index_graph, y_index, add_nodes_modality, add_nodes_number, add_nodes_values= [], old_add_nodes_values = []):
+    """
+    Generate add_nodes_values based on the specified modality. 
+    NOTE: The additional nodes are selected from the y_index subgraph because they are considered only in cgm and c2bm.
+    
+    Args:
+        graph: pandas DataFrame representing adjacency matrix
+        torch_graph: torch tensor adjacency matrix
+        y_index_graph: list of nodes in y_index subgraph
+        y_index: target node index
+        add_nodes_modality: 'random' or other modality
+        add_nodes_number: number of nodes to add
+    
+    Returns:
+        List of node indices to add
+    """
+    from src.utils import get_parents
+
+    if add_nodes_modality == 'random':
+        possible_nodes = [node for node in y_index_graph if node != y_index and node not in old_add_nodes_values]
+        if possible_nodes == []:
+            raise ValueError("It is not possible to select additional nodes with the specified modality. Please change modality or reduce number_add_nodes.")
+    elif add_nodes_modality == 'at_least_one_parent_and_child' or add_nodes_modality == 'connection':
+        # Select nodes that have at least one parent and one child
+        possible_nodes = [] 
+        connections = []
+        for node in y_index_graph:
+                childrens =  torch.where(torch_graph[node,:] == 1)[0].tolist()
+                parents = get_parents(torch_graph, node).tolist()
+                if len(childrens) != 0 and len(parents) != 0:
+                    possible_nodes.append(node)
+                    connections.append(len(parents)+ len(childrens))
+
+        # filter out old_add_nodes_values
+        possible_nodes = [node for node in possible_nodes if node not in old_add_nodes_values]
+        if possible_nodes == []:
+            raise ValueError("It is not possible to select additional nodes with the specified modality. Please change modality or reduce number_add_nodes.")
+
+        if add_nodes_modality == 'connection':
+            # order nodes in base of connections and select top add_nodes_number
+            possible_nodes = sorted(possible_nodes, key=lambda x: connections[possible_nodes.index(x)], reverse=True)    
+            return possible_nodes[:add_nodes_number]
+    elif add_nodes_modality == 'specific_nodes':
+        if not add_nodes_values:
+            raise ValueError("add_nodes_values must be provided when using 'specific_nodes' modality.")
+        possible_nodes = add_nodes_values
+    else:
+        raise ValueError("Unsupported modality for dict_subgraph_with_add_nodes. Supported modalities are 'connected_nodes' and 'random'")
+
+
+    return random.sample(possible_nodes, min(add_nodes_number, len(possible_nodes)))
+
+
+def add_additional_nodes_to_subgraph(graph, subgraph, add_nodes_values, randomize=True):
+    """
+    Extend subgraph by including additional nodes with their paths.
+    
+    Args:
+        graph: pandas DataFrame representing adjacency matrix
+        subgraph: current subgraph as list of node indices
+        add_nodes_values: nodes to add
+        randomize: if True, randomize path selection
+    
+    Returns:
+        Extended subgraph as list of node indices
+    """
+    extended_subgraph = subgraph.copy()
+
+    for node in add_nodes_values:
+        if node in extended_subgraph:
+            continue
+        
+        # Find a leaf reachable from this node
+        path_to_leaf = find_path_to_target_or_leaf(graph, start_node=node, randomize=randomize)
+        if path_to_leaf is None:
+            continue
+        
+        # Get paths to and from the additional node
+        path_to_add_node = find_path_to_root(graph, start_node=node, randomize=randomize)
+        # reverse path_to_add_node to have from root to node
+        path_to_add_node = path_to_add_node[::-1] if path_to_add_node is not None else []
+        # just select a part of path to leaf
+        random_length = random.randint(2, len(path_to_leaf))
+        path_from_add_node = path_to_leaf[:random_length]
+        
+        if path_to_add_node and path_from_add_node:
+            extended_subgraph = list(set(extended_subgraph + path_to_add_node + path_from_add_node))
+    
+    return extended_subgraph
+
+def get_subgraphs(graph, y_index, min_number_subgraphs = 3, max_number_subgraphs = 10, modality = 'random_nodes', task_in_common = True, randomly_eliminate_task_from_subgraphs = True, dict_subgraph_with_add_nodes = {}):
     """
     This function generates n_subgraphs from the original graph.
 
@@ -75,99 +361,356 @@ def get_subgraphs(graph, y_index, n_subgraphs, modality = 'random_nodes', concep
     Returns:
         subgraphs: A dictionary with indices as keys and lists of nodes for each subgraph as values
         subgraphs_concept_names: A dictionary with indices as keys and the names of the nodes of each subgraph as values
+        add_nodes_values: The list of additional nodes used
+        subgraphs_with_add_nodes: List of boolean indicating which subgraphs contain additional nodes
     """
     from src.utils import get_roots, get_task_graph
+
+    if min_number_subgraphs > max_number_subgraphs:
+        raise ValueError("min_number_subgraphs must be less than or equal to max_number_subgraphs.")
+
+    ### INITIALIZATION ###
+    torch_graph = torch.tensor(graph.values)
+
     nodes_covered = set()
     n_subgraphs_generated = 0
     subgraphs = []
+    subgraphs_with_add_nodes = []
+    # if task_in_common is False, randomly choose one subgraph to reach the task
+    subgraph_reaching_task = random.choice([0,1])
+    # select nodes to cover
+    nodes_to_cover = list(range(len(graph)))
+    nodes_to_cover.sort()
+    # get the graph starting from y_index, i.e., the one considered in c2bm and cgm
+    y_index_graph = get_task_graph(torch.tensor(graph.values), task_node = y_index)
+    y_index_graph = [int(item) for sublist in y_index_graph for item in sublist]
+    roots = get_roots(torch_graph)
+    roots = torch.nonzero(roots).squeeze()
+    couples_parents_children = find_all_parent_child_pairs(graph, y_index_graph)
+    couples_covered = set()
+    subgraph_from_missing_root = None
 
-    if task_in_common:
-        nodes_to_cover = get_task_graph(torch.tensor(graph.values), task_node = y_index)
-        # get nodes in a single list
-        nodes_to_cover = [int(item) for sublist in nodes_to_cover for item in sublist]
+    # manage additional nodes to include in specific subgraphs
+    if dict_subgraph_with_add_nodes:
+        add_nodes_modality = dict_subgraph_with_add_nodes.get('modality', 'random')
+        add_nodes_number = dict_subgraph_with_add_nodes.get('number_add_nodes', 1)
+        n_subgraphs_add_nodes_to_generate = dict_subgraph_with_add_nodes.get('number_subgraphs_add_nodes', 1)
+        n_subgraphs_add_nodes_generated = 0
+        if add_nodes_modality== 'specific_nodes':
+            custom_nodes = dict_subgraph_with_add_nodes.get('specific_nodes_names', [])
+            custom_values = [graph.columns.get_loc(name) for name in custom_nodes if name in graph.columns]
+        else:
+            custom_values = []
+
+
+        # Validate parameters for additional nodes
+        if add_nodes_number <1:
+            raise ValueError("number_add_nodes must be at least 1")
+        if add_nodes_number >= len(y_index_graph)-1:
+            raise ValueError("number_add_nodes exceeds the number of available nodes in the y_index subgraph minus one: {}".format(len(y_index_graph)-1))
+        if n_subgraphs_add_nodes_to_generate < 1:
+            raise ValueError("number_subgraphs_add_nodes must be at least 1")
+        
+        # at least one subgraph without additional nodes
+        if n_subgraphs_add_nodes_to_generate > (max_number_subgraphs-1):
+            raise ValueError("Number of subgraphs with additional nodes to generate exceeds the maximum number of subgraphs-1, i.e., number of clients-1: {}".format(max_number_subgraphs -1 ))
+        if n_subgraphs_add_nodes_to_generate < 1:
+            raise ValueError("Number of subgraphs with additional nodes to generate must be at least 1")
+           
+        # Generate initial add_nodes_values
+        add_nodes_values = generate_add_nodes_values(
+            graph, torch_graph, y_index_graph, y_index, 
+            add_nodes_modality, add_nodes_number, add_nodes_values= custom_values
+        )
+
     else:
-        nodes_to_cover = list(range(len(graph)))
+        add_nodes_values = []
+
+
+
+    ### STEP 1: GENERATE SUBGRAPHS UNTIL COVERING ALL NODES IN THE GRAPH AND THE NUMBER OF SUBGRAPHS IS AT LEAST min_number_subgraphs ###
+    max_retries = 10
+    retry_count = 0
+    hist_add_nodes_values = []
+
+
+    def check_condition():
+        base_condition = len(nodes_covered) < len(nodes_to_cover) or n_subgraphs_generated < min_number_subgraphs or len(couples_covered) < len(couples_parents_children)
+        if dict_subgraph_with_add_nodes:
+            return base_condition or n_subgraphs_add_nodes_generated < n_subgraphs_add_nodes_to_generate
+        return base_condition
     
-    # eliminate y_index from nodes_to_cover
-    nodes_to_cover.remove(y_index)
+    def get_pairs_in_subgraph(subgraph, all_pairs):
+        """Helper function to find which parent-child pairs are contained in a subgraph."""
+        pairs_in_subgraph = set()
+        for parent, child in all_pairs:
+            if parent in subgraph and child in subgraph:
+                pairs_in_subgraph.add((parent, child))
+        return pairs_in_subgraph
 
-    # Step 1: Generate enough subgraphs to cover all nodes
-    while len(nodes_covered)< len(nodes_to_cover) or n_subgraphs_generated < n_subgraphs:
+    while_iterations = 0
+    while check_condition():
+        while_iterations = while_iterations +1
+        if while_iterations > 100:
+            raise ValueError("Exceeded maximum iterations while generating subgraphs. Please revise additional nodes logic or the number of subgraphs to generate.")
+        
+        try:
+            # generate a subgraph
+            if modality == 'random_nodes':
+                raise NotImplementedError("Modality 'random_nodes' is not implemented in this version.")
+                #subgraph = random.sample(nodes_to_cover, random.randint(2, len(nodes_to_cover)))
+                
+            elif modality == 'connected_nodes':
+                # Generate task indices
+                # Randomly include some node chosen in the whole graph (excluding roots and nodes in y_index) in such a way to be able to cover the whole graph
+                task_indices = []
+                remaining_nodes = [node for node in nodes_to_cover if node not in roots and node not in y_index_graph and node not in nodes_covered]
+                if len(remaining_nodes) != 0:
+                    random_number = random.randint(0, max(1, (len(remaining_nodes)//3)))
+                    task_indices = random.sample([node for node in remaining_nodes if node not in roots and node not in y_index_graph], random_number)
 
-        if modality == 'random_nodes':
-            # Randomly select a subgroup of nodes
-            subgraph = random.sample(nodes_to_cover, random.randint(2, len(nodes_to_cover)))         
-        if modality == 'connected_nodes':
-            if not task_in_common:
-                # Randomly select a node that is not a root to start the subgraph
-                roots = get_roots(torch.tensor(graph.values))
-                task_index = random.choice([node for node in nodes_to_cover if node not in np.where(roots)[0]])
-            else:
-                task_index = y_index
-                       
-            subgraph = get_connected_subgraph(graph, task_index)
-            if y_index in subgraph:
-                # if y_index is in the subgraph, remove it
-                subgraph.remove(y_index)
-            # if concept_in_common, add the subgraph only if it has at least one node in common with another subgraph
-            if concept_in_common:
-                # If the subgraph has no nodes in common with any other subgraph, skip it
-                if n_subgraphs_generated!=0 and not any(set(subgraph).intersection(set(s)) for s in subgraphs):
-                    continue
-       
-        subgraphs = subgraphs + [subgraph]
-
-        nodes_covered = nodes_covered.union(set(subgraph))
-        n_subgraphs_generated += 1
+                if remaining_nodes == []:
+                    # there can still be missing nodes that are roots not in y_index_graph
+                    missing_nodes = [node for node in nodes_to_cover if (node not in nodes_covered) and (node in roots)]
+                    if missing_nodes !=[]:
+                        # add as task_indices a descendant of missing_nodes
+                        childrens = []
+                        for node in missing_nodes:
+                            if node in y_index_graph:
+                                # Generate the subgraph directly from this root to y_index
+                                subgraph_from_missing_root = find_path_to_target_or_leaf(graph, start_node=node, end_node=y_index, randomize=True)
+                                break
+                            else:
+                                curr_childrens = torch.where(torch_graph[node,:] == 1)[0].tolist()
+                                childrens.extend(curr_childrens)
+                        
+                        if subgraph_from_missing_root is None:
+                            random_childrens = random.sample(childrens, max(len(childrens)//3, 1))
+                            task_indices.extend(random_childrens) 
+                            
+                        
 
 
+                # Include the main task
+                if task_in_common:
+                    task_indices.append(y_index)
+                else:
+                    # Ensure one subgraph reaches the task
+                    if n_subgraphs_generated == subgraph_reaching_task:
+                        task_indices.append(y_index)
+                    else:
+                        if not dict_subgraph_with_add_nodes:
+                            task_indices.append(random.choice([node for node in y_index_graph if node not in roots]))
+                        else:
+                            if n_subgraphs_generated % 2 == 0 and n_subgraphs_add_nodes_generated < n_subgraphs_add_nodes_to_generate:
+                                task_indices.append(random.choice([node for node in y_index_graph if node not in roots]))
+                            else:
+                                # Exclude from task_indices the nodes in add_nodes_values
+                                if len(task_indices)!=0:
+                                    task_indices = [node for node in task_indices if node not in add_nodes_values]
+                                task_indices.append(random.choice([node for node in y_index_graph if node not in roots and node not in add_nodes_values]))
 
-    # Step 2: Merge subgraphs until reaching desired number
-    while len(subgraphs) > n_subgraphs:
+                # Handle additional nodes if required
+                if not dict_subgraph_with_add_nodes:
+                    # Simple case: no additional nodes
+                    if subgraph_from_missing_root is not None:
+                        subgraph = subgraph_from_missing_root
+                    else:
+                        subgraph = generate_base_subgraph(graph, task_indices, randomize=True)
+                    has_add_nodes = False
 
-        if modality == 'random_nodes':
-            # Sort by length so smaller ones are merged first
-            subgraphs = sorted(subgraphs, key=len)
-            # Merge the two smallest
-            first = subgraphs.pop(0)
-            second = subgraphs.pop(0)
-            merged = list(set(first + second))
-            subgraphs.append(merged)
+                else:
+                    # Complex case: include or exclude additional nodes
+                    if n_subgraphs_generated % 2 == 0 and n_subgraphs_add_nodes_generated < n_subgraphs_add_nodes_to_generate:
+                        # Include additional nodes
+                        if subgraph_from_missing_root is not None:
+                            subgraph = subgraph_from_missing_root
+                        else:
+                            subgraph = generate_base_subgraph(graph, task_indices, randomize=True)
+                        subgraph = add_additional_nodes_to_subgraph(graph, subgraph, add_nodes_values, randomize=True)
+                        has_add_nodes = True
+                    
+                    else:
+                        # NOTE: PAY ATTENTION WITH SUBGRAOHS FROM MISSING ROOT
+                        # Exclude additional nodes
+                        subgraph = generate_base_subgraph(graph, task_indices, randomize=True, 
+                                                          nodes_not_allowed=add_nodes_values)
+                        has_add_nodes = False
+
+
             
-            
-        if modality == 'connected_nodes':
-            # Sort by length so smaller ones are merged first
-            subgraphs = sorted(subgraphs, key=len)
-            # Try to merge the ones that have at least a node in common
-            merged = False
-            for i in range(len(subgraphs)):
-                for j in range(i+1, len(subgraphs)):
-                    if len(set(subgraphs[i]).intersection(set(subgraphs[j]))) > 0:
-                        merged = True
-                        merged_subgraph = list(set(subgraphs[i] + subgraphs[j]))
-                        subgraphs.pop(j)
-                        subgraphs.pop(i)
-                        subgraphs.append(merged_subgraph)
+            # Check for duplicate subgraphs
+            if set(subgraph) in map(set, subgraphs):
+                continue
+
+            if n_subgraphs_generated > 20:
+                last_missing_nodes = [node for node in nodes_to_cover if node not in nodes_covered]
+                last_missing_couples = [pair for pair in couples_parents_children if pair not in couples_covered]
+                if last_missing_nodes != []:
+                    for node in last_missing_nodes:
+                        subgraph = add_additional_nodes_to_subgraph(graph, subgraph, [node], randomize=True)
                         break
-                if merged:
-                    break
+                if last_missing_couples != []:
+                    for pair in last_missing_couples:
+                        subgraph = add_additional_nodes_to_subgraph(graph, subgraph, [pair[0], pair[1]], randomize=True)
+                        break
+             
 
-            # If no merge is possible, just eliminate the smallest subgraph
-            if not merged:
-                subgraphs.pop(0)
+            # Add subgraph
+            subgraphs.append(subgraph)
+            subgraphs_with_add_nodes.append(has_add_nodes)
+            nodes_covered = nodes_covered.union(set(subgraph))
+            # Update covered parent-child pairs
+            pairs_in_current_subgraph = get_pairs_in_subgraph(subgraph, couples_parents_children)
+            couples_covered = couples_covered.union(pairs_in_current_subgraph)
+            n_subgraphs_generated += 1
+            if dict_subgraph_with_add_nodes:
+                n_subgraphs_add_nodes_generated += int(has_add_nodes)
+            retry_count = 0  # Reset on success
+            subgraph_from_missing_root = None
+
+        except (ValueError, IndexError, AttributeError) as e:
+            retry_count += 1
+            hist_add_nodes_values.append(add_nodes_values[0])
+            print(f"Error generating subgraph (attempt {retry_count}/{max_retries}): {e}")
+            
+            if retry_count >= max_retries:
+                raise ValueError(f"Failed to generate valid subgraph after {max_retries} attempts")
+            
+            # Regenerate add_nodes_values if needed
+            if dict_subgraph_with_add_nodes:
+                add_nodes_values = generate_add_nodes_values(
+                    graph, torch_graph, y_index_graph, y_index,
+                    add_nodes_modality, add_nodes_number, old_add_nodes_values=hist_add_nodes_values
+                )
+                print(f"Regenerated add_nodes_values: {add_nodes_values}")
+            
+            continue
+
+ 
+    ### STEP 2: MERGE SUBGRAPHS IF NEEDED ###
+    print(f"Generated {len(subgraphs)} subgraphs. Max allowed: {max_number_subgraphs}")
+
+    if len(subgraphs) > max_number_subgraphs:
+        print("Warning: Number of subgraphs exceeds the maximum allowed. Some subgraphs will be merged trying to mantain balance between those with and without additional nodes (if present).")
+        # Separate subgraphs with and without additional nodes
+        subgraphs_with_add = [(i, sg) for i, sg in enumerate(subgraphs) if subgraphs_with_add_nodes[i]]
+        subgraphs_without_add = [(i, sg) for i, sg in enumerate(subgraphs) if not subgraphs_with_add_nodes[i]]
+        
+        print(f"Subgraphs WITH additional nodes: {len(subgraphs_with_add)}")
+        print(f"Subgraphs WITHOUT additional nodes: {len(subgraphs_without_add)}")
+
+
+        # First, try to merge within groups
+        # Merge subgraphs WITHOUT additional nodes
+        while len(subgraphs_with_add) + len(subgraphs_without_add) > max_number_subgraphs and len(subgraphs_without_add) > 1:
+            subgraphs_without_add = sorted(subgraphs_without_add, key=lambda x: len(x[1]))
+            first = subgraphs_without_add.pop(0)
+            second = subgraphs_without_add.pop(0)
+            merged = (first[0], list(set(first[1] + second[1])))
+            subgraphs_without_add.append(merged)
+
+                
+        # Merge subgraphs WITH additional nodes
+        #while len(subgraphs_with_add) > len(subgraphs_without_add) and len(subgraphs_with_add) > 1:
+        #    subgraphs_with_add = sorted(subgraphs_with_add, key=lambda x: len(x[1]))
+        #    first = subgraphs_with_add.pop(0)
+        #    second = subgraphs_with_add.pop(0)
+        #    merged = (first[0], list(set(first[1] + second[1])))
+        #    subgraphs_with_add.append(merged)
+
+
+        # Check if we still exceed max_number_subgraphs
+        #total_after_merge = len(subgraphs_with_add) + len(subgraphs_without_add)
+
+        #if total_after_merge > max_number_subgraphs:
+        #    print(f"Still have {total_after_merge} subgraphs after group merge. Further merging needed.")
+        #    # Merge across groups if necessary
+        #    all_subgraphs = subgraphs_with_add + subgraphs_without_add
+            
+        #    while len(all_subgraphs) > max_number_subgraphs:
+        #        all_subgraphs = sorted(all_subgraphs, key=lambda x: len(x[1]))
+        #        first = all_subgraphs.pop(0)
+        #        second = all_subgraphs.pop(0)
+        #        # The merged subgraph has additional nodes if either had them
+        #        has_add = first[0] in [idx for idx, _ in subgraphs_with_add] or second[0] in [idx for idx, _ in subgraphs_with_add]
+        #        merged = (first[0], list(set(first[1] + second[1])))
+        #        all_subgraphs.append(merged)
+                
+                # Update tracking
+        #        if has_add:
+        #            # merge the merged with one of the subgraphs_with_add
+        #            subgraphs_with_add = [sg for sg in all_subgraphs if sg[0] in [idx for idx, _ in subgraphs_with_add] or sg == merged]
+        #        
+        #    subgraphs = [sg for _, sg in all_subgraphs]
+        #    subgraphs_with_add_nodes = [any(node in add_nodes_values for node in sg) for sg in subgraphs]
+
+        #else:
+
+
+        # Recombine
+        subgraphs = [sg for _, sg in subgraphs_with_add] + [sg for _, sg in subgraphs_without_add]
+        subgraphs_with_add_nodes = [True] * len(subgraphs_with_add) + [False] * len(subgraphs_without_add)
+
+        
+        # Ensure at least one subgraph with and one without additional nodes
+        if dict_subgraph_with_add_nodes:
+            has_with = any(subgraphs_with_add_nodes)
+            has_without = any(not flag for flag in subgraphs_with_add_nodes)
+            
+            if not has_with or not has_without:
+                raise ValueError("After merging, subgraphs do not contain both types (with and without additional nodes) as required.")
+
+    
+    print(f"Final: {len(subgraphs)} subgraphs")
+    print(f"With additional nodes: {sum(subgraphs_with_add_nodes)}")
+    print(f"Without additional nodes: {sum(not flag for flag in subgraphs_with_add_nodes)}")
+    print(f"Parent-child pairs covered: {len(couples_covered)}/{len(couples_parents_children)}")
 
     # return a dictionary with soubgroups as keys and the nodes as values
     subgraphs = {f'subgraph_{i+1}': s for i, s in enumerate(subgraphs)}
     # return a dictionary with the subgroups as keys and the nodes names as values
     subgraphs_concept_names = {f'subgraph_{i+1}':[graph.columns[node_idx] for node_idx in s] for i, s in enumerate(subgraphs.values())}
 
-    return subgraphs, subgraphs_concept_names
+    # Randomly eliminate task from some subgraphs if needed but only if I do not eliminate couples parents-children
+    if randomly_eliminate_task_from_subgraphs:
+        assert task_in_common, "randomly_eliminate_task_from_subgraphs can be True only if task_in_common is True, otherwise there are already subgraphs without the task."
+        # Get parents of y_index, note: they are in y_index_graph by definition
+        parents_of_task = [parent for parent, child in couples_parents_children if child == y_index]
+        
+        for i in range(len(subgraphs)):
+            if y_index in subgraphs[f'subgraph_{i+1}']:
+                # Check if removing y_index would eliminate a parent-child pair
+                # This happens if there's a parent of y_index in this subgraph that is not in any other subgraph
+                can_remove = True
+                for parent in parents_of_task:
+                    if parent in subgraphs[f'subgraph_{i+1}']:
+                        # Check if this parent exists in another subgraph
+                        parent_in_other_subgraph = False
+                        for j in range(len(subgraphs)):
+                            if j != i and parent in subgraphs[f'subgraph_{j+1}'] and y_index in subgraphs[f'subgraph_{j+1}']:
+                                parent_in_other_subgraph = True
+                                break
+                        if not parent_in_other_subgraph:
+                            # This parent-child pair would be lost
+                            can_remove = False
+                            break
+                
+                # Only remove if it doesn't eliminate any parent-child pair and randomly decide
+                if can_remove and random.random() < 0.5:
+                    subgraphs[f'subgraph_{i+1}'].remove(y_index)
+                    subgraphs_concept_names[f'subgraph_{i+1}'].remove(graph.columns[y_index])
+
+    return subgraphs, subgraphs_concept_names, subgraphs_with_add_nodes, add_nodes_values
 
 def generate_split(cfg, datasets, graph, y_index):
 
     n = cfg.learning.n_clients
 
     if len(datasets)>1:
+        if cfg.learning.subgraphs.get('dict_subgraph_with_add_nodes', {}) != {}:
+            raise NotImplementedError("When multiple datasets are used, it is not possible to use additional nodes in subgraphs.")
+        
         # Create a subgraph for each client containing all the variables and values from one dataset
         subgraphs = {}
         subgraphs_concept_names = {}
@@ -182,22 +725,35 @@ def generate_split(cfg, datasets, graph, y_index):
 
     else:
         # Get the subgraph for each client
-        subgraphs, subgraphs_concept_names = get_subgraphs(graph, y_index, round(n/2)+1, 
-                                    modality=cfg.learning.subgraphs.modality,
-                                    concept_in_common=cfg.learning.subgraphs.concept_in_common,
-                                    task_in_common=cfg.learning.subgraphs.task_in_common)
+        subgraphs, subgraphs_concept_names, subgraphs_with_add_nodes, add_nodes_values= get_subgraphs(graph, 
+                                                                         y_index, 
+                                                                         min_number_subgraphs= cfg.learning.subgraphs.get('min_number_subgraphs', 3),
+                                                                         max_number_subgraphs = cfg.learning.subgraphs.get('max_number_subgraphs', 10),
+                                                                         modality=cfg.learning.subgraphs.modality,
+                                                                         #concept_in_common=cfg.learning.subgraphs.concept_in_common,
+                                                                         task_in_common=cfg.learning.subgraphs.task_in_common,
+                                                                         randomly_eliminate_task_from_subgraphs=cfg.learning.subgraphs.get('randomly_eliminate_task_from_subgraphs', True),
+                                                                         dict_subgraph_with_add_nodes=cfg.learning.subgraphs.get('dict_subgraph_with_add_nodes', {})
+                                    )
         
-
-
-    # Check on the subgraphs
-    assert len(subgraphs) < n, "Number of subgraphs must be lower than n"
-
+        # Check on the subgraphs
+        assert len(subgraphs) < n, "Number of subgraphs must be lower than n"
+        
+        # eliminate y_index from each subgraph but save from which I eliminated it
+        indices_subgraphs_reaching_task = []
+        for key in subgraphs.keys():
+            if y_index in subgraphs[key]:
+                indices_subgraphs_reaching_task.append(int(key.split('_')[1]))
+                subgraphs[key].remove(y_index)
+        
     # If the task is not included, select some subgraphs to mask the y variable
-    if not cfg.learning.annotation_assumption == "task_included":
-        r = random.randint(1, (len(subgraphs)-1))  # Randomly select r subgraphs to mask y variable
-        subgraphs_task_excluded = random.sample(range(1, len(subgraphs) + 1), r)
-    else:
-        subgraphs_task_excluded = None
+    #if not cfg.learning.annotation_assumption == "task_included":
+        #r = random.randint(1, (len(subgraphs)-1))  # Randomly select r subgraphs to mask y variable
+        #subgraphs_task_excluded = random.sample(range(1, len(subgraphs) + 1), r)
+        # subgraphs_task_excluded are those that do not reach the task, so the complementary of indices_subgraphs_reaching_task
+    subgraphs_task_excluded = [i for i in range(1, len(subgraphs) + 1) if i not in indices_subgraphs_reaching_task]
+    #else:
+    #    subgraphs_task_excluded = None
     
     # clean the directory
     root = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
@@ -215,7 +771,7 @@ def generate_split(cfg, datasets, graph, y_index):
         with open(path, 'wb') as f:
             pickle.dump(test_dataloader, f)
 
-    return subgraphs, subgraphs_concept_names
+    return subgraphs, subgraphs_concept_names, subgraphs_with_add_nodes, add_nodes_values
 
 def split_and_save(cfg, datasets, graph, set,n, subgraphs = None, subgraphs_task_excluded = None, root = None):
 

@@ -95,7 +95,7 @@ def main(cfg: DictConfig) -> None:
 
     # instantiate the dataset, split into train, val, test
     # preprocess all of them and save the preprocessed dataset
-    dataset, true_graph, dataset_directory = get_dataset(cfg.dataset, cfg.device)
+    dataset, true_graph, dataset_directory = get_dataset(cfg.dataset, cfg.device, seed=cfg.seed)
     graph = true_graph
 
     combined_dataset = OmegaConf.select(cfg, 'combined_datasets.other_datasets', default=None)
@@ -200,9 +200,9 @@ def main(cfg: DictConfig) -> None:
 
     # We split the data by selecting a sub-graph for each split
     if cfg.learning.mode == "centralized":
-        subgraphs, subgraphs_concept_names = None, None
+        subgraphs, subgraphs_concept_names, subgraphs_with_add_nodes, add_nodes_values = None, None, None
     else:
-        subgraphs, subgraphs_concept_names = generate_split(cfg, datasets, graph, y_index)
+        subgraphs, subgraphs_concept_names, subgraphs_with_add_nodes, add_nodes_values = generate_split(cfg, datasets, graph, y_index)
 
     # update config based on the dataset
     # e.g., set input and output size of the model
@@ -328,6 +328,7 @@ def main(cfg: DictConfig) -> None:
                 # freeze if required
                 maybe_freeze_parameters(
                     c=train_dataloaders[cid].dataset.c,
+                    y_to_freeze = True if val_dataloaders[cid].dataset.y[0]==-1 else False, # to change if we can incorporate y in train_dataloaders[cid].dataset
                     model=local_engine.model,
                     learning=cfg.learning.mode,
                     freezing=cfg.learning.settings.freezing,
@@ -356,7 +357,9 @@ def main(cfg: DictConfig) -> None:
             #     print(f"\033[93mRunning Membership Inference Attack (MIA)\033[0m")
                 
             #     set_parameters(local_engine, global_params)
-            #     global_vec = flat_trainable_params_tensor(local_engine.model, cfg.device)
+
+            if cfg.learning.settings.mia:
+                #global_vec = flat_trainable_params_tensor(local_engine.model, cfg.device)
 
                 for cid in range(n_clients):
                     # normalize client update vector

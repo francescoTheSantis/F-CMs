@@ -13,6 +13,9 @@ CACHE = Path(
     )
 ).expanduser()
 CACHE.mkdir(exist_ok=True)
+
+HUGGINGFACEHUB_TOKEN=''    # set your huggingface token here
+OPENAI_API_KEY=''    # set your openai api key here
  
 env['HYDRA_FULL_ERROR'] = '1'
 env['CUDA_LAUNCH_BLOCKING'] = '1'
