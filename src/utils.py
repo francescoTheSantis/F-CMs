@@ -287,7 +287,7 @@ def maybe_update_config_with_graph(cfg: DictConfig, graph, interv_policy) -> Dic
 
 
 def update_intervention_policy_and_graph(cfg, interv_policy, graph, subgraphs, subgraphs_concept_names):
-    path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
+
 
     # Get the subgraph given the client id
     #for file in os.listdir(path):
@@ -670,7 +670,7 @@ def create_folders():
     os.makedirs('histories', exist_ok=True)
 
 
-def maybe_freeze_parameters(c, model, learning, freezing = True):
+def maybe_freeze_parameters(c,  y_to_freeze, model, learning, freezing = True):
     """
     This function freezes the model parameters related to the concepts masked for the client when learning = 'federated'
     Args:
@@ -684,6 +684,9 @@ def maybe_freeze_parameters(c, model, learning, freezing = True):
     if (learning == "local_federated" or learning=="federated") and freezing:
 
         c_indices_to_freeze = torch.where(c[0] == -1)[0]
+        if y_to_freeze:
+            y_index = len(model.c_info['names'])  # assuming y is after all concepts
+            c_indices_to_freeze = torch.cat((c_indices_to_freeze, torch.tensor([y_index])))
 
         for param in model.parameters():
             param.requires_grad = True
@@ -724,8 +727,8 @@ def maybe_freeze_parameters(c, model, learning, freezing = True):
             print("Parameters frozen for concepts:", c_to_freeze)
 
             # check
-            #for name, param in model.named_parameters():
-            #    print(f"{name}: requires_grad = {param.requires_grad}")
+            for name, param in model.named_parameters():
+                print(f"{name}: requires_grad = {param.requires_grad}")
 
     return None
 
@@ -1735,6 +1738,8 @@ def compute_validation_loss(model, val_loader, cfg) -> float:
                     y_hat_loss, y, c_hat_loss, c,
                     reduction='mean', multi_output=True
                 )
+                if loss_task is None:
+                    raise TypeError
                 loss_value = loss_task
             except TypeError:
                 loss_value = model.loss(

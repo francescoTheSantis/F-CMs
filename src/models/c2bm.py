@@ -72,10 +72,14 @@ class C2BM(BaseModel):
         self.combo_info = {'names': self.c_info['names'] + self.y_info['names'],
                            'cardinality': self.c_info['cardinality'] + self.y_info['cardinality']}
         
+        # check order self.combo_info['names'] matches graph_labels
+        assert self.combo_info['names'] == self.graph_labels
+
         # sort c_names and graph_labels
-        c2bm_graph = sorted(self.c_names + self.y_names)
-        graph_labels = sorted(self.graph_labels)
-        assert c2bm_graph == graph_labels
+        c2bm_graph_ordered = sorted(self.c_names + self.y_names)
+        graph_labels_ordered = sorted(self.graph_labels)
+        assert c2bm_graph_ordered == graph_labels_ordered
+        
 
         # Concept encoders, one for each concept
         self.concept_encoders = nn.ModuleDict()
