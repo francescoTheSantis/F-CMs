@@ -727,8 +727,8 @@ def maybe_freeze_parameters(c,  y_to_freeze, model, learning, freezing = True):
             print("Parameters frozen for concepts:", c_to_freeze)
 
             # check
-            for name, param in model.named_parameters():
-                print(f"{name}: requires_grad = {param.requires_grad}")
+            #for name, param in model.named_parameters():
+            #    print(f"{name}: requires_grad = {param.requires_grad}")
 
     return None
 
