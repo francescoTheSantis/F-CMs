@@ -1,8 +1,12 @@
 # TODO
 
 **Ari & Fra**
-1. **IMPORTANTE**!!!!!: dobbiamo uniformare il calcolo concept accuracy. Per ora calcoliamo la concept accuracy su tutti i concetti per cbm mentre calcoliamo la concept accuracy sui concetti parenti del task per i metodi graph based. cosa facciamo? facciamo predire al modello con il grafo anche i concetti non parenti del task? **Lasciare il bottleneck invariato per CBM ed eliminare i concetti non parent del task per C2BM. Poi calcolare la concept accuracy solo sui concetti presi da C2BM.**
-2. Controllare risultati sospetti di CGM e C2BM su Alarm. Far girare tutti gli esperimenti (localized e federated).
+1. **IMPORTANTE**!!!!!: dobbiamo uniformare il calcolo concept accuracy. Per ora calcoliamo la concept accuracy su tutti i concetti per cbm mentre calcoliamo la concept accuracy sui concetti parenti del task per i metodi graph based. cosa facciamo? facciamo predire al modello con il grafo anche i concetti non parenti del task? **Lasciare il bottleneck invariato per CBM ed eliminare i concetti non parent del task per C2BM. Poi calcolare la concept accuracy solo sui concetti presi da C2BM.** - FATTO
+2. CHECK INDICI DEI CONCETTI PER TUTTI I MODELLI E INTERVENTI PER LIVLELI, SECONDO ME I LIVELLI 
+VANNO AGGIORNATI FORSE SUL GRAFICO DEL CLIENTE? NO MI SA CHE DEVO TENERE I LIVELLI GLOBALI
+PERCHE' DEVO POI POTER CONFRONTARE GLI INTERVENTI PER DIVERSI CLIENTI, DOVREBBE ANDARE BENE COSI
+- FATTO
+2. Localized ha dei problemi: sachs e federated e asia cbm_linear - FATTO
 3. modificare lo spit dei grafi:
     3.1 i client non devono necessariamente avere l'annotazione sul task.
     3.2 il numero di client e numero di sottografi sono due cose distinte (già implementato in questo modo)
@@ -11,6 +15,9 @@
 5. Manca da visualizzare la unobserved concept accuracy table. Calcolata partendo dai risultati del federated, mettendosi dal punto di vista dei vari client.
 6. Aggiungere datasets:
     6.1 selezionare solo un task dal dataset multimodale.
+7. Hailfinder centralized da vedere
+8. Check se show_results funziona con piu' file e vedere perche' mi da' messaggio di errore sui plot
+9. Fare un check degli interventi, che funzioni tutto
 
 **Dario**
 ...

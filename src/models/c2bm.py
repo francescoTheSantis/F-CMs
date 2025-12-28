@@ -72,10 +72,14 @@ class C2BM(BaseModel):
         self.combo_info = {'names': self.c_info['names'] + self.y_info['names'],
                            'cardinality': self.c_info['cardinality'] + self.y_info['cardinality']}
         
+        # check order self.combo_info['names'] matches graph_labels
+        assert self.combo_info['names'] == self.graph_labels
+
         # sort c_names and graph_labels
-        c2bm_graph = sorted(self.c_names + self.y_names)
-        graph_labels = sorted(self.graph_labels)
-        assert c2bm_graph == graph_labels
+        c2bm_graph_ordered = sorted(self.c_names + self.y_names)
+        graph_labels_ordered = sorted(self.graph_labels)
+        assert c2bm_graph_ordered == graph_labels_ordered
+        
 
         # Concept encoders, one for each concept
         self.concept_encoders = nn.ModuleDict()
@@ -191,13 +195,12 @@ class C2BM(BaseModel):
             # update all nodes in the level
             for c_name, propagator in level.items():
                 # Concept's index in the dictionary of the ID concepts of the client.
-                c_index = self.combo_info['names'].index(c_name)
-                p_indices = get_parents(self.graph, c_index).tolist()
-                p_names = [self.combo_info['names'][p] for p in p_indices]
+                c_index_local = self.combo_info['names'].index(c_name)
+                p_indices_local = get_parents(self.graph, c_index_local).tolist()
+                p_names = [self.combo_info['names'][p] for p in p_indices_local]
                 
-                c_cardinality = self.combo_info['cardinality'][c_index]
-                p_cardinality = [self.combo_info['cardinality'][p] for p in p_indices]
-
+                c_cardinality = self.combo_info['cardinality'][c_index_local]
+                p_cardinality = [self.combo_info['cardinality'][p] for p in p_indices_local]
                 # Concept's index in the dictionary of ALL concepts.
                 c_index = self.c_name_index[c_name]
 

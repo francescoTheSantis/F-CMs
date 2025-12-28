@@ -19,6 +19,8 @@ loader:
         test:
             mode: false
             kwargs: {}
+            
+hidden_size: 64
 
 autoencoder:
   noise: 0.

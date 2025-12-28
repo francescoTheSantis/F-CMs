@@ -1,6 +1,6 @@
 
 _target_: "src.models.blackbox_multioutput.BlackBox_Multi"
-hidden_size: 64
+hidden_size: ${dataset.hidden_size}
 n_layers_encoder: 2
 n_layers_decoder: 1
 activation: leaky_relu

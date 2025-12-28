@@ -520,7 +520,10 @@ class Predictor(pl.LightningModule):
         # Update metrics and log
         y_hat, c_hat = self.model.filter_output_for_metric(y_output, c_output)
         #print("c_hat_bronc", c_hat["bronc"][0:5])
-        self.update_and_log_metrics("test", y_hat, y, c_hat, c, batch)
+        if y[y== -1].numel() != 0:
+            self.update_and_log_metrics("test", y_hat, y, c_hat, c, batch, calculate_c_metrics = True, calculate_y_metrics = False)
+        else:
+            self.update_and_log_metrics("test", y_hat, y, c_hat, c, batch) 
         self.log_loss("test", test_loss, batch_size=batch['batch_size'])
         # test-time interventions
         self.test_intervention(batch)

@@ -7,7 +7,7 @@ from hydra.utils import instantiate
 from src.data.preprocessing import preprocess_dataset
 from src.plots import maybe_plot_graph
 
-def get_dataset(dataset_cfg, device_cfg):
+def get_dataset(dataset_cfg, device_cfg, seed):
     """
     1) instantiate the dataset, 
     2) split into train, val, test
@@ -23,7 +23,7 @@ def get_dataset(dataset_cfg, device_cfg):
     dataset_directory = os.path.join(str(CACHE / dataset_cfg.name))
     os.makedirs(dataset_directory, exist_ok=True)
 
-    destination_path = os.path.join(dataset_directory, "preprocessed_dataset.pkl")
+    destination_path = os.path.join(dataset_directory, f"preprocessed_dataset_{seed}.pkl")
     if dataset_cfg.get('load_embeddings') == False:
         dataset = instantiate(dataset_cfg.loader)
         dataset = preprocess_dataset(dataset_cfg, 
