@@ -622,7 +622,6 @@ def get_subgraphs(graph, y_index, min_number_subgraphs = 3, max_number_subgraphs
                 
                 continue
 
-
  
     ### STEP 2: MERGE SUBGRAPHS IF NEEDED ###
     print(f"Generated {len(subgraphs)} subgraphs. Max allowed: {max_number_subgraphs}")
@@ -653,10 +652,6 @@ def get_subgraphs(graph, y_index, min_number_subgraphs = 3, max_number_subgraphs
             second = subgraphs_without_add.pop(0)
             merged = (first[0], list(set(first[1] + second[1])))
             subgraphs_without_add.append(merged)
-
-                
-
-
 
         # Check if we still exceed max_number_subgraphs
         #total_after_merge = len(subgraphs_with_add) + len(subgraphs_without_add)
@@ -797,9 +792,57 @@ def get_subgraphs(graph, y_index, min_number_subgraphs = 3, max_number_subgraphs
 
     return subgraphs, subgraphs_concept_names, subgraphs_with_add_nodes, add_nodes_values, add_nodes_names
 
+def build_client_subgraph_ids(
+    n_train_clients,
+    subgraphs_with_add_nodes,
+    dataset_client_multiplier=1,
+    drift_add_nodes_ratio=0.5,
+    ):
+    
+    if dataset_client_multiplier < 1:
+        raise ValueError("dataset_client_multiplier must be >= 1.")
+    if drift_add_nodes_ratio < 0 or drift_add_nodes_ratio > 1:
+        raise ValueError("drift_add_nodes_ratio must be between 0 and 1.")
+
+    n_dataset_clients = n_train_clients * dataset_client_multiplier
+    if n_dataset_clients == n_train_clients:
+        return n_dataset_clients, None
+
+    add_ids = [i for i, flag in enumerate(subgraphs_with_add_nodes) if flag]
+    no_add_ids = [i for i, flag in enumerate(subgraphs_with_add_nodes) if not flag]
+    if not no_add_ids:
+        raise ValueError("No subgraphs without additional nodes are available.")
+
+    n_extra_clients = n_dataset_clients - n_train_clients
+    n_extra_add = int(round(n_extra_clients * drift_add_nodes_ratio))
+    n_extra_add = max(0, min(n_extra_add, n_extra_clients))
+    n_extra_no_add = n_extra_clients - n_extra_add
+
+    def cycle_ids(ids, count):
+        return [ids[i % len(ids)] for i in range(count)]
+
+    client_subgraph_ids = []
+    client_subgraph_ids.extend(cycle_ids(no_add_ids, n_train_clients))
+
+    if n_extra_add > 0 and not add_ids:
+        print("Warning: drift_add_nodes_ratio requested, but no subgraphs with additional nodes were generated.")
+        n_extra_no_add = n_extra_clients
+        n_extra_add = 0
+
+    if n_extra_add > 0:
+        client_subgraph_ids.extend(cycle_ids(add_ids, n_extra_add))
+    if n_extra_no_add > 0:
+        client_subgraph_ids.extend(cycle_ids(no_add_ids, n_extra_no_add))
+
+    return n_dataset_clients, client_subgraph_ids
+
 def generate_split(cfg, datasets, graph, y_index):
 
     n = cfg.learning.n_clients
+    dataset_client_multiplier = int(cfg.learning.subgraphs.get('dataset_client_multiplier', 1))
+    drift_add_nodes_ratio = cfg.learning.subgraphs.get('drift_add_nodes_ratio', 0.5)
+    n_dataset_clients = n
+    client_subgraph_ids = None
 
     if len(datasets)>1:
         if cfg.learning.subgraphs.get('dict_subgraph_with_add_nodes', {}) != {}:
@@ -830,8 +873,6 @@ def generate_split(cfg, datasets, graph, y_index):
                                                                          dict_subgraph_with_add_nodes=cfg.learning.subgraphs.get('dict_subgraph_with_add_nodes', {})
                                     )
         
-
-        
         # eliminate y_index from each subgraph but save from which I eliminated it
         indices_subgraphs_reaching_task = []
         for key in subgraphs.keys():
@@ -847,15 +888,42 @@ def generate_split(cfg, datasets, graph, y_index):
     subgraphs_task_excluded = [i for i in range(1, len(subgraphs) + 1) if i not in indices_subgraphs_reaching_task]
     #else:
     #    subgraphs_task_excluded = None
+
+    if len(datasets) == 1 and dataset_client_multiplier != 1:
+        n_dataset_clients, client_subgraph_ids = build_client_subgraph_ids(
+            n_train_clients=n,
+            subgraphs_with_add_nodes=subgraphs_with_add_nodes,
+            dataset_client_multiplier=dataset_client_multiplier,
+            drift_add_nodes_ratio=drift_add_nodes_ratio,
+        )
+
+        n_extra_clients = n_dataset_clients - n
+        n_extra_add = sum(
+            1 for idx in client_subgraph_ids[n:] if subgraphs_with_add_nodes[idx]
+        )
+        print(
+            f"Dataset clients: {n_dataset_clients} (base {n} without additional nodes, "
+            f"extra {n_extra_clients}: {n_extra_add} with additional nodes)"
+        )
+
+    print("\nClient concept coverage:")
+    for i in range(n_dataset_clients):
+        if client_subgraph_ids is None:
+            subgraph_idx = i % len(subgraphs)
+        else:
+            subgraph_idx = client_subgraph_ids[i]
+        subgraph_key = f"subgraph_{subgraph_idx + 1}"
+        concepts = subgraphs_concept_names.get(subgraph_key, [])
+        print(f"client {i + 1}: {subgraph_key} -> {concepts}")
     
     # clean the directory
     root = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
     path = os.path.join(root)
     shutil.rmtree(path, ignore_errors=True)
     os.makedirs(path, exist_ok=True)
-    split_and_save(cfg, datasets, graph, 'train', n, subgraphs, subgraphs_task_excluded, root)
-    split_and_save(cfg, datasets, graph, 'val',n, subgraphs, subgraphs_task_excluded, root)
-    split_and_save(cfg, datasets, graph, 'test', n, subgraphs, subgraphs_task_excluded, root)
+    split_and_save(cfg, datasets, graph, 'train', n_dataset_clients, subgraphs, subgraphs_task_excluded, root, client_subgraph_ids)
+    split_and_save(cfg, datasets, graph, 'val', n_dataset_clients, subgraphs, subgraphs_task_excluded, root, client_subgraph_ids)
+    split_and_save(cfg, datasets, graph, 'test', n_dataset_clients, subgraphs, subgraphs_task_excluded, root, client_subgraph_ids)
     # Save the dataloader for the unique, real test-set (if not combined datasets)
     if len(datasets) == 1:
         test_dataloader = DataLoader(datasets[0].data['test'], batch_size=cfg.dataset.batch_size, collate_fn=static_graph_collate)
@@ -864,12 +932,9 @@ def generate_split(cfg, datasets, graph, y_index):
         with open(path, 'wb') as f:
             pickle.dump(test_dataloader, f)
 
-
-    
-
     return subgraphs, subgraphs_concept_names, subgraphs_with_add_nodes, add_nodes_values, add_nodes_names
 
-def split_and_save(cfg, datasets, graph, set,n, subgraphs = None, subgraphs_task_excluded = None, root = None):
+def split_and_save(cfg, datasets, graph, set, n, subgraphs = None, subgraphs_task_excluded = None, root = None, client_subgraph_ids = None):
 
         if len(datasets)==1:
             dataset = datasets[0]
@@ -907,15 +972,16 @@ def split_and_save(cfg, datasets, graph, set,n, subgraphs = None, subgraphs_task
             c_splits = [c[idx] for idx in split_indices]
             y_splits = [y[idx] for idx in split_indices]
         
-
         if subgraphs is None:
             raise ValueError("`subgraphs` cannot be None.")
 
-
-
         # For each split, create a dataloader containing x, c, y 
         for i in range(n):
-            j = i % len(subgraphs)
+            if client_subgraph_ids is None:
+                j = i % len(subgraphs)
+            else:
+                j = client_subgraph_ids[i]
+                # print(f"Client {i+1} uses subgraph {j+1}")
 
             if len(datasets) == 1:
                 masked_c_splits = apply_mask(c_splits[i], subgraphs[f'subgraph_{j+1}'])
@@ -937,17 +1003,15 @@ def split_and_save(cfg, datasets, graph, set,n, subgraphs = None, subgraphs_task
                 else:
                     masked_y_splits = datasets[j].data[set].y
                 
-        
             dataloader = DataLoader(
                 CustomDataset(x_i, masked_c_splits, masked_y_splits, graph),
                 batch_size=cfg.dataset.batch_size,
                 collate_fn=static_graph_collate
             )
 
-
-
             # Store the dataloader in the 
             path = os.path.join(root, f"{set}set_{i+1}_subgraph_{j+1}.pkl") # Start to count from 1
+            # print(f"Saving dataloader for {set} set, client {i+1}, subgraph {j+1} at {path}")
             with open(path, 'wb') as f:
                 pickle.dump(dataloader, f)
 

@@ -881,7 +881,7 @@ def _clone_loader(template_loader, dataset, *, shuffle):
     )
 
 
-def dataprocess_auditing(train_dataloaders, cfg):
+def dataprocess_auditing(train_dataloaders, n_clients, cfg):
     """
     Produces:
       • subsampled_train_loaders : list[DataLoader]
@@ -895,7 +895,7 @@ def dataprocess_auditing(train_dataloaders, cfg):
     subsampled_train_loaders, canary_loaders, true_in_outs = [], [], []
     sia_datasets: List[_SIASampleDataset] = []
 
-    for cid in range(cfg.learning.n_clients):
+    for cid in range(n_clients):
         base_loader  = train_dataloaders[cid]
         base_dataset = base_loader.dataset
         n_total      = len(base_dataset)

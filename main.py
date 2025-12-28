@@ -285,7 +285,7 @@ def main(cfg: DictConfig) -> None:
     elif cfg.learning.mode == 'local_federated':
         
         # hyperparameters   
-        n_rounds = cfg.learning.settings.n_rounds
+        n_rounds = cfg.learning.settings.n_rounds 
         n_clients = cfg.learning.n_clients 
         patience = cfg.learning.settings.patience
         cfg.trainer.max_epochs = cfg.learning.settings.local_epochs
@@ -300,8 +300,8 @@ def main(cfg: DictConfig) -> None:
         seed_everything(cfg.seed)
         
         # read client data
-        train_dataloaders, val_dataloaders, test_dataloaders = load_dataloaders(cfg, path, n_clients)
-        train_dataloaders, canary_loaders, true_in_outs, sia_loader = dataprocess_auditing(train_dataloaders, cfg) # NOTE: for the moment we are reducing the training data size
+        train_dataloaders, val_dataloaders, test_dataloaders = load_dataloaders(cfg, path, n_clients * cfg.learning.subgraphs.get('dataset_client_multiplier', 1))
+        train_dataloaders, canary_loaders, true_in_outs, sia_loader = dataprocess_auditing(train_dataloaders, n_clients * cfg.learning.subgraphs.get('dataset_client_multiplier', 1), cfg) # NOTE: for the moment we are reducing the training data size
         print("\033[94mNumber of samples per client:\033[0m")
         for i in range(len(train_dataloaders)):
             print(f"\033[94mClient {i}: {len(train_dataloaders[i].dataset)} samples\033[0m")
@@ -329,7 +329,8 @@ def main(cfg: DictConfig) -> None:
             # local training (sequentially)
             # ------------------------------------------------------------
             print(f"\033[93mLocal training on {n_clients} clients\033[0m")
-            for cid in range(n_clients):
+            start_n_client = 0 if rnd < cfg.learning.subgraphs.rnd_drift else n_clients 
+            for cid in range(start_n_client, start_n_client + n_clients):
                 # clone global params → local model
                 update_config_from_client(cfg, datasets, cid)
                 # first training
