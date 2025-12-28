@@ -381,7 +381,8 @@ def main(cfg: DictConfig) -> None:
             if cfg.learning.settings.mia:
                 #global_vec = flat_trainable_params_tensor(local_engine.model, cfg.device)
 
-                for cid in range(n_clients):
+                start_n_client = 0 if rnd < cfg.learning.subgraphs.rnd_drift else n_clients 
+                for cid in range(start_n_client, start_n_client + n_clients):
                     # normalize client update vector
                     true_in_out = true_in_outs[cid].float().numpy()
                     set_parameters(local_engine, client_params[cid][0])
