@@ -22,3 +22,4 @@ test_batch*
 batches*
 # ignore all the folders that start with outputs
 outputs*
+*/show_results_my.py
