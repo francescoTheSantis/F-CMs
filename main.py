@@ -200,9 +200,22 @@ def main(cfg: DictConfig) -> None:
 
     # We split the data by selecting a sub-graph for each split
     if cfg.learning.mode == "centralized":
-        subgraphs, subgraphs_concept_names, subgraphs_with_add_nodes, add_nodes_values = None, None, None
+        subgraphs, subgraphs_concept_names, subgraphs_with_add_nodes, add_nodes_values, add_nodes_names = None, None, None, None, None
     else:
-        subgraphs, subgraphs_concept_names, subgraphs_with_add_nodes, add_nodes_values = generate_split(cfg, datasets, graph, y_index)
+        subgraphs, subgraphs_concept_names, subgraphs_with_add_nodes, add_nodes_values, add_nodes_names = generate_split(cfg, datasets, graph, y_index)
+        
+        # Save subgraphs_concept_names, add_nodes_values, and subgraphs_with_add_nodes
+        model_name = cfg.model._target_.split('.')[-1] if hasattr(cfg.model, '_target_') else 'model'
+        subgraphs_file = f"subgraphs_{cfg.dataset.name}_{model_name}_seed_{cfg.seed}.json"
+        with open(subgraphs_file, 'w') as f:
+            json.dump({
+                "subgraphs_concept_names": subgraphs_concept_names,
+                "add_nodes_names": add_nodes_names,
+                "subgraphs_with_add_nodes": subgraphs_with_add_nodes,
+                "dataset_name": cfg.dataset.name,
+                "model_type": model_name
+            }, f, indent=2)
+        print(f"Saved subgraphs data to {subgraphs_file}")
 
     # update config based on the dataset
     # e.g., set input and output size of the model
@@ -319,10 +332,16 @@ def main(cfg: DictConfig) -> None:
             for cid in range(n_clients):
                 # clone global params → local model
                 update_config_from_client(cfg, datasets, cid)
-                local_engine = instantiate(cfg.engine)
-                #print(local_engine.client_id)
-                set_parameters(local_engine, global_params)
-                local_engine.model.to(cfg.device)
+                # first training
+                if rnd == cfg.drift:
+                    local_engine = instantiate(cfg.engine)
+                    #print(local_engine.client_id)
+                    set_parameters(local_engine, global_params)
+                #else:
+                    #change cfg.engine
+                    #local_engine = instantiate(cfg.engine)
+                    #update_set_params)=
+                #local_engine.model.to(cfg.device)
                 #local_engine.client_id = cid
 
                 # freeze if required
