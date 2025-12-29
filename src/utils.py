@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import random
 import numpy as np
 import pandas as pd
-from omegaconf import DictConfig, open_dict, OmegaConf
+from omegaconf import DictConfig, open_dict, OmegaConf  # type: ignore
 from src.my_hydra import parse_hyperparams, target_classname
 from src.metrics import edge_type
 from env import CACHE

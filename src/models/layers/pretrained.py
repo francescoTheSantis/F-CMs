@@ -5,7 +5,7 @@ import torch
 from torch import nn
 from torch import nn
 from torchvision.models.resnet import resnet50
-from transformers import AutoConfig, AutoModel, SwinModel, ViTModel, BertModel
+from transformers import AutoConfig, AutoModel, SwinModel, ViTModel, BertModel # type: ignore
 
 class MLPProjectionHead(nn.Module):
     def __init__(self, embedding_dim, projection_dim, dropout):

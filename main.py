@@ -4,11 +4,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 import os
 import warnings
-import hydra
+import hydra # type: ignore
 import pickle
 from torch.utils.data import DataLoader
 from src.data.utils import static_graph_collate
-from pytorch_lightning.loggers import WandbLogger
+from pytorch_lightning.loggers import WandbLogger # type: ignore
 from src.trainer import Trainer
 from src.plots_mia import plot_and_save_max_mia, plot_and_save_max_sia
 import subprocess
@@ -16,16 +16,15 @@ import json
 import matplotlib.pyplot as plt
 from typing import Dict, List, Any
 
-from hydra.utils import instantiate, call
-from omegaconf import DictConfig, open_dict, OmegaConf
+from hydra.utils import instantiate, call # type: ignore
+from omegaconf import DictConfig, open_dict, OmegaConf # type: ignore
 
 import pickle
 from pathlib import Path
 import warnings
 import time
 
-import hydra
-from hydra.core.hydra_config import HydraConfig
+from hydra.core.hydra_config import HydraConfig # type: ignore
 from src.utils import (
     seed_everything, 
     maybe_freeze_parameters, 
