@@ -29,10 +29,12 @@ from hydra.core.hydra_config import HydraConfig
 from src.utils import (
     seed_everything, 
     maybe_freeze_parameters, 
+    update_config_with_subgroup_clients,
     aggregate, 
     get_parameters, 
     set_parameters, 
     load_dataloaders,
+    identify_subgraph,
     score_blackbox_batch,
     score_whitebox_batch,
     dataprocess_auditing,
@@ -306,9 +308,7 @@ def main(cfg: DictConfig) -> None:
         for i in range(len(train_dataloaders)):
             print(f"\033[94mClient {i}: {len(train_dataloaders[i].dataset)} samples\033[0m")
 
-        # try with and without these two lines
-        engine = instantiate(cfg.engine)
-        engine.model.to(cfg.device)
+
                 
         t0 = time.time()
         best_loss = float('inf')
@@ -326,10 +326,26 @@ def main(cfg: DictConfig) -> None:
             val_losses, sizes = [], []
             
             # ------------------------------------------------------------
+            # Setup configuration based on drift round
+            # ------------------------------------------------------------
+            if rnd < cfg.learning.subgraphs.rnd_drift:
+                # pre-drift phase: use only first n_clients info: concepts, subgraph, etc...
+                start_n_client = 0
+                cfg_predrift = update_config_with_subgroup_clients(cfg, graph, datasets, subgraphs_concept_names, interv_policy, subgroup_clients=list(range(1, n_clients+1)))    
+                engine = instantiate(cfg_predrift.engine)
+                engine.model.to(cfg.device)
+            else:
+                # post-drift phase: use last n_clients info: concepts, subgraph, etc...
+                print("\033[93mDrift occurred: switching to new client data distributions\033[0m")
+                start_n_client = n_clients
+                engine = instantiate(cfg.engine)
+                engine.model.to(cfg.device)
+            
+            # ------------------------------------------------------------
             # local training (sequentially)
             # ------------------------------------------------------------
-            print(f"\033[93mLocal training on {n_clients} clients\033[0m")
-            start_n_client = 0 if rnd < cfg.learning.subgraphs.rnd_drift else n_clients 
+            print(f"\033[93mLocal training on {n_clients} clients\033[0m") 
+
             for cid in range(start_n_client, start_n_client + n_clients):
                 # clone global params → local model
                 update_config_from_client(cfg, datasets, cid)

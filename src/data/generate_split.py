@@ -879,6 +879,7 @@ def generate_split(cfg, datasets, graph, y_index):
             if y_index in subgraphs[key]:
                 indices_subgraphs_reaching_task.append(int(key.split('_')[1]))
                 subgraphs[key].remove(y_index)
+                subgraphs_concept_names[key].remove(graph.columns[y_index])
         
     # If the task is not included, select some subgraphs to mask the y variable
     #if not cfg.learning.annotation_assumption == "task_included":
@@ -912,7 +913,7 @@ def generate_split(cfg, datasets, graph, y_index):
             subgraph_idx = i % len(subgraphs)
         else:
             subgraph_idx = client_subgraph_ids[i]
-        subgraph_key = f"subgraph_{subgraph_idx + 1}"
+        subgraph_key = f"subgraph_{subgraph_idx}"
         concepts = subgraphs_concept_names.get(subgraph_key, [])
         print(f"client {i + 1}: {subgraph_key} -> {concepts}")
     

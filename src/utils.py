@@ -220,7 +220,7 @@ def update_config_from_data(cfg: DictConfig, datasets, subgraphs, subgraphs_conc
             c_names_ood = dict()
             # The list of names for all concepts (in-distribution and out-of-distribution)
             c_names_all = original_c_names 
-            for id in range(1, cfg.learning.n_clients + 1):
+            for id in range(1, cfg.learning.n_clients*cfg.learning.subgraphs.get('dataset_client_multiplier', 1)+1):
                 if len(datasets)>1:
                     dataset = datasets[(id-1) % len(datasets)]
                 else:
@@ -317,6 +317,43 @@ def update_intervention_policy_and_graph(cfg, interv_policy, graph, subgraphs, s
     updated_graph = graph.loc[c_names+cfg.model.y_info['names'], c_names+cfg.model.y_info['names']]
     return updated_policy, updated_graph
 
+def update_config_with_subgroup_clients(cfg, graph, datasets, subgraphs_concept_names, interv_policy, subgroup_clients):
+    
+    # Get concepts from subgroup clients subgraphs
+    subgroup_concepts = set()
+    for cid in subgroup_clients:
+        path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
+        subgraph_id = identify_subgraph(path, cid)
+        if subgraph_id is not None:
+            client_concepts = subgraphs_concept_names[f'subgraph_{subgraph_id}']
+            subgroup_concepts.update(client_concepts)
+    
+    # Create a temporary cfg with filtered c_info for use with update_intervention_policy_and_graph
+    subgroup_concepts_list = list(subgroup_concepts)
+    cfg_temp = copy.deepcopy(cfg)
+    
+    with open_dict(cfg_temp):
+        c_combined = [(name, card) for name, card in zip(datasets[0].c_info['names'], datasets[0].c_info['cardinality']) 
+                        if name in subgroup_concepts_list]
+        cfg_temp.engine.model.c_info = {'names': [x for x, _ in c_combined], 'cardinality': [card for _, card in c_combined]}
+        cfg_temp.engine.model.c_name_index = {name: i for i, name in enumerate(subgroup_concepts_list + datasets[0].y_info['names'])}
+        cfg_temp.engine.model.y_info = datasets[0].y_info
+    
+    # Use update_intervention_policy_and_graph to filter graph and policy
+    filtered_interv_policy, filtered_graph = update_intervention_policy_and_graph(
+        cfg_temp, interv_policy, graph, None, subgraphs_concept_names
+    )
+    
+    # Update cfg with filtered graph and policy
+    cfg_predrift = copy.deepcopy(cfg)
+    cfg_predrift = maybe_update_config_with_graph(cfg_predrift, filtered_graph, filtered_interv_policy)
+    
+    # Update c_info in cfg for subgroup clients only
+    with open_dict(cfg_predrift):
+        cfg_predrift.engine.model.c_info = {'names': [x for x, _ in c_combined], 'cardinality': [card for _, card in c_combined]}
+        cfg_predrift.engine.model.c_name_index = {name: i for i, name in enumerate(subgroup_concepts_list + datasets[0].y_info['names'])}
+
+    return cfg_predrift
 
 def get_parents(graph, i):
     # get the indices of the parents of the node i

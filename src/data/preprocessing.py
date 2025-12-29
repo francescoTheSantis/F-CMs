@@ -6,6 +6,7 @@ import torch
 from torch.utils.data import DataLoader
 import torchvision.models as tv_models
 from torchvision.models.resnet import ResNet50_Weights, ResNet18_Weights
+import torchxrayvision as xrv
 import numpy as np
 # progress bar
 from tqdm import tqdm
@@ -28,6 +29,9 @@ def generate_img_embeddings(dataset: torch.utils.data.Dataset,
         input_encoder = tv_models.resnet18(weights= ResNet18_Weights.DEFAULT)
     elif backbone == 'resnet50':
         input_encoder = tv_models.resnet50(weights=ResNet50_Weights.DEFAULT)
+    elif backbone == 'res224-nih':
+        input_encoder = xrv.models.DenseNet(weights="densenet121-res224-nih")
+
     model = InputImgEncoder(input_encoder).to(device)
     model.eval()
 
@@ -49,7 +53,11 @@ def _generate_img_embeddings(dataset, model, batch_size, device) -> None:
     """
 
     # Load dataset
-    data_loader = DataLoader(dataset, batch_size=batch_size)
+    # take the name of the dataset
+    if hasattr(dataset, 'collate_fn'):
+        data_loader = DataLoader(dataset, batch_size=batch_size, collate_fn=dataset.collate_fn)
+    else:
+        data_loader = DataLoader(dataset, batch_size=batch_size)
 
     # Extract embeddings
     embeddings = []
@@ -57,6 +65,7 @@ def _generate_img_embeddings(dataset, model, batch_size, device) -> None:
         for _, batch in enumerate(tqdm(data_loader)):
             images = batch['x'].to(device)
             # TODO: check this handles colors correctly
+            #check if the dataset root contains "NIH_chest"
             emb = model(images)
             embeddings.append(emb)
                 
@@ -165,6 +174,28 @@ def preprocess_dataset(dataset_cfg, _dataset, device, backbone ='resnet18') -> d
 
         #dataset = maybe_reduce(cfg.dataset.get('reduce_fraction', None), dataset)
         #dataset = generate_img_embeddings(dataset, batch_size=cfg.dataset.get('batch_size'), device=device)
+
+    elif dataset_name == 'NIH_chest':
+        
+        dataset.split()
+        dataset = maybe_reduce(dataset_cfg.get('reduce_fraction', None), dataset)
+        # check modality
+
+        if dataset_cfg.loader['modality'] == 'image':
+            backbone = 'res224-nih'
+            dataset = generate_img_embeddings(dataset, 
+                                            batch_size= dataset_cfg.get('batch_size', 32), 
+                                            device=device,
+                                            backbone=backbone)
+        else:
+            selected_var_index = range(dataset.data['train'].X.shape[1])
+            autoencoder_trainer = AutoencoderTrainer(autoencoder_cfg= dataset_cfg.autoencoder,
+                                                 input_shape=len(selected_var_index), 
+                                                 device=device)
+            dataset = autoencoder_trainer.train(dataset=dataset, 
+                                            selected_var_index=selected_var_index)
+            dataset = scale_embeddings(dataset)
+
     else:
         raise ValueError(f"Preprocessing is missing for dataset: {dataset_cfg.get('name')}")
     

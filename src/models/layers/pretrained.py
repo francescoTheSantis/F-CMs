@@ -75,7 +75,12 @@ class InputImgEncoder(torch.nn.Module):
     """
     def __init__(self, original_model: torch.nn.Module):
         super(InputImgEncoder, self).__init__()
-        self.features = torch.nn.Sequential(*list(original_model.children())[:-1])
+        self.weights_name = original_model.weights
+        if self.weights_name == 'densenet121-res224-nih':
+            self.features = original_model.features
+            self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        else:
+            self.features = torch.nn.Sequential(*list(original_model.children())[:-1])
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -88,6 +93,8 @@ class InputImgEncoder(torch.nn.Module):
             torch.Tensor: The output tensor from the last layer of the model.
         """
         x = self.features(x)
+        if self.weights_name == 'densenet121-res224-nih':
+            x = self.avgpool(x)
         x = torch.flatten(x, 1)
         return x
     
