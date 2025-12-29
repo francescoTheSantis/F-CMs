@@ -75,7 +75,7 @@ class InputImgEncoder(torch.nn.Module):
     """
     def __init__(self, original_model: torch.nn.Module):
         super(InputImgEncoder, self).__init__()
-        self.weights_name = original_model.weights
+        self.weights_name = getattr(original_model, "weights", None)
         if self.weights_name == 'densenet121-res224-nih':
             self.features = original_model.features
             self.avgpool = nn.AdaptiveAvgPool2d((1, 1))

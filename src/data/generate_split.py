@@ -836,6 +836,44 @@ def build_client_subgraph_ids(
 
     return n_dataset_clients, client_subgraph_ids
 
+def build_client_subgraph_ids_for_datasets(
+    n_train_clients,
+    n_datasets,
+    dataset_client_multiplier=1,
+    drift_dataset_ratio=0.5,
+):
+    if dataset_client_multiplier < 1:
+        raise ValueError("dataset_client_multiplier must be >= 1.")
+    if drift_dataset_ratio < 0 or drift_dataset_ratio > 1:
+        raise ValueError("drift_dataset_ratio must be between 0 and 1.")
+    if n_datasets < 2:
+        raise ValueError("At least two datasets are required.")
+
+    n_dataset_clients = n_train_clients * dataset_client_multiplier
+    client_subgraph_ids = [0] * n_train_clients
+
+    n_extra_clients = n_dataset_clients - n_train_clients
+    if n_extra_clients == 0:
+        return n_dataset_clients, client_subgraph_ids
+
+    n_extra_drift = int(round(n_extra_clients * drift_dataset_ratio))
+    n_extra_drift = max(0, min(n_extra_drift, n_extra_clients))
+    n_extra_remaining = n_extra_clients - n_extra_drift
+
+    extra_ids = []
+    if n_extra_drift > 0:
+        extra_ids.extend([1] * n_extra_drift)
+
+    if n_extra_remaining > 0:
+        if n_datasets == 2:
+            extra_ids.extend([0] * n_extra_remaining)
+        else:
+            other_ids = list(range(2, n_datasets))
+            extra_ids.extend([other_ids[i % len(other_ids)] for i in range(n_extra_remaining)])
+
+    client_subgraph_ids.extend(extra_ids)
+    return n_dataset_clients, client_subgraph_ids
+
 def generate_split(cfg, datasets, graph, y_index):
 
     n = cfg.learning.n_clients
@@ -845,20 +883,46 @@ def generate_split(cfg, datasets, graph, y_index):
     client_subgraph_ids = None
 
     if len(datasets)>1:
-        if cfg.learning.subgraphs.get('dict_subgraph_with_add_nodes', {}) != {}:
-            raise NotImplementedError("When multiple datasets are used, it is not possible to use additional nodes in subgraphs.")
+        # if cfg.learning.subgraphs.get('dict_subgraph_with_add_nodes', {}) != {}:
+        #     raise NotImplementedError("When multiple datasets are used, it is not possible to use additional nodes in subgraphs.")
         
         # Create a subgraph for each client containing all the variables and values from one dataset
         subgraphs = {}
         subgraphs_concept_names = {}
         for i, dataset in enumerate(datasets.values()):
-            # get variables name understanding columns that are not all equal to -1
+           # get variables name understanding columns that are not all equal to -1
            subgraphs_concept_names[f'subgraph_{i+1}'] = [dataset.c_info['names'][col] for col in range(dataset.data['train'].c.size(1)) if not torch.all(dataset.data['train'].c[:,col] == -1)]
            subgraphs[f'subgraph_{i+1}'] = [dataset.c_info['names'].index(name) for name in subgraphs_concept_names[f'subgraph_{i+1}']]
            # add y if it has values different from -1
            #if not torch.all(dataset.data['train'].y == -1):
            #    subgraphs_concept_names[f'subgraph_{i+1}'] += dataset.y_info['names']
            #    subgraphs[f'subgraph_{i+1}'] += [y_index]
+        
+        subgraphs_with_add_nodes = [False] * len(subgraphs)
+        add_nodes_values = []
+        add_nodes_names = []
+        indices_subgraphs_reaching_task = list(range(1, len(subgraphs) + 1))
+        combined_cfg = cfg.get('combined_datasets', {})
+        drift_dataset_ratio = combined_cfg.get('drift_dataset_ratio', 0.5)
+        n_dataset_clients, client_subgraph_ids = build_client_subgraph_ids_for_datasets(
+            n_train_clients=n,
+            n_datasets=len(subgraphs),
+            dataset_client_multiplier=dataset_client_multiplier,
+            drift_dataset_ratio=drift_dataset_ratio,
+        )
+
+        n_extra_clients = n_dataset_clients - n
+        if n_extra_clients > 0:
+            extra_counts = {i: client_subgraph_ids[n:].count(i) for i in range(len(subgraphs))}
+            extra_desc = ", ".join(
+                f"{count} on subgraph_{idx + 1}"
+                for idx, count in extra_counts.items()
+                if count > 0
+            )
+            print(
+                f"Dataset clients: {n_dataset_clients} (base {n} on subgraph_1, "
+                f"extra {n_extra_clients}: {extra_desc})"
+            )
 
     else:
         # Get the subgraph for each client
@@ -913,7 +977,7 @@ def generate_split(cfg, datasets, graph, y_index):
             subgraph_idx = i % len(subgraphs)
         else:
             subgraph_idx = client_subgraph_ids[i]
-        subgraph_key = f"subgraph_{subgraph_idx}"
+        subgraph_key = f"subgraph_{subgraph_idx + 1}"
         concepts = subgraphs_concept_names.get(subgraph_key, [])
         print(f"client {i + 1}: {subgraph_key} -> {concepts}")
     

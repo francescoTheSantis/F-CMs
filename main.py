@@ -122,7 +122,7 @@ def main(cfg: DictConfig) -> None:
             original_cfg = OmegaConf.load(ds_path)
             overrides = cfg.combined_datasets.get(ds_name, {})
             merged_cfg = OmegaConf.merge(original_cfg, overrides)
-            new_dataset, _, _ = get_dataset(merged_cfg, cfg.device)
+            new_dataset, _, _ = get_dataset(merged_cfg, cfg.device, seed=cfg.seed)
 
             # consistency checks
             # check at least two variables are in common
@@ -134,13 +134,11 @@ def main(cfg: DictConfig) -> None:
             else:
                 datasets = update_datasets(datasets, new_dataset, cfg.combined_datasets)
                 graph = construct_combined_true_graph(datasets, cfg.dataset, cfg.combined_datasets)
+            
     else:
         datasets = {0: dataset}
-        
-
-    print(OmegaConf.to_yaml(cfg))
-
     
+    print(OmegaConf.to_yaml(cfg))
 
     # get the causal graph
     #if cfg.dataset.load_true_graph:
@@ -308,8 +306,7 @@ def main(cfg: DictConfig) -> None:
         for i in range(len(train_dataloaders)):
             print(f"\033[94mClient {i}: {len(train_dataloaders[i].dataset)} samples\033[0m")
 
-
-                
+       
         t0 = time.time()
         best_loss = float('inf')
         best_round = 0
