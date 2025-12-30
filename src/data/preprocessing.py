@@ -175,7 +175,7 @@ def preprocess_dataset(dataset_cfg, _dataset, device, backbone ='resnet18') -> d
         #dataset = maybe_reduce(cfg.dataset.get('reduce_fraction', None), dataset)
         #dataset = generate_img_embeddings(dataset, batch_size=cfg.dataset.get('batch_size'), device=device)
 
-    elif dataset_name == 'NIH_chest':
+    elif dataset_name == 'nih_chest_images' or dataset_name == 'nih_chest_tabular':
         
         dataset.split()
         dataset = maybe_reduce(dataset_cfg.get('reduce_fraction', None), dataset)
