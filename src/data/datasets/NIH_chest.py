@@ -8,6 +8,8 @@ import numpy as np
 import pandas as pd
 import torchxrayvision as xrv
 from typing import Union
+from skimage.io import imread
+import matplotlib.pyplot as plt
 
 from src.data.utils import split_dataset
 import shutil
@@ -90,16 +92,16 @@ CONCEPTS_FOR_IMAGES_MODALITY = TOTAL_CONCEPTS - {"Patient Gender"}
 CONCEPTS_FOR_TABULAR_MODALITY = TOTAL_CONCEPTS
 
 # data preparation: dictionary used to create a single multilabel task from the 14 disease categories
-TASK_DICTIONARY = {'Atelectasis': 0,
- 'Cardiomegaly': 1,
- 'Effusion': 2,
- 'Infiltration': 3,
- 'Mass': 4,
- 'Nodule': 5,
- 'Pneumonia': 6,
- 'Pneumothorax': 7,
- 'Consolidation': 8,
- 'Edema': 9,
+TASK_DICTIONARY = {'Atelectasis': 0, 
+ 'Cardiomegaly': 1, 
+ 'Effusion': 2, 
+ 'Infiltration': 3, 
+ 'Mass': 4, 
+ 'Nodule': 5, 
+ 'Pneumonia': 6, 
+ 'Pneumothorax': 7, 
+ 'Consolidation': 8, 
+ 'Edema': 9, 
  'Emphysema': 10,
  'Fibrosis': 11,
  'Pleural_Thickening': 12,
@@ -107,18 +109,19 @@ TASK_DICTIONARY = {'Atelectasis': 0,
  "No Finding": 14
 }
 
+def normalize(img, maxval, reshape=False):
+    """Scales images to be roughly [-1024 1024].
+
+    Call xrv.utils.normalize moving forward.
+    """
+    return xrv.utils.normalize(img, maxval, reshape)
+
 def process_diagnosis(diagnosis_str):
     """
     Process diagnosis string: if multiple diagnoses separated by |, randomly pick one.
     Then replace diagnosis name with corresponding number from TASK_DICTIONARY.
     """
-    if pd.isna(diagnosis_str):
-        return np.nan
-    # split by | and randomly select one
-    diagnoses = diagnosis_str.split('|')
-    selected_diagnosis = np.random.choice(diagnoses)
-    # return the corresponding number from TASK_DICTIONARY
-    return TASK_DICTIONARY.get(selected_diagnosis, np.nan)
+    return TASK_DICTIONARY.get(diagnosis_str, np.nan)
 
 def preprocess_tabular_data(df):
     """
@@ -319,6 +322,9 @@ class _NIH_chest():
            images = pd.read_csv(DATA_DIRECTORY / "original_nih_chest/test_list.txt", header=None, names=["img_id"])          
         self.df = images.copy()
 
+        # clean images
+        self.df = self.df[self.df['img_id'] != '00005299_000.png'].reset_index(drop=True)
+
         ### ADD TASK TO THE DATAFRAME ###
         # load the task labels
         labels = pd.read_csv(DATA_DIRECTORY / "original_nih_chest/Data_Entry_2017.csv")
@@ -327,13 +333,18 @@ class _NIH_chest():
         # keep only img_id, diagnosis (task_names) and concepts_names columns
         columns_to_keep = ['img_id'] + list(self.task_names) + list(self.concepts_names)
         self.df = self.df[[col for col in columns_to_keep if col in self.df.columns]]
-        # process diagnosis column: if multiple diagnoses separated by |, randomly pick one
-        # then replace diagnosis name with corresponding number from TASK_DICTIONARY
-        self.df['diagnosis'] = self.df['diagnosis'].apply(process_diagnosis)
+        
+        # Filter: keep only samples with single diagnosis (no "|" character)
+        # Note: checked that all the diagnoses are still represented in the training set after this filtering
+        self.df = self.df[~self.df['diagnosis'].str.contains('|', regex=False, na=False)].reset_index(drop=True)
+        print(f"After filtering for single diagnoses: {len(self.df)} samples")
+
+        
+        # Replace diagnosis name with corresponding number from TASK_DICTIONARY
+        self.df['diagnosis'] = self.df['diagnosis'].apply(lambda x: TASK_DICTIONARY.get(x, np.nan) if pd.notna(x) else np.nan)
 
         # eliminate rows with NaN diagnosis
         self.df = self.df.dropna(subset=['diagnosis']).reset_index(drop=True)
-
 
         ### ADD CONCEPTS TO THE DATAFRAME ###
         # load the concepts
@@ -405,19 +416,15 @@ class _NIH_chest():
     def __getitem__(self, idx):
         if self.modality == 'image':
             img_path = self.X[idx]
-
             try:
                 transform = torchvision.transforms.Compose([xrv.datasets.XRayCenterCrop(),xrv.datasets.XRayResizer(224)])
-                img = Image.open(img_path).convert("L")
-                img = np.array(img)
-                img =  xrv.datasets.normalize(img, 255)
-                img = img[None, ...]
+                img = imread(img_path)
+                img= normalize(img, maxval=255, reshape=True)
                 img = transform(img)
-                img = torch.from_numpy(img)           
+                img = torch.from_numpy(img)       
             except:
                 print(f"Error loading image: {img_path}")
-                raise FileNotFoundError(f"Image not found: {img_path}")
-            
+                raise FileNotFoundError(f"Image not found: {img_path}")  
             x = img
         else:
             x = self.X[idx]
@@ -430,6 +437,7 @@ class _NIH_chest():
         return {"x": x, "c": c, "y": y, "graph": self.graph}
 
     def collate_fn(self, instances):
+        #print(f"collate_fn called with {len(instances)} instances")
         xs = torch.stack([ins["x"] for ins in instances], dim=0)
         c = torch.stack([ins["c"] for ins in instances], dim=0)
         labels = torch.stack([ins["y"] for ins in instances], dim=0)
