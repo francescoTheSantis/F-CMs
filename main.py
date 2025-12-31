@@ -1,7 +1,5 @@
 import numpy as np
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import os
 import warnings
 import hydra # type: ignore
@@ -13,25 +11,25 @@ from src.trainer import Trainer
 from src.plots_mia import plot_and_save_max_mia, plot_and_save_max_sia
 import subprocess
 import json
-import matplotlib.pyplot as plt
 from typing import Dict, List, Any
 
 from hydra.utils import instantiate, call # type: ignore
 from omegaconf import DictConfig, open_dict, OmegaConf # type: ignore
 
 import pickle
-from pathlib import Path
 import warnings
 import time
 
-from hydra.core.hydra_config import HydraConfig # type: ignore
 from src.utils import (
     seed_everything, 
     maybe_freeze_parameters, 
     update_config_with_subgroup_clients,
+    aggregate_graph_proposals,
+    model_is_causal,
     aggregate, 
     get_parameters, 
     set_parameters, 
+    set_old_parameters,
     load_dataloaders,
     identify_subgraph,
     score_blackbox_batch,
@@ -73,13 +71,38 @@ from src.my_hydra import parse_hyperparams
 from src.data.generate_split import generate_split, get_subgraph_dict
 from collections import OrderedDict
 from typing import List, Dict, Tuple
-import copy
 
 from env import CACHE
-import shutil
 
 # Suppress specific warning
 warnings.filterwarnings("ignore", message="When grouping with a length-1 list-like")
+
+
+def _print_concept_availability(tag, loader, cfg, cid):
+    dataset = getattr(loader, "dataset", None)
+    if dataset is None or not hasattr(dataset, "c") or dataset.c is None:
+        print(f"\033[95m[{tag}] client {cid}: no concept labels in dataset.\033[0m")
+        return
+    c = dataset.c
+    if c.numel() == 0:
+        print(f"\033[95m[{tag}] client {cid}: empty concept tensor.\033[0m")
+        return
+    # A concept is unavailable if its column is all -1
+    unavailable = (c == -1).all(dim=0)
+    n_total = int(unavailable.numel())
+    n_unavail = int(unavailable.sum().item())
+    n_avail = n_total - n_unavail
+    if hasattr(cfg, "engine") and hasattr(cfg.engine, "model") and hasattr(cfg.engine.model, "c_info"):
+        names = cfg.engine.model.c_info.get("names", [])
+    else:
+        names = []
+    unavailable_names = [names[i] for i in range(min(len(names), n_total)) if unavailable[i]]
+    print(
+        f"\033[95m[{tag}] client {cid}: concepts available {n_avail}/{n_total}, "
+        f"unavailable {n_unavail}/{n_total}.\033[0m"
+    )
+    if unavailable_names:
+        print(f"\033[95m[{tag}] client {cid} unavailable concepts: {unavailable_names}\033[0m")
    
 
 @hydra.main(config_path="conf", config_name="test", version_base="1.3")
@@ -289,7 +312,7 @@ def main(cfg: DictConfig) -> None:
         patience = cfg.learning.settings.patience
         cfg.trainer.max_epochs = cfg.learning.settings.local_epochs
         cfg.trainer.patience = 0
-        use_concepts = True # whether to use concept information in the MIA attacks
+        # use_concepts = True # whether to use concept information in the MIA attacks
         
         num_threads = cfg.learning.settings.num_threads
         print(f"\033[93mLocal Federated training with {n_clients} clients\033[0m")
@@ -304,7 +327,6 @@ def main(cfg: DictConfig) -> None:
         print("\033[94mNumber of samples per client:\033[0m")
         for i in range(len(train_dataloaders)):
             print(f"\033[94mClient {i}: {len(train_dataloaders[i].dataset)} samples\033[0m")
-
        
         t0 = time.time()
         best_loss = float('inf')
@@ -315,7 +337,159 @@ def main(cfg: DictConfig) -> None:
         for cid in range(n_clients):
             history["loss_val_client"][cid] = []
         mia_accuracies, mia_epsilons = initialize_mia_results(n_clients)
-        global_params = get_parameters(instantiate(cfg.engine))
+        n_dataset_clients = len(train_dataloaders)
+        predrift_clients = list(range(1, n_clients + 1))
+        postdrift_clients = list(range(n_clients + 1, min(2 * n_clients, n_dataset_clients) + 1))
+        if not postdrift_clients:
+            postdrift_clients = predrift_clients
+
+        def _client_has_task_labels(loader):
+            y = getattr(loader.dataset, "y", None)
+            if y is None:
+                return False
+            if torch.is_tensor(y):
+                return not torch.all(y == -1)
+            return True
+
+        def _build_local_graphs(client_ids):
+            local_graphs = []
+            local_weights = []
+            for client_id in client_ids:
+                subgraph_id = identify_subgraph(path, client_id)
+                if subgraph_id is None:
+                    continue
+                node_names = list(
+                    subgraphs_concept_names.get(f"subgraph_{subgraph_id}", [])
+                )
+                if not node_names:
+                    continue
+                loader = train_dataloaders[client_id - 1]
+                if _client_has_task_labels(loader):
+                    for y_name in datasets[0].y_info["names"]:
+                        if y_name not in node_names:
+                            node_names.append(y_name)
+                local_graphs.append(graph.loc[node_names, node_names])
+                local_weights.append(len(loader.dataset))
+            return local_graphs, local_weights
+
+        def _ensure_task_has_parent(agg_graph, task_name, fallback_graph):
+            if task_name not in agg_graph.columns:
+                raise ValueError(f"Task node {task_name} not found in aggregated graph.")
+            task_idx = agg_graph.columns.get_loc(task_name)
+            if agg_graph.iloc[:, task_idx].sum() == 0:
+                warnings.warn(
+                    "Aggregated graph has no parents for the task; "
+                    "restoring task parents from the original graph."
+                )
+                agg_graph = agg_graph.copy()
+                fallback_col = fallback_graph.loc[agg_graph.index, task_name]
+                agg_graph.iloc[:, task_idx] = fallback_col.values
+                agg_graph.iat[task_idx, task_idx] = 0
+            return agg_graph
+
+        cfg_predrift = None
+        cfg_postdrift = cfg
+        use_graph_agg = cfg.learning.subgraphs.get("aggregate_graph", False)
+        if use_graph_agg:
+            node_order = datasets[0].c_info["names"] + datasets[0].y_info["names"]
+            agg_tau = cfg.learning.subgraphs.get("aggregate_tau", 0.5)
+            agg_missing = cfg.learning.subgraphs.get("aggregate_missing", "ignore")
+            agg_resolve_conflicts = cfg.learning.subgraphs.get("aggregate_resolve_conflicts", True)
+            agg_require_dag = cfg.learning.subgraphs.get("aggregate_require_dag", model_is_causal(cfg.model))
+
+            local_graphs, local_weights = _build_local_graphs(predrift_clients)
+            if local_graphs:
+                graph_predrift, _ = aggregate_graph_proposals(
+                    local_graphs,
+                    weights=local_weights,
+                    node_order=node_order,
+                    tau=agg_tau,
+                    resolve_conflicts=agg_resolve_conflicts,
+                    require_dag=agg_require_dag,
+                    missing=agg_missing,
+                )
+                graph_predrift = _ensure_task_has_parent(
+                    graph_predrift, datasets[0].y_info["names"][0], graph
+                )
+                y_index_predrift = graph_predrift.columns.get_loc(
+                    datasets[0].y_info["names"][0]
+                )
+                interv_policy_predrift, _ = get_intervention_policy(
+                    graph_predrift, y_index_predrift
+                )
+                cfg_predrift = update_config_with_subgroup_clients(
+                    cfg,
+                    graph_predrift,
+                    datasets,
+                    subgraphs_concept_names,
+                    interv_policy_predrift,
+                    subgroup_clients=predrift_clients,
+                )
+            else:
+                warnings.warn(
+                    "No local graphs found for pre-drift aggregation; using existing graph."
+                )
+                cfg_predrift = update_config_with_subgroup_clients(
+                    cfg,
+                    graph,
+                    datasets,
+                    subgraphs_concept_names,
+                    interv_policy,
+                    subgroup_clients=predrift_clients,
+                )
+
+            local_graphs, local_weights = _build_local_graphs(postdrift_clients)
+            if local_graphs:
+                graph_postdrift, _ = aggregate_graph_proposals(
+                    local_graphs,
+                    weights=local_weights,
+                    node_order=node_order,
+                    tau=agg_tau,
+                    resolve_conflicts=agg_resolve_conflicts,
+                    require_dag=agg_require_dag,
+                    missing=agg_missing,
+                )
+                graph_postdrift = _ensure_task_has_parent(
+                    graph_postdrift, datasets[0].y_info["names"][0], graph
+                )
+                y_index_postdrift = graph_postdrift.columns.get_loc(
+                    datasets[0].y_info["names"][0]
+                )
+                interv_policy_postdrift, _ = get_intervention_policy(
+                    graph_postdrift, y_index_postdrift
+                )
+                cfg_postdrift = update_config_with_subgroup_clients(
+                    cfg,
+                    graph_postdrift,
+                    datasets,
+                    subgraphs_concept_names,
+                    interv_policy_postdrift,
+                    subgroup_clients=postdrift_clients,
+                )
+            else:
+                warnings.warn(
+                    "No local graphs found for post-drift aggregation; using existing graph."
+                )
+                cfg_postdrift = cfg
+
+            if cfg_predrift is None:
+                cfg_predrift = cfg_postdrift
+        else:
+            if cfg.learning.subgraphs.rnd_drift > 1:
+                cfg_predrift = update_config_with_subgroup_clients(
+                    cfg,
+                    graph,
+                    datasets,
+                    subgraphs_concept_names,
+                    interv_policy,
+                    subgroup_clients=predrift_clients,
+                )
+
+        init_cfg = cfg_predrift if cfg_predrift is not None else cfg_postdrift
+        init_engine = instantiate(init_cfg.engine)
+        global_params = get_parameters(init_engine)
+        global_param_keys = list(init_engine.model.state_dict().keys())
+        drift_debug_printed = False
         for rnd in range(1, n_rounds + 1):
             print(f"\033[92m\n--> ROUND {rnd}/{n_rounds}\033[0m")
             client_params: List[Tuple[List[torch.Tensor], int]] = []
@@ -327,35 +501,55 @@ def main(cfg: DictConfig) -> None:
             if rnd < cfg.learning.subgraphs.rnd_drift:
                 # pre-drift phase: use only first n_clients info: concepts, subgraph, etc...
                 start_n_client = 0
-                cfg_predrift = update_config_with_subgroup_clients(cfg, graph, datasets, subgraphs_concept_names, interv_policy, subgroup_clients=list(range(1, n_clients+1)))    
-                engine = instantiate(cfg_predrift.engine)
-                engine.model.to(cfg.device)
+                if cfg_predrift is None:
+                    cfg_predrift = update_config_with_subgroup_clients(
+                        cfg,
+                        graph,
+                        datasets,
+                        subgraphs_concept_names,
+                        interv_policy,
+                        subgroup_clients=predrift_clients,
+                    )
+                cfg_round = cfg_predrift
             else:
                 # post-drift phase: use last n_clients info: concepts, subgraph, etc...
-                print("\033[93mDrift occurred: switching to new client data distributions\033[0m")
+                if rnd == cfg.learning.subgraphs.rnd_drift:
+                    print("\033[93mDrift occurred: switching to new client data distributions\033[0m")
                 start_n_client = n_clients
-                engine = instantiate(cfg.engine)
-                engine.model.to(cfg.device)
+                cfg_round = cfg_postdrift
+            engine = instantiate(cfg_round.engine)
+            engine.model.to(cfg.device)
+
+            # if (rnd >= cfg.learning.subgraphs.rnd_drift) and True:
+            if True:
+                print("\033[95m[Drift Debug] Checking concept label availability (train/val) for post-drift clients\033[0m")
+                for cid in range(start_n_client, start_n_client + n_clients):
+                    _print_concept_availability("train", train_dataloaders[cid], cfg_round, cid)
+                    if val_dataloaders[cid] is not None:
+                        _print_concept_availability("val", val_dataloaders[cid], cfg_round, cid)
+                drift_debug_printed = True
             
             # ------------------------------------------------------------
             # local training (sequentially)
             # ------------------------------------------------------------
             print(f"\033[93mLocal training on {n_clients} clients\033[0m") 
-
-            for cid in range(start_n_client, start_n_client + n_clients):
+            for n, cid in enumerate(range(start_n_client, start_n_client + n_clients)):
                 # clone global params → local model
-                update_config_from_client(cfg, datasets, cid)
+                update_config_from_client(cfg_round, datasets, cid)
+                local_engine = instantiate(cfg_round.engine)
                 # first training
-                if rnd == cfg.drift:
-                    local_engine = instantiate(cfg.engine)
-                    #print(local_engine.client_id)
+                if rnd == cfg.learning.subgraphs.rnd_drift:
+                    # load new architecture and update only those parameters that were present before
+                    set_old_parameters(
+                        local_engine,
+                        global_params,
+                        global_param_keys,
+                        verbose=(cid == start_n_client),
+                    )
+                else:
                     set_parameters(local_engine, global_params)
-                #else:
-                    #change cfg.engine
-                    #local_engine = instantiate(cfg.engine)
-                    #update_set_params)=
-                #local_engine.model.to(cfg.device)
-                #local_engine.client_id = cid
+                    
+                local_engine.model.to(cfg.device)
 
                 # freeze if required
                 maybe_freeze_parameters(
@@ -376,7 +570,7 @@ def main(cfg: DictConfig) -> None:
                 # local validation
                 if val_dataloaders[cid] is not None:
                     avg_loss = compute_validation_loss(local_engine.model, val_dataloaders[cid], cfg)
-                    history["loss_val_client"][cid].append(avg_loss)
+                    history["loss_val_client"][n].append(avg_loss)
     
                 # collect weights for aggregation
                 client_params.append((get_parameters(local_engine), n_samples))
@@ -390,17 +584,17 @@ def main(cfg: DictConfig) -> None:
                 
             #     set_parameters(local_engine, global_params)
 
-            if cfg.learning.settings.mia:
-                #global_vec = flat_trainable_params_tensor(local_engine.model, cfg.device)
+            # if cfg.learning.settings.mia:
+            #     #global_vec = flat_trainable_params_tensor(local_engine.model, cfg.device)
 
-                start_n_client = 0 if rnd < cfg.learning.subgraphs.rnd_drift else n_clients 
-                for cid in range(start_n_client, start_n_client + n_clients):
-                    # normalize client update vector
-                    true_in_out = true_in_outs[cid].float().numpy()
-                    set_parameters(local_engine, client_params[cid][0])
-                    client_vec = flat_trainable_params_tensor(local_engine.model, cfg.device)
-                    client_update = client_vec - global_vec
-                    client_update = client_update / torch.tensor(np.linalg.norm(client_update.cpu()), device=cfg.device) 
+            #     start_n_client = 0 if rnd < cfg.learning.subgraphs.rnd_drift else n_clients 
+            #     for cid in range(start_n_client, start_n_client + n_clients):
+            #         # normalize client update vector
+            #         true_in_out = true_in_outs[cid].float().numpy()
+            #         set_parameters(local_engine, client_params[cid][0])
+            #         client_vec = flat_trainable_params_tensor(local_engine.model, cfg.device)
+            #         client_update = client_vec - global_vec
+            #         client_update = client_update / torch.tensor(np.linalg.norm(client_update.cpu()), device=cfg.device) 
 
             #         # white-box attack (accumulate over the whole canary loader)
             #         set_parameters(local_engine, global_params)
@@ -418,20 +612,20 @@ def main(cfg: DictConfig) -> None:
             #         # black-box concept-entropy (uses ONLY concepts if available, else falls back to label entropy)
             #         # scores_blackbox_concept = score_blackbox_concept_entropy_loader(canary_loaders[cid], client_model, cfg)
 
-                    # black-box shadow MLP (features = label confidences/margins/entropy/-loss + concept stats if available)
-                    shadow_epochs = getattr(getattr(cfg, "learning").settings, "mia_shadow_epochs", 100)
-                    scores_blackbox_shadow = shadow_mlp_scores_loader(
-                        canary_loaders[cid],
-                        client_model,
-                        cfg,
-                        y_mem_labels=true_in_out,
-                        use_concepts=use_concepts,
-                        epochs=shadow_epochs,
-                        batch_size=64,
-                        lr=1e-4,
-                        k_folds=5,
-                        scores_whitebox_list=None,  # no need to use them.. no effect observed in practice on asia
-                    )
+                    # # black-box shadow MLP (features = label confidences/margins/entropy/-loss + concept stats if available)
+                    # shadow_epochs = getattr(getattr(cfg, "learning").settings, "mia_shadow_epochs", 100)
+                    # scores_blackbox_shadow = shadow_mlp_scores_loader(
+                    #     canary_loaders[cid],
+                    #     client_model,
+                    #     cfg,
+                    #     y_mem_labels=true_in_out,
+                    #     use_concepts=use_concepts,
+                    #     epochs=shadow_epochs,
+                    #     batch_size=64,
+                    #     lr=1e-4,
+                    #     k_folds=5,
+                    #     scores_whitebox_list=None,  # no need to use them.. no effect observed in practice on asia
+                    # )
 
             #         # evaluate white-box
             #         accuracy_mia, privacy_estimate = evaluate_privacy(scores_whitebox, true_in_out, cfg)
@@ -478,6 +672,7 @@ def main(cfg: DictConfig) -> None:
             # ------------------------------------------------------------
             print(f"\033[93mAggregating local models\033[0m")
             global_params = aggregate(client_params)
+            global_param_keys = list(local_engine.model.state_dict().keys())
             print("Saving global model parameters")
             params_dict = zip(local_engine.model.state_dict().keys(), global_params)
             state_dict = OrderedDict({k: torch.tensor(v) for k, v in params_dict})
@@ -487,10 +682,10 @@ def main(cfg: DictConfig) -> None:
             # FedAvg aggregation on client validation sets
             # ------------------------------------------------------------
             print(f"\033[93mEvaluating on client validation sets\033[0m")
-            local_engine = instantiate(cfg.engine)
+            local_engine = instantiate(cfg_round.engine)
             set_parameters(local_engine, global_params)
             local_engine.model.to(cfg.device)
-            for cid in range(n_clients):
+            for cid in range(start_n_client, start_n_client + n_clients):
                 val_metrics = trainer.validate(local_engine, val_dataloaders[cid])[0]  #{'val/c/asia': 0.0, 'val/c/bronc': 0.0, 'val/c/either': 0.0, 'val/c/lung': 0.0, 'val/c/smoke': 0.0, 'val/c/tub': 0.0, 'val/c/xray': 0.0, 'val_loss': nan}
                 val_losses.append(val_metrics['val_loss'])
                 sizes.append(len(val_dataloaders[cid].dataset))
@@ -566,7 +761,8 @@ def main(cfg: DictConfig) -> None:
         ind_min_loss = np.argmin(history["loss_val_avg"])
         # best_round = history["round"][ind_min_loss]
         print(f"\033[92mBest round: {best_round} with loss {history['loss_val_avg'][ind_min_loss]:.4f}\033[0m")
-        local_engine = instantiate(cfg.engine)
+        cfg_eval = cfg_predrift if best_round < cfg.learning.subgraphs.rnd_drift else cfg
+        local_engine = instantiate(cfg_eval.engine)
         local_engine.model.load_state_dict(torch.load(f"checkpoints/model_round_{best_round}.pth", weights_only=False))
 
         # Evaluate the model on the client datasets 

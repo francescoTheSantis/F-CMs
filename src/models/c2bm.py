@@ -56,6 +56,9 @@ class C2BM(BaseModel):
         self.prop_type = prop_type
         self.cat_latent = cat_latent
         
+        # print in red the graph
+        print("\033[91m[C2BM] Using graph:\n", self.graph.numpy(), "\033[0m")
+        
         # Setup concept loss weight
         self._setup_concept_loss_weight(concept_loss_weight)
         
@@ -216,6 +219,24 @@ class C2BM(BaseModel):
 
                 if c_name not in self.y_names and c is not None and intervention_index is not None:
                     c_probs[c_name] = maybe_intervene(c_probs[c_name], c[:,c_index], intervention_index[:,c_index]) 
+
+        # # Predict concepts that are not in the task ancestor graph (no propagation step).
+        # missing_concepts = [
+        #     name for name in self.c_names
+        #     if name not in c_probs and name not in self.virtual_roots
+        # ]
+        # # print in red misisng concepts
+        # print("\033[91m[Warning] Missing concepts (no propagation):", missing_concepts, "\033[0m")
+        # for name in missing_concepts:
+        #     idx = self.c_name_index[name]
+        #     c_input = c[:, idx] if c is not None else None
+        #     intervention_input = intervention_index[:, idx] if intervention_index is not None else None
+        #     c_probs[name] = self.concept_encoders[name](
+        #         x_encoded,
+        #         c_input,
+        #         intervention_input,
+        #         to_return=['probs']
+        #     )
 
         # Decode, get task logits
         y_hat_probs = c_probs[self.y_names[0]]

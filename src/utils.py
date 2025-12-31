@@ -10,6 +10,7 @@ from src.metrics import edge_type
 from env import CACHE
 import os
 import random
+import warnings
 from src.data.generate_split import get_subgraph_dict
 import matplotlib.pyplot as plt
 from typing import List, Dict, Tuple, Any, Optional
@@ -103,6 +104,47 @@ def set_parameters(engine, parameters):
     params_dict = zip(engine.model.state_dict().keys(), parameters)
     state_dict = OrderedDict({k: torch.tensor(v) for k, v in params_dict})
     engine.model.load_state_dict(state_dict, strict=True)
+
+
+def set_old_parameters(engine, parameters, parameter_keys, verbose: bool = False):
+    """
+    Load only the parameters that are compatible with the current model.
+    Useful when the architecture expands and new modules are introduced.
+    """
+    if parameter_keys is None:
+        raise ValueError("parameter_keys must be provided to map previous parameters.")
+    if len(parameters) != len(parameter_keys):
+        warnings.warn(
+            f"Parameter/key length mismatch: {len(parameters)} params vs {len(parameter_keys)} keys. "
+            "Proceeding with the shortest length."
+        )
+
+    new_state = engine.model.state_dict()
+    loaded = 0
+    missing = 0
+    mismatched = 0
+
+    for k, v in zip(parameter_keys, parameters):
+        if k not in new_state:
+            missing += 1
+            continue
+        old_tensor = torch.tensor(v)
+        if new_state[k].shape != old_tensor.shape:
+            mismatched += 1
+            continue
+        if old_tensor.dtype != new_state[k].dtype:
+            old_tensor = old_tensor.to(new_state[k].dtype)
+        new_state[k] = old_tensor
+        loaded += 1
+
+    engine.model.load_state_dict(new_state, strict=False)
+    if verbose:
+        total = len(parameter_keys)
+        print(
+            f"\033[96mLoaded {loaded}/{total} params from previous model "
+            f"(missing={missing}, shape_mismatch={mismatched}).\033[0m"
+        )
+    return {"loaded": loaded, "missing": missing, "mismatched": mismatched}
 
 
 def model_has_concepts(model):
@@ -413,6 +455,168 @@ def remove_cycles(graph, start_node):
     return graph
 
 
+def _find_cycle_edges(adj_matrix: np.ndarray):
+    n = adj_matrix.shape[0]
+    visited = [False] * n
+    in_stack = [False] * n
+    parent = [-1] * n
+
+    def dfs(node):
+        visited[node] = True
+        in_stack[node] = True
+        for neighbor in range(n):
+            if adj_matrix[node][neighbor] != 1:
+                continue
+            if not visited[neighbor]:
+                parent[neighbor] = node
+                cycle = dfs(neighbor)
+                if cycle is not None:
+                    return cycle
+            elif in_stack[neighbor]:
+                cycle_edges = []
+                cur = node
+                while cur != neighbor:
+                    p = parent[cur]
+                    if p == -1:
+                        break
+                    cycle_edges.append((p, cur))
+                    cur = p
+                cycle_edges.append((node, neighbor))
+                return cycle_edges
+        in_stack[node] = False
+        return None
+
+    for node in range(n):
+        if not visited[node]:
+            cycle = dfs(node)
+            if cycle is not None:
+                return cycle
+    return None
+
+
+def _break_cycles_by_confidence(adj_matrix: np.ndarray, scores: np.ndarray):
+    adj = adj_matrix.copy()
+    removed_edges = []
+    while True:
+        cycle_edges = _find_cycle_edges(adj)
+        if not cycle_edges:
+            break
+        edge_to_remove = min(
+            cycle_edges,
+            key=lambda e: (scores[e[0], e[1]], e[0], e[1]),
+        )
+        adj[edge_to_remove[0], edge_to_remove[1]] = 0
+        removed_edges.append(edge_to_remove)
+    return adj, removed_edges
+
+
+def aggregate_graph_proposals(
+    local_graphs: List[pd.DataFrame],
+    local_confidences: Optional[List[pd.DataFrame]] = None,
+    weights: Optional[List[float]] = None,
+    node_order: Optional[List[str]] = None,
+    tau: float = 0.5,
+    resolve_conflicts: bool = True,
+    require_dag: bool = False,
+    missing: str = "ignore",
+):
+    if not local_graphs:
+        raise ValueError("local_graphs cannot be empty.")
+    if local_confidences is not None and len(local_confidences) != len(local_graphs):
+        raise ValueError("local_confidences must match local_graphs length.")
+    if weights is None:
+        weights = [1.0] * len(local_graphs)
+    if len(weights) != len(local_graphs):
+        raise ValueError("weights must match local_graphs length.")
+
+    if node_order is None:
+        node_order = []
+        seen = set()
+        for g in local_graphs:
+            for name in g.index.tolist():
+                if name not in seen:
+                    node_order.append(name)
+                    seen.add(name)
+    node_to_idx = {name: i for i, name in enumerate(node_order)}
+
+    n_nodes = len(node_order)
+    score_sum = np.zeros((n_nodes, n_nodes), dtype=float)
+    weight_sum = np.zeros((n_nodes, n_nodes), dtype=float)
+
+    for idx, g in enumerate(local_graphs):
+        if not isinstance(g, pd.DataFrame):
+            raise ValueError("local_graphs must contain pandas DataFrames with node labels.")
+        scores_df = g if local_confidences is None else local_confidences[idx]
+        if not isinstance(scores_df, pd.DataFrame):
+            scores_df = pd.DataFrame(scores_df, index=g.index, columns=g.columns)
+        if scores_df.shape[0] != scores_df.shape[1]:
+            raise ValueError("Each local graph must be a square adjacency matrix.")
+        if scores_df.index.tolist() != scores_df.columns.tolist():
+            raise ValueError("Local graph indices must match columns order.")
+
+        local_nodes = scores_df.index.tolist()
+        keep = [i for i, name in enumerate(local_nodes) if name in node_to_idx]
+        if not keep:
+            continue
+
+        local_scores = scores_df.to_numpy(dtype=float)
+        local_scores = local_scores[np.ix_(keep, keep)]
+        idxs = [node_to_idx[local_nodes[i]] for i in keep]
+
+        full = np.full((n_nodes, n_nodes), np.nan, dtype=float)
+        full[np.ix_(idxs, idxs)] = local_scores
+        np.fill_diagonal(full, 0.0)
+
+        if missing == "ignore":
+            mask = ~np.isnan(full)
+            score_sum += weights[idx] * np.where(mask, full, 0.0)
+            weight_sum += weights[idx] * mask
+        elif missing == "zero":
+            full = np.nan_to_num(full, nan=0.0)
+            score_sum += weights[idx] * full
+            weight_sum += weights[idx]
+        else:
+            raise ValueError("missing must be either 'ignore' or 'zero'.")
+
+    bar_scores = np.zeros_like(score_sum)
+    valid = weight_sum > 0
+    bar_scores[valid] = score_sum[valid] / weight_sum[valid]
+
+    adj = (bar_scores >= tau) & valid
+    adj = adj.astype(int)
+    np.fill_diagonal(adj, 0)
+
+    uncertain_edges = []
+    if resolve_conflicts:
+        for i in range(n_nodes):
+            for j in range(i + 1, n_nodes):
+                if adj[i, j] == 1 and adj[j, i] == 1:
+                    if bar_scores[i, j] > bar_scores[j, i]:
+                        adj[j, i] = 0
+                    elif bar_scores[i, j] < bar_scores[j, i]:
+                        adj[i, j] = 0
+                    else:
+                        adj[i, j] = 0
+                        adj[j, i] = 0
+                        uncertain_edges.append((node_order[i], node_order[j]))
+
+    removed_cycle_edges = []
+    if require_dag:
+        adj, removed_edges = _break_cycles_by_confidence(adj, bar_scores)
+        removed_cycle_edges = [
+            (node_order[i], node_order[j]) for i, j in removed_edges
+        ]
+
+    graph_df = pd.DataFrame(adj, index=node_order, columns=node_order, dtype=int)
+    meta = {
+        "scores": pd.DataFrame(bar_scores, index=node_order, columns=node_order),
+        "weights": pd.DataFrame(weight_sum, index=node_order, columns=node_order),
+        "uncertain_edges": uncertain_edges,
+        "removed_cycle_edges": removed_cycle_edges,
+    }
+    return graph_df, meta
+
+
 def remove_problematic_edges(graph, dataset):
     graph, virtual_c_names = common_cause_nodes(graph)
     if virtual_c_names:
@@ -720,35 +924,41 @@ def maybe_freeze_parameters(c,  y_to_freeze, model, learning, freezing = True):
     """
     if (learning == "local_federated" or learning=="federated") and freezing:
 
-        c_indices_to_freeze = torch.where(c[0] == -1)[0]
+        c_indices_to_freeze = torch.where(c[0] == -1)[0].tolist()
         if y_to_freeze:
             y_index = len(model.c_info['names'])  # assuming y is after all concepts
-            c_indices_to_freeze = torch.cat((c_indices_to_freeze, torch.tensor([y_index])))
+            c_indices_to_freeze.append(int(y_index))
 
         for param in model.parameters():
             param.requires_grad = True
 
         if model.name=="cbm_linear" or model.name =="cbm_mlp":
             c_keys = list(model.c_mlp.keys())
-            c_to_freeze = [c_keys[i] for i in c_indices_to_freeze]
+            c_to_freeze = [c_keys[i] for i in c_indices_to_freeze if 0 <= i < len(c_keys)]
             for name, mlp in model.c_mlp.items():
                     if name in c_to_freeze:
                         for param in mlp.parameters():
                             param.requires_grad = False
+            if y_to_freeze and hasattr(model, "decoder"):
+                for param in model.decoder.parameters():
+                    param.requires_grad = False
             print("Parameters frozen for concepts:", c_to_freeze)
 
         if model.name=="cem":
             c_keys = list(model.concept_encoders.keys())
-            c_to_freeze = [c_keys[i] for i in c_indices_to_freeze]
+            c_to_freeze = [c_keys[i] for i in c_indices_to_freeze if 0 <= i < len(c_keys)]
             for name, concept_encoder in model.concept_encoders.items():
                 if name in c_to_freeze:
                     for param in concept_encoder.parameters():
                         param.requires_grad = False
+            if y_to_freeze and hasattr(model, "decoder"):
+                for param in model.decoder.parameters():
+                    param.requires_grad = False
             print("Parameters frozen for concepts:", c_to_freeze)
         
         if model.name=="c2bm":
             c_keys = list(model.concept_encoders.keys())
-            c_to_freeze = [c_keys[i] for i in c_indices_to_freeze]
+            c_to_freeze = [c_keys[i] for i in c_indices_to_freeze if 0 <= i < len(c_keys)]
 
             for name, concept_encoder in model.concept_encoders.items():
                 if name in c_to_freeze:
