@@ -76,8 +76,9 @@ class InputImgEncoder(torch.nn.Module):
     def __init__(self, original_model: torch.nn.Module):
         super(InputImgEncoder, self).__init__()
         self.weights_name = getattr(original_model, "weights", None)
-        if self.weights_name == 'densenet121-res224-nih':
+        if self.weights_name == 'densenet121-res224-all':
             self.features = original_model.features
+            # to obtain global summarized features
             self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
         else:
             self.features = torch.nn.Sequential(*list(original_model.children())[:-1])
@@ -93,7 +94,7 @@ class InputImgEncoder(torch.nn.Module):
             torch.Tensor: The output tensor from the last layer of the model.
         """
         x = self.features(x)
-        if self.weights_name == 'densenet121-res224-nih':
+        if self.weights_name == 'densenet121-res224-all':
             x = self.avgpool(x)
         x = torch.flatten(x, 1)
         return x

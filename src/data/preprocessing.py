@@ -10,8 +10,9 @@ import torchxrayvision as xrv
 import numpy as np
 # progress bar
 from tqdm import tqdm
-
+from sklearn.preprocessing import StandardScaler
 from src.models.layers.pretrained import InputImgEncoder
+from src.models.layers.base import MLP
 from src.data.utils import reduce_dataset, change_task
 from src.data.datasets.colormnist import update_concept_names_ColorMNIST, onehot_to_concepts_ColorMNIST
 from src.data.datasets.fashionmnist import update_concept_names_FashionMNIST, onehot_to_concepts_FashionMNIST
@@ -29,8 +30,10 @@ def generate_img_embeddings(dataset: torch.utils.data.Dataset,
         input_encoder = tv_models.resnet18(weights= ResNet18_Weights.DEFAULT)
     elif backbone == 'resnet50':
         input_encoder = tv_models.resnet50(weights=ResNet50_Weights.DEFAULT)
-    elif backbone == 'res224-nih':
-        input_encoder = xrv.models.DenseNet(weights="densenet121-res224-nih")
+    elif backbone == 'res224-all':
+        input_encoder = xrv.models.DenseNet(weights="densenet121-res224-all")
+    else:
+        raise ValueError(f"Backbone {backbone} not supported for image embeddings generation.")
 
     model = InputImgEncoder(input_encoder).to(device)
     model.eval()
@@ -69,6 +72,119 @@ def _generate_img_embeddings(dataset, model, batch_size, device) -> None:
             emb = model(images)
             embeddings.append(emb)
                 
+    # Concatenate and save embeddings
+    embeddings = torch.cat(embeddings, dim=0).cpu()
+    dataset.X = embeddings
+    return dataset
+
+def generate_tabular_embeddings(dataset: torch.utils.data.Dataset,
+                                batch_size: int = 32,
+                                device: str = 'cpu',
+                                hidden_size: int = 128,
+                                n_layers: int = 3,
+                                epochs: int = 50,
+                                lr: float = 1e-3) -> None:
+    """
+    Generate embeddings from tabular data using a trained MLP model.
+    The model is trained to predict labels from tabular input, and embeddings
+    are extracted from the penultimate layer (before the classification layer).
+    
+    Args:
+        dataset: dataset object with tabular data
+        batch_size: batch size for training and embedding extraction
+        device: device to run the model on
+        hidden_size: hidden layer size for the MLP
+        n_layers: number of layers in the MLP encoder
+        epochs: number of training epochs
+        lr: learning rate
+    """
+    import torch.nn.functional as F
+    import torch.optim as optim
+    
+    # Get input size from the training data
+    input_size = dataset.data['train'].X.shape[1]
+    
+    # Determine actual number of unique classes in the training data
+    train_labels = dataset.data['train'].y
+    unique_labels = np.unique(train_labels)
+    output_size = int(max(unique_labels)) + 1  # e.g., if labels are 0-14, we need 15 classes
+    
+    print(f"Input size: {input_size}")
+    print(f"Unique labels in training: {unique_labels}")
+    print(f"Number of output classes: {output_size}")
+    print(f"Label range: [{train_labels.min():.0f}, {train_labels.max():.0f}]")
+    
+    # Create MLP model: encoder + classifier
+    encoder = MLP(input_size=input_size,
+                  hidden_size=hidden_size,
+                  output_size=hidden_size,
+                  n_layers=n_layers,
+                  activation='leaky_relu')
+    
+    classifier = torch.nn.Linear(hidden_size, output_size)
+    
+    model = torch.nn.Sequential(encoder, classifier).to(device)
+    
+    # Train the model
+    optimizer = optim.Adam(model.parameters(), lr=lr)
+    criterion = torch.nn.CrossEntropyLoss()
+    
+    train_data = dataset.data['train']
+    if hasattr(train_data, 'collate_fn'):
+        train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, collate_fn=train_data.collate_fn)
+    else:
+        train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
+    
+    print("Training tabular embedding model...")
+    model.train()
+    for epoch in range(epochs):
+        total_loss = 0
+        correct = 0
+        total_samples = 0
+        for batch in tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}"):
+            x = batch['x'].to(device)
+            y = batch['y'].squeeze().long().to(device)
+            
+            optimizer.zero_grad()
+            outputs = model(x)
+            loss = criterion(outputs, y)
+            loss.backward()
+            optimizer.step()
+            
+            total_loss += loss.item()
+            _, predicted = torch.max(outputs.data, 1)
+            total_samples += y.size(0)
+            correct += (predicted == y).sum().item()
+        
+        acc = 100 * correct / total_samples
+        if (epoch + 1) % 10 == 0:
+            print(f"Epoch {epoch+1}/{epochs}, Loss: {total_loss/len(train_loader):.4f}, Accuracy: {acc:.2f}%")
+    
+    print("Extracting embeddings...")
+    # Extract embeddings using only the encoder (excluding classifier)
+    encoder.eval()
+    for split, data in dataset.data.items():
+        data = _generate_tabular_embeddings(data, encoder, batch_size, device)
+        dataset.data[split] = data
+    
+    return dataset
+
+def _generate_tabular_embeddings(dataset, encoder, batch_size, device):
+    """
+    Extract embeddings from tabular data using the trained encoder.
+    """
+    if hasattr(dataset, 'collate_fn'):
+        data_loader = DataLoader(dataset, batch_size=batch_size, collate_fn=dataset.collate_fn)
+    else:
+        data_loader = DataLoader(dataset, batch_size=batch_size)
+    
+    embeddings = []
+    with torch.no_grad():
+        for batch in tqdm(data_loader):
+            x = batch['x'].to(device)
+            emb = encoder(x)
+            embeddings.append(emb)
+    
     # Concatenate and save embeddings
     embeddings = torch.cat(embeddings, dim=0).cpu()
     dataset.X = embeddings
@@ -175,26 +291,31 @@ def preprocess_dataset(dataset_cfg, _dataset, device, backbone ='resnet18') -> d
         #dataset = maybe_reduce(cfg.dataset.get('reduce_fraction', None), dataset)
         #dataset = generate_img_embeddings(dataset, batch_size=cfg.dataset.get('batch_size'), device=device)
 
-    elif dataset_name == 'NIH_chest':
+    elif dataset_name == 'nih_chest_images' or dataset_name == 'nih_chest_tabular':
         
         dataset.split()
         dataset = maybe_reduce(dataset_cfg.get('reduce_fraction', None), dataset)
         # check modality
 
-        if dataset_cfg.loader['modality'] == 'image':
-            backbone = 'res224-nih'
+        if dataset_name == 'nih_chest_images':
+            backbone = 'res224-all'
             dataset = generate_img_embeddings(dataset, 
                                             batch_size= dataset_cfg.get('batch_size', 32), 
                                             device=device,
                                             backbone=backbone)
+
         else:
-            selected_var_index = range(dataset.data['train'].X.shape[1])
-            autoencoder_trainer = AutoencoderTrainer(autoencoder_cfg= dataset_cfg.autoencoder,
-                                                 input_shape=len(selected_var_index), 
-                                                 device=device)
-            dataset = autoencoder_trainer.train(dataset=dataset, 
-                                            selected_var_index=selected_var_index)
-            dataset = scale_embeddings(dataset)
+            scaler = StandardScaler()
+            X_train = dataset.data['train'].X
+
+            scaler.fit(X_train)
+
+            for split in dataset.data:
+                dataset.data[split].X = scaler.transform(dataset.data[split].X)
+
+            dataset = generate_tabular_embeddings(dataset,
+                                                  batch_size= dataset_cfg.get('batch_size', 32),
+                                                  device=device)
 
     else:
         raise ValueError(f"Preprocessing is missing for dataset: {dataset_cfg.get('name')}")

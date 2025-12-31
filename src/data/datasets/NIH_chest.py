@@ -8,11 +8,15 @@ import numpy as np
 import pandas as pd
 import torchxrayvision as xrv
 from typing import Union
+from skimage.io import imread
+import matplotlib.pyplot as plt
 
 from src.data.utils import split_dataset
 import shutil
 import os
 import zipfile
+import re
+import ast
 from PIL import Image
 
 
@@ -37,18 +41,143 @@ You need to download the directory nih_cxr14 containing the .csv files and put i
 
 ################################################################################
 """
+### PATHS TO SAVE THE DATA ###
 DATA_DIRECTORY = CACHE / "NIH_chest"/ "raw_data"
 DATA_DIRECTORY.mkdir(exist_ok=True, parents=True)
 
-# determine which columns are considered as tabular data
-TABULAR_DATA_DICTIONARY = {'cardiomegaly': ['ctr'],
-                        'mediastinal_widening': ['mcr'],
-                        'carina_angle': ['angle'],
-                        'trachea_deviation': ['direction'],
-                        'aortic_knob_enlargement': ['ratio'],
-                        'ascending_aorta_enlargement': ['ratio'],
-                        'descending_aorta_enlargement': ['ratio'],
-                        'descending_aorta_tortuous': ['curvature']}
+
+### TABULAR DATA DEFINITION ###
+# data preparation: dictionary to change columns names of "descending_aorta_tortuous.csv" to not have overlapping names
+DESCENDING_AORTA_TORTUOUS_TABULAR_DATA_DICTIONARY = {
+    "point_1": "point_a1",
+    "point_2": "point_a2",
+    "point_3": "point_a3",
+    "point_4": "point_a4",
+    "point_5": "point_a5",
+    "point_6": "point_a6"
+}
+
+# raw tabular data columns = Anatomical landmarks directly extracted from the radiological images, they still need to be preprocessed to have one column for each landmark
+RAW_TABULAR_DATA_COLUMNS = {"heart_xmin", "heart_xmax", "lung_xmin", "lung_xmax",
+                        "mediastinum_xmin", "mediastinum_xmax",
+                        "mediastinum_lung_xmin", "mediastinum_lung_xmax",
+                        "point_c1", "point_c2", "point_c3",
+                        "point_t1", "point_t2", "point_t3", "point_t4", "point_t5", "point_t6","point_t7", "point_t8", "point_t9", 
+                        "direction_per_pnt",
+                        "aortic_knob_xmin", "aortic_knob_xmax", "trachea_point_left", "trachea_point_right",
+                        "heart_point", "trachea_point",
+                        "desc_aorta_point_left","desc_aorta_point_right",
+                        "descending_aorta_tortuous",
+                        "point_a1", "point_a2", "point_a3", "point_a4", "point_a5", "point_a6"
+                        }
+
+#TABULAR_DATA_COLUMNS = 
+
+
+### CONCEPTS AND TASK DEFINITION ###
+# concepts considered in the CBMs models = Diagnostic indices
+# they correspond to the labels of each .csv file with the corresponding name
+TOTAL_CONCEPTS = {"Patient Gender",
+            "cardiomegaly",
+            "mediastinal_widening",
+            "carina_angle",
+            "trachea_deviation",
+            "aortic_knob_enlargement",
+            "ascending_aorta_enlargement",
+            "descending_aorta_enlargement",
+            "descending_aorta_tortuous"
+            }
+
+CONCEPTS_FOR_IMAGES_MODALITY = TOTAL_CONCEPTS - {"Patient Gender"}
+CONCEPTS_FOR_TABULAR_MODALITY = TOTAL_CONCEPTS
+
+# data preparation: dictionary used to create a single multilabel task from the 14 disease categories
+TASK_DICTIONARY = {'Atelectasis': 0, 
+ 'Cardiomegaly': 1, 
+ 'Effusion': 2, 
+ 'Infiltration': 3, 
+ 'Mass': 4, 
+ 'Nodule': 5, 
+ 'Pneumonia': 6, 
+ 'Pneumothorax': 7, 
+ 'Consolidation': 8, 
+ 'Edema': 9, 
+ 'Emphysema': 10,
+ 'Fibrosis': 11,
+ 'Pleural_Thickening': 12,
+ 'Hernia': 13,
+ "No Finding": 14
+}
+
+def normalize(img, maxval, reshape=False):
+    """Scales images to be roughly [-1024 1024].
+
+    Call xrv.utils.normalize moving forward.
+    """
+    return xrv.utils.normalize(img, maxval, reshape)
+
+def process_diagnosis(diagnosis_str):
+    """
+    Process diagnosis string: if multiple diagnoses separated by |, randomly pick one.
+    Then replace diagnosis name with corresponding number from TASK_DICTIONARY.
+    """
+    return TASK_DICTIONARY.get(diagnosis_str, np.nan)
+
+def preprocess_tabular_data(df):
+    """
+    Preprocess tabular data in the dataframe:
+    a) Process direction_per_pnt: split into separate columns for each point with values 0 (flat), 1 (right), 2 (left)
+    b) Split point columns into _x and _y components
+    c) Process Patient Gender: M->0, F->1
+    d) Merge duplicate _x and _y columns by taking their mean
+    e) Replace True/False with 1/0
+    """
+    # Replace True/False with 1/0
+    df = df.replace({True: 1, False: 0})
+    
+
+    # a) Process direction_per_pnt: split it into separate columns for each point
+    if 'direction_per_pnt' in df.columns:
+        # Map direction values: flat->0, right->1, left->2
+        direction_mapping = {'flat': 0, 'right': 1, 'left': 2}
+        
+        # Extract all directions at once using apply
+        def extract_directions(val):
+            if pd.notna(val):
+                directions = re.findall(r"'([^']*)'", val)
+                return [direction_mapping.get(d, np.nan) for d in directions]
+            return []
+        
+        directions_series = df['direction_per_pnt'].apply(extract_directions)
+        
+        # Find max number of directions to create columns
+        max_directions = directions_series.apply(len).max() if len(directions_series) > 0 else 0
+        
+        # Create all direction columns at once
+        for i in range(1, int(max_directions) + 1):
+            col_name = f'direction_point_{i}_trachea'
+            df[col_name] = directions_series.apply(lambda x: x[i-1] if len(x) >= i else np.nan)
+        
+        df = df.drop(columns=['direction_per_pnt'])
+    
+    # b) Split point columns into _x and _y components and not direction_point_{i}_trachea
+    point_cols = [col for col in df.columns if "point" in col and not col.endswith('_x') and not col.endswith('_y') and not col.startswith('direction_point_')]
+    
+    for col in point_cols:
+        if col in df.columns:  # Check if column still exists
+            # Use vectorized string operations for faster processing
+            # Remove brackets and split by comma
+            temp = df[col].astype(str).str.strip('()[]').str.split(',', expand=True)
+            if temp.shape[1] >= 2:
+                df[f'{col}_x'] = pd.to_numeric(temp[0], errors='coerce')
+                df[f'{col}_y'] = pd.to_numeric(temp[1], errors='coerce')
+            df = df.drop(columns=[col])
+    
+    # c) Process Patient Gender: M->0, F->1
+    if 'Patient Gender' in df.columns:
+        df['Patient Gender'] = df['Patient Gender'].apply(lambda x: 0 if x == 'M' else 1)
+    
+    return df
 
 class NIHChestDataset():
     """
@@ -117,38 +246,24 @@ class NIHChestDataset():
             print("Files already extracted.")
 
         self.modality = modality
+        self.tabular_columns = []
         self.transform = transform
         self.target_transform = target_transform
         self.ftune_size = ftune_size
         self.val_size = val_size
         self.ftune_val_size = ftune_val_size
 
-        self.c_info = {'names': ['Patient Age',
-                                 'Male',
-                                 'ascending_aorta_enlargement',
-                                 'cardiomegaly',
-                                 'aortic_knob_enlargement',
-                                'descending_aorta_tortuous',
-                                'trachea_deviation',
-                                'carina_angle',
-                                'mediastinal_widening',
-                                'descending_aorta_enlargement'],
-        'cardinality': [100,2,2,2,2,2,2,2,2,2]} # 10 concepts
+        if modality not in ['image', 'tabular']:
+            raise ValueError("Modality must be either 'image' or 'tabular'")
+        elif modality == 'image':
+            self.c_info = {'names': CONCEPTS_FOR_IMAGES_MODALITY,   
+            'cardinality': [2,2,2,2,2,2,2,2]} # 8 concepts
+        else:
+            self.c_info = {'names': CONCEPTS_FOR_TABULAR_MODALITY,
+            'cardinality': [2,2,2,2,2,2,2,2,2]} # 9 concepts
 
-        self.y_info = {'names': ['Atelectasis', 
-                                 'Cardiomegaly', 
-                                 'Effusion',
-                                 'Infiltration', 
-                                 'Mass',
-                                 'Nodule',
-                                 'Pneumonia',
-                                 'Pneumothorax',
-                                 'Consolidation',
-                                 'Edema',
-                                 'Emphysema',
-                                 'Fibrosis',
-                                 'Pleural_Thickening',
-                                 'Hernia'], 'cardinality': [2,2,2,2,2,2,2,2,2,2,2,2,2,2,2]} # 14 disease categories + No Finding
+
+        self.y_info = {'names': ['diagnosis'], 'cardinality': [15]} # 14 disease categories + No Finding
 
         self.data = {}
 
@@ -162,11 +277,13 @@ class NIHChestDataset():
         """
         self.data['train'] = _NIH_chest(root = str(CACHE / "NIH_chest"), 
                                         modality = self.modality,
+                                        tabular_columns= self.tabular_columns,
                                         concepts_names= self.c_info['names'],
                                         task_names = self.y_info['names'],
                                         train = True)
         self.data['test'] = _NIH_chest(root = str(CACHE / "NIH_chest"),
                                        modality = self.modality,
+                                       tabular_columns= self.tabular_columns,
                                        concepts_names= self.c_info['names'],
                                        task_names = self.y_info['names'],
                                        train = False)
@@ -183,6 +300,7 @@ class _NIH_chest():
     def __init__(self, 
                  root: str,
                  modality: str, # 'image' or 'text
+                 tabular_columns: list,
                  concepts_names: list,
                  task_names: list,
                  train: bool = False):
@@ -193,99 +311,100 @@ class _NIH_chest():
         self.root = root
         self.concepts_names = concepts_names
         self.task_names = task_names
+        self.tabular_columns = tabular_columns
+
         
+        ### LOAD DATAFRAME (TRAIN, TEST) ###
         # load images ids for train and test
         if self.split_type == 'train':
            images = pd.read_csv(DATA_DIRECTORY / "original_nih_chest/train_val_list.txt", header=None, names=["img_id"])
         else:
-           images = pd.read_csv(DATA_DIRECTORY / "original_nih_chest/test_list.txt", header=None, names=["img_id"])
-            
+           images = pd.read_csv(DATA_DIRECTORY / "original_nih_chest/test_list.txt", header=None, names=["img_id"])          
         self.df = images.copy()
 
-        # load the labels
-        labels = pd.read_csv(DATA_DIRECTORY / "original_nih_chest/Data_Entry_2017.csv")
-        labels = labels.rename(columns={'Image Index': 'img_id', 'Finding Labels': 'disease'}) 
-        self.df = pd.merge(self.df, labels, on='img_id', how='left')
-        self.df = self.df.drop(columns=['Follow-up #', 'Patient ID', 'View Position', 'OriginalImage[Width', 'Height]', 'OriginalImagePixelSpacing[x', 'y]', 'Unnamed: 11'])
-        for disease in self.task_names:
-            self.df[f"Task_{disease}"] = self.df['disease'].apply(lambda x: 1 if disease in x.split('|') else 0)
-        # drop the original 'disease' column
-        self.df = self.df.drop(columns=['disease'])
+        # clean images
+        self.df = self.df[self.df['img_id'] != '00005299_000.png'].reset_index(drop=True)
 
+        ### ADD TASK TO THE DATAFRAME ###
+        # load the task labels
+        labels = pd.read_csv(DATA_DIRECTORY / "original_nih_chest/Data_Entry_2017.csv")
+        labels = labels.rename(columns={'Image Index': 'img_id', 'Finding Labels': 'diagnosis'}) 
+        self.df = pd.merge(self.df, labels, on='img_id', how='left')
+        # keep only img_id, diagnosis (task_names) and concepts_names columns
+        columns_to_keep = ['img_id'] + list(self.task_names) + list(self.concepts_names)
+        self.df = self.df[[col for col in columns_to_keep if col in self.df.columns]]
+        
+        # Filter: keep only samples with single diagnosis (no "|" character)
+        # Note: checked that all the diagnoses are still represented in the training set after this filtering
+        self.df = self.df[~self.df['diagnosis'].str.contains('|', regex=False, na=False)].reset_index(drop=True)
+        print(f"After filtering for single diagnoses: {len(self.df)} samples")
+
+        
+        # Replace diagnosis name with corresponding number from TASK_DICTIONARY
+        self.df['diagnosis'] = self.df['diagnosis'].apply(lambda x: TASK_DICTIONARY.get(x, np.nan) if pd.notna(x) else np.nan)
+
+        # eliminate rows with NaN diagnosis
+        self.df = self.df.dropna(subset=['diagnosis']).reset_index(drop=True)
+
+        ### ADD CONCEPTS TO THE DATAFRAME ###
         # load the concepts
         for file in os.listdir(DATA_DIRECTORY / "nih_cxr14/radiological_findings"):
-            concepts_file = pd.read_csv(DATA_DIRECTORY / "nih_cxr14/radiological_findings" / file)
-            file_name = file.split('.')[0]     
+            # read each concepts file
+            concept_file = pd.read_csv(DATA_DIRECTORY / "nih_cxr14/radiological_findings" / file)
+            file_name = file.split('.')[0]
 
-            # for each file, only the label is kept as concept
-            concepts_file.rename(columns={'image_file': 'img_id'}, inplace=True)
-            concepts_file['img_id'] = concepts_file['img_id'].apply(lambda x: x + '.png')
-            concepts = concepts_file[['img_id'] + ['label']]
-            concepts.rename(columns={'label': file_name}, inplace=True)
-
-            # add concepts to self.df
-            self.df = pd.merge(self.df, concepts, on='img_id', how='left')
-
-            if modality == 'tabular':
-                if file_name not in TABULAR_DATA_DICTIONARY.keys():
-                    continue
-                else:
-                    # add to self.df the columns of concepts_file that are in the TABULAR_DATA_DICTIONARY
-                    tabular_file_addition = concepts_file[['img_id'] + concepts_file.columns.intersection(TABULAR_DATA_DICTIONARY[file_name]).tolist()]
-
-                # change names of the columns in tabular_file_addition
-                if file_name in ['ascending_aorta_enlargement', 'descending_aorta_enlargement', 'aortic_knob_enlargement']:
-                    # eliminate "enlargement" from the file_name if it is present
-                    file_name = file_name.replace('_enlargement', '')
-                    tabular_file_addition.rename(columns={'ratio': f'{file_name}_ratio'}, inplace=True)
-                elif file_name in ['descending_aorta_tortuous', 'trachea_deviation']:
-                    file_name = file_name.replace('_tortuous', '')
-                    file_name = file_name.replace('_angle', '')
-                    tabular_file_addition = tabular_file_addition.rename(columns=lambda x: file_name + '_' + x if x != 'img_id'else x)
-                elif file_name == 'carina_angle':
-                    tabular_file_addition.rename(columns={'angle': 'carina_angle_num'}, inplace=True)
-
-                self.df = pd.merge(self.df, tabular_file_addition, on='img_id', how='left')
+            # change names of the columns in tabular data files if needed
+            if file_name == 'carina_angle':
+                # rename point_1, point_2, point_3 as point_c1, point_c2, point_c3
+                concept_file = concept_file.rename(columns={f"point_{i}": f"point_c{i}" for i in range(1,4)})
+            elif file_name == 'descending_aorta_tortuous':
+                concept_file = concept_file.rename(columns={f"point_{i}": f"point_a{i}" for i in range(1,7)})
+            elif  file_name == 'trachea_deviation':
+                # rename point_1,...point_9 as point_1_trachea,...,point_9_trachea
+                concept_file = concept_file.rename(columns={f"point_{i}": f"point_t{i}" for i in range(1,10)})
+            elif file_name == 'mediastinal_widening':
+                # rename lung_xmin and lung_xmax as mediastinum_lung_xmin and mediastinum_lung_xmax
+                concept_file = concept_file.rename(columns={"lung_xmin": "mediastinum_lung_xmin", "lung_xmax": "mediastinum_lung_xmax"})
+            elif file_name == 'descending_aorta_enlargement':
+                # eliminate trachea_pint_right and trachea_point_left columns
+                concept_file = concept_file.drop(columns=['trachea_point_right', 'trachea_point_left'], errors='ignore')
 
 
-        # clean data
-        # replace True/False with 1/0
-        self.df = self.df.replace({True: 1, False: 0})
+            # rename images and labels for merging
+            concept_file.rename(columns={'image_file': 'img_id'}, inplace=True)
+            concept_file['img_id'] = concept_file['img_id'].apply(lambda x: x + '.png')
+            concept_file.rename(columns={'label': file_name}, inplace=True)
 
-        # replace 'M'/'F' with 1/0
-        self.df['Patient Gender'] = self.df['Patient Gender'].replace({'M': 1, 'F': 0})
-        self.df.rename(columns={'Patient Gender': 'Male'}, inplace=True)
-
-        # manage identical columns found in concepts_files (e.g. heart_ratio_x and heart_ratio_y) by taking the mean of the two columns
-        for col in self.df.columns:
-            if col.endswith('_x'):
-                col_y = col[:-2] + '_y'
-                self.df[col[:-2]] = self.df[[col, col_y]].mean(axis=1)
-                self.df = self.df.drop(columns=[col, col_y])
-                
-        # eliminate rows with NaN values and reset the index
-        self.df = self.df.dropna().reset_index(drop=True)
-
+            # add concepts and raw tabular data to concepts_df
+            # drop from concept_file all the columns that are not in RAW_TABULAR_DATA_COLUMNS or in TOTAL_CONCEPTS
+            if self.modality == 'tabular':
+                concept_file = concept_file[[col for col in concept_file.columns if col in RAW_TABULAR_DATA_COLUMNS or col in self.concepts_names or col == 'img_id']]
+            else:
+                concept_file = concept_file[[col for col in concept_file.columns if col in self.concepts_names or col == 'img_id']]   
+            self.df = pd.merge(self.df, concept_file, on='img_id', how='left')
+            
+        # preprocess tabular data
+        self.df = preprocess_tabular_data(self.df)
 
         # create the column 'img_path' by joining root + 'images/' + img_id
         self.df['img_path'] = self.df['img_id'].apply(lambda x: os.path.join(self.root, 'raw_data/original_nih_chest/images', x))
         self.df = self.df.drop(columns=['img_id'])
 
-        # save tabular data
-        if modality == 'tabular':
-            trachea_direction_mapping = {'flat': 0, 'right': 1, 'left': 2, 'left&right': 3, 'right&left': 4}
-            self.df['trachea_deviation_direction'] = self.df['trachea_deviation_direction'].map(trachea_direction_mapping)
-            self.df.drop(columns = ['img_path'], inplace=True) # drop img_path column
-            self.df.to_csv(os.path.join(DATA_DIRECTORY, f"tabular_data_{self.split_type}.csv"), index=False)
+        # eliminate rows with NaN in any columns
+        self.df = self.df.dropna().reset_index(drop=True)
 
         # create X,c,y
+        # select columns in the order specified in self.concepts_names and self.task_names
+        self.c = torch.tensor(self.df[list(self.concepts_names)].values.astype(np.float32)) 
+        self.y = self.df[list(self.task_names)].values.astype(np.float32)
         if modality == 'image':
             self.X = self.df['img_path'].values
+            self.tabular_columns = None
         else:
-            feature_columns = [col for col in self.df.columns if col not in self.concepts_names + [f"Task_{task}" for task in self.task_names]]
-            self.X = torch.tensor(self.df[feature_columns].values.astype(np.float32))
-        self.c = torch.tensor(self.df[self.concepts_names].values.astype(np.float32))
-        self.y = torch.tensor(self.df[[f"Task_{task}" for task in self.task_names]].values.astype(np.float32))
+            # keep names of the columns for tabular data
+            if self.tabular_columns == []:
+                self.tabular_columns = [col for col in self.df.columns if col not in list(self.concepts_names) + list(self.task_names) + ['img_path']]
+            self.X = self.df[self.tabular_columns].values.astype(np.float32)
 
 
     def register_graph(self, graph):
@@ -297,19 +416,15 @@ class _NIH_chest():
     def __getitem__(self, idx):
         if self.modality == 'image':
             img_path = self.X[idx]
-
             try:
                 transform = torchvision.transforms.Compose([xrv.datasets.XRayCenterCrop(),xrv.datasets.XRayResizer(224)])
-                img = Image.open(img_path).convert("L")
-                img = np.array(img)
-                img =  xrv.datasets.normalize(img, 255)
-                img = img[None, ...]
+                img = imread(img_path)
+                img= normalize(img, maxval=255, reshape=True)
                 img = transform(img)
-                img = torch.from_numpy(img)           
+                img = torch.from_numpy(img)       
             except:
                 print(f"Error loading image: {img_path}")
-                raise FileNotFoundError(f"Image not found: {img_path}")
-            
+                raise FileNotFoundError(f"Image not found: {img_path}")  
             x = img
         else:
             x = self.X[idx]
@@ -322,6 +437,7 @@ class _NIH_chest():
         return {"x": x, "c": c, "y": y, "graph": self.graph}
 
     def collate_fn(self, instances):
+        #print(f"collate_fn called with {len(instances)} instances")
         xs = torch.stack([ins["x"] for ins in instances], dim=0)
         c = torch.stack([ins["c"] for ins in instances], dim=0)
         labels = torch.stack([ins["y"] for ins in instances], dim=0)
