@@ -226,26 +226,33 @@ def main(cfg: DictConfig) -> None:
     else:
         subgraphs, subgraphs_concept_names, subgraphs_with_add_nodes, add_nodes_values, add_nodes_names = generate_split(cfg, datasets, graph, y_index)
         
-        # Save subgraphs_concept_names, add_nodes_values, and subgraphs_with_add_nodes
-        model_name = cfg.model._target_.split('.')[-1] if hasattr(cfg.model, '_target_') else 'model'
-        subgraphs_file = f"subgraphs_{cfg.dataset.name}_{model_name}_seed_{cfg.seed}.json"
-        with open(subgraphs_file, 'w') as f:
-            json.dump({
-                "subgraphs_concept_names": subgraphs_concept_names,
-                "add_nodes_names": add_nodes_names,
-                "subgraphs_with_add_nodes": subgraphs_with_add_nodes,
-                "dataset_name": cfg.dataset.name,
-                "model_type": model_name
-            }, f, indent=2)
-        print(f"Saved subgraphs data to {subgraphs_file}")
+        ## Save subgraphs_concept_names, add_nodes_values, and subgraphs_with_add_nodes
+        #model_name = cfg.model._target_.split('.')[-1] if hasattr(cfg.model, '_target_') else 'model'
+        #subgraphs_file = f"subgraphs_{cfg.dataset.name}_{model_name}_seed_{cfg.seed}.json"
+        #with open(subgraphs_file, 'w') as f:
+        #    json.dump({
+        #        "subgraphs_concept_names": subgraphs_concept_names,
+        #        "add_nodes_names": add_nodes_names,
+        #        "subgraphs_with_add_nodes": subgraphs_with_add_nodes,
+        #        "dataset_name": cfg.dataset.name,
+        #        "model_type": model_name
+        #    }, f, indent=2)
+        #print(f"Saved subgraphs data to {subgraphs_file}")
 
     # update config based on the dataset
     # e.g., set input and output size of the model
-    cfg = update_config_from_data(cfg, datasets, subgraphs, subgraphs_concept_names)
+    cfg = update_config_from_data(cfg, datasets, subgraphs_concept_names)
     if cfg.learning.mode == 'localized':
-        interv_policy, graph = update_intervention_policy_and_graph(cfg, interv_policy, graph, subgraphs, subgraphs_concept_names)  
+        interv_policy, graph = update_intervention_policy_and_graph(cfg, interv_policy, graph, datasets)  
 
     cfg = maybe_update_config_with_graph(cfg, graph, interv_policy)
+    # check consistency
+    if len(datasets) > 1:
+        raise NotImplementedError("Multiple datasets are not supported in the current version for training.")
+    else:
+        combo_info = {'names': datasets[0].c_info['names'] + datasets[0].y_info['names'],
+                        'cardinality': datasets[0].c_info['cardinality'] + datasets[0].y_info['cardinality']}
+        assert list(cfg.engine.model.c_name_index.keys()) == combo_info['names'], "Concept names are ordered differently in the engine configuration and in the dataset one."
 
     ############ data block ########################################################################################
     #if combined_dataset is None:
@@ -475,6 +482,7 @@ def main(cfg: DictConfig) -> None:
             if cfg_predrift is None:
                 cfg_predrift = cfg_postdrift
         else:
+            # if exists cfg.learning.subgraphs.rnd_drft
             if cfg.learning.subgraphs.rnd_drift > 1:
                 cfg_predrift = update_config_with_subgroup_clients(
                     cfg,
@@ -484,6 +492,7 @@ def main(cfg: DictConfig) -> None:
                     interv_policy,
                     subgroup_clients=predrift_clients,
                 )
+
 
         init_cfg = cfg_predrift if cfg_predrift is not None else cfg_postdrift
         init_engine = instantiate(init_cfg.engine)
@@ -515,13 +524,16 @@ def main(cfg: DictConfig) -> None:
                 # post-drift phase: use last n_clients info: concepts, subgraph, etc...
                 if rnd == cfg.learning.subgraphs.rnd_drift:
                     print("\033[93mDrift occurred: switching to new client data distributions\033[0m")
-                start_n_client = n_clients
+                if cfg.learning.subgraphs.rnd_drift>1:
+                    start_n_client = n_clients
+                else:
+                    start_n_client = 0
                 cfg_round = cfg_postdrift
             engine = instantiate(cfg_round.engine)
             engine.model.to(cfg.device)
 
             # if (rnd >= cfg.learning.subgraphs.rnd_drift) and True:
-            if True:
+            if  cfg.learning.subgraphs.rnd_drift >=1:
                 print("\033[95m[Drift Debug] Checking concept label availability (train/val) for post-drift clients\033[0m")
                 for cid in range(start_n_client, start_n_client + n_clients):
                     _print_concept_availability("train", train_dataloaders[cid], cfg_round, cid)

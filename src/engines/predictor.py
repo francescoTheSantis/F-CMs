@@ -326,7 +326,12 @@ class Predictor(pl.LightningModule):
             # level intervention
             # NOTICE: if self.learning_modality== "localized", self.interv_policy has been updated to the subgraph
             device = c.device
-            self.clients = range(1, len(self.c_names_ood)+2)  # +1 for the case where there are no OOD concepts
+            if self.learning_modality == "localized":
+                self.clients = [first_key]
+            elif self.learning_modality == "centralized":
+                self.clients = [1]
+            else:
+                self.clients = range(1, len(self.c_names_ood)+2)  # +1 for the case where there are no OOD concepts
             possible_clients = deepcopy(self.clients)  # copy the list of clients
             # If there are multiple test sets, select only the clients with the correct one
             if (c == -1).all(dim=0).any():
@@ -358,7 +363,7 @@ class Predictor(pl.LightningModule):
                 for l in range(0, len(self.test_interv_policy)+1):
                     # get the nodes to intervene on
                     nodes = list(itertools.chain(*self.test_interv_policy[:l]))
-                    if client_id == len(self.c_names_ood)+1:
+                    if client_id == len(self.c_names_ood)+1 or self.learning_modality in ["centralized", "localized"]:
                         # intervene on all the concepts of the level
                         intervention_index = get_test_intervention_index(c.shape, nodes)
                         inputs = {'x':x, 'c':c, 'intervention_index':intervention_index}
@@ -391,7 +396,7 @@ class Predictor(pl.LightningModule):
                     # after interveening on a level of the graph, how well can we predict each child concept
                     childs = list(itertools.chain(*self.test_interv_policy[l:]))
                     for child_index in childs:
-                        if client_id == len(self.c_names_ood)+1:
+                        if client_id == len(self.c_names_ood)+1 or self.learning_modality in ["centralized", "localized"]:
                             c_name = self.c_names_all[child_index]
                             self.test_intervention_level_c[f'level {l}/child {c_name}'].update(c_hat[c_name], c[:,child_index])
                         else:
@@ -412,7 +417,7 @@ class Predictor(pl.LightningModule):
                     
                     # level intervention for all clients on iid and ood concepts separately
 
-    # DA RIVEDERE
+    # NOT APPLICABLE NOW
     def test_intervention_fairness(self, batch):
         if self.model.has_concepts:
             x, c, y = self._unpack_batch(batch)

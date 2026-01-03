@@ -211,7 +211,7 @@ def update_config_from_client(cfg: DictConfig, datasets, cid: int) -> DictConfig
     return cfg
 
 
-def update_config_from_data(cfg: DictConfig, datasets, subgraphs, subgraphs_concept_names) -> DictConfig:
+def update_config_from_data(cfg: DictConfig, datasets, subgraphs_concept_names, subset_concepts = None, subset_clients = None) -> DictConfig:
     """ can be used to update the config based on the data, e.g., set input and output size """ 
 
     with open_dict(cfg):
@@ -243,13 +243,17 @@ def update_config_from_data(cfg: DictConfig, datasets, subgraphs, subgraphs_conc
             #c_cardinality = {cfg.client_id: [card for card, name in zip(dataset.c_info['cardinality'], dataset.c_info['names']) if name in updated_c_names]}
             c_names_ood = {cfg.client_id: [name for name in dataset.c_info['names'] if name not in updated_c_names]}
             c_names_all = original_c_names
-
-
-            
+      
         elif cfg.learning.mode=="local_federated":
             
-            original_c_names = datasets[0].c_info['names']
-            c_info = datasets[0].c_info
+            if subset_concepts is None:
+                original_c_names = datasets[0].c_info['names']
+                c_info = datasets[0].c_info
+                total_clients = cfg.learning.n_clients*cfg.learning.subgraphs.get('dataset_client_multiplier', 1)
+            else:
+                original_c_names = subset_concepts
+                c_info = {'names': subset_concepts, 'cardinality': [datasets[0].c_info['cardinality'][datasets[0].c_info['names'].index(name)] for name in subset_concepts]}
+                total_clients = len(subset_clients)
 
             path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
             # just initialize it with dataset[0], then I'll update configuration and model with the different clients
@@ -261,18 +265,24 @@ def update_config_from_data(cfg: DictConfig, datasets, subgraphs, subgraphs_conc
             # The list of names for out-of-distribution concepts (concepts that the client has not in its subgraph)
             c_names_ood = dict()
             # The list of names for all concepts (in-distribution and out-of-distribution)
-            c_names_all = original_c_names 
-            for id in range(1, cfg.learning.n_clients*cfg.learning.subgraphs.get('dataset_client_multiplier', 1)+1):
-                if len(datasets)>1:
-                    dataset = datasets[(id-1) % len(datasets)]
+            c_names_all = original_c_names
+
+            for id in range(1, total_clients+1):
+                if subset_concepts is None:
+                    if len(datasets)>1:
+                        dataset = datasets[(id-1) % len(datasets)]
+                    else:
+                        dataset = datasets[0]
+                    available_concepts = dataset.c_info['names']
                 else:
-                    dataset = datasets[0]
+                    available_concepts = subset_concepts
+                
                 #input_size[id-1] = dataset.data["train"].X.shape[-1] if dataset.data["train"].X is not None else None
                 subgraph_id = identify_subgraph(path, id)
                 if subgraph_id is not None:
                     updated_c_names = subgraphs_concept_names['subgraph_'+subgraph_id]
-                    c_names_id[id] = [name for name in dataset.c_info['names'] if name in updated_c_names]
-                    c_names_ood[id] = [name for name in dataset.c_info['names'] if name not in updated_c_names]
+                    c_names_id[id] = [name for name in available_concepts if name in updated_c_names]
+                    c_names_ood[id] = [name for name in available_concepts if name not in updated_c_names]
 
             
             ## The list of names for out-of-distribution concepts (concepts that the client has never seen before)
@@ -328,7 +338,7 @@ def maybe_update_config_with_graph(cfg: DictConfig, graph, interv_policy) -> Dic
     return cfg
 
 
-def update_intervention_policy_and_graph(cfg, interv_policy, graph, subgraphs, subgraphs_concept_names):
+def update_intervention_policy_and_graph(cfg, interv_policy, graph, datasets):
 
 
     # Get the subgraph given the client id
@@ -341,7 +351,9 @@ def update_intervention_policy_and_graph(cfg, interv_policy, graph, subgraphs, s
 
     path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
     c_names = cfg.model.c_info['names']
-    c_index = [cfg.model.c_name_index[name] for name in c_names]
+    original_c_names = datasets[0].c_info['names']
+    name_to_index = {name: i for i, name in enumerate(original_c_names)}
+    c_index = [name_to_index[name] for name in c_names]
 
     # Update policy
     updated_policy = []
@@ -372,28 +384,32 @@ def update_config_with_subgroup_clients(cfg, graph, datasets, subgraphs_concept_
     
     # Create a temporary cfg with filtered c_info for use with update_intervention_policy_and_graph
     subgroup_concepts_list = list(subgroup_concepts)
-    cfg_temp = copy.deepcopy(cfg)
-    
-    with open_dict(cfg_temp):
-        c_combined = [(name, card) for name, card in zip(datasets[0].c_info['names'], datasets[0].c_info['cardinality']) 
-                        if name in subgroup_concepts_list]
-        cfg_temp.engine.model.c_info = {'names': [x for x, _ in c_combined], 'cardinality': [card for _, card in c_combined]}
-        cfg_temp.engine.model.c_name_index = {name: i for i, name in enumerate(subgroup_concepts_list + datasets[0].y_info['names'])}
-        cfg_temp.engine.model.y_info = datasets[0].y_info
-    
+    cfg_predrift = copy.deepcopy(cfg)
+    cfg_predrift = update_config_from_data(cfg_predrift, datasets, subgraphs_concept_names, subset_concepts = subgroup_concepts_list, subset_clients = subgroup_clients) 
+       
     # Use update_intervention_policy_and_graph to filter graph and policy
     filtered_interv_policy, filtered_graph = update_intervention_policy_and_graph(
-        cfg_temp, interv_policy, graph, None, subgraphs_concept_names
+        cfg_predrift, interv_policy, graph, datasets
     )
-    
+     
     # Update cfg with filtered graph and policy
-    cfg_predrift = copy.deepcopy(cfg)
     cfg_predrift = maybe_update_config_with_graph(cfg_predrift, filtered_graph, filtered_interv_policy)
-    
-    # Update c_info in cfg for subgroup clients only
-    with open_dict(cfg_predrift):
-        cfg_predrift.engine.model.c_info = {'names': [x for x, _ in c_combined], 'cardinality': [card for _, card in c_combined]}
-        cfg_predrift.engine.model.c_name_index = {name: i for i, name in enumerate(subgroup_concepts_list + datasets[0].y_info['names'])}
+
+    # replace in cfg_predrift.test_interv_policy the indices with respect to the current graph
+    if cfg_predrift.engine.get('test_interv_policy', None) is not None:
+        name_to_index = {name: i for i, name in enumerate(cfg_predrift.engine.model.graph_labels)}
+        original_index_to_name = {i: name for i, name in enumerate(datasets[0].c_info['names'])}
+        updated_policy = []
+        for level in cfg_predrift.engine.test_interv_policy:
+            level_policy = []
+            for node in level:
+                node_name = original_index_to_name[node]
+                if node_name in cfg_predrift.engine.model.graph_labels:
+                    level_policy.append(name_to_index[node_name])
+            if len(level_policy) > 0:
+                updated_policy.append(level_policy)
+        with open_dict(cfg_predrift):
+            cfg_predrift.engine.test_interv_policy = updated_policy
 
     return cfg_predrift
 
