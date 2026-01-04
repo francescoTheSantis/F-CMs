@@ -274,10 +274,10 @@ def preprocess_dataset(dataset_cfg, _dataset, device, backbone ='resnet18') -> d
             #                 'ERRLOWOUTPUT', 'ERRCAUTER']
         elif dataset_name=='sachs_ood':
             pass
-        var_index = [all_var.index(var) for var in all_var]
+        var_index = [all_var.index(var) for var in selected_var]
 
         autoencoder_trainer = AutoencoderTrainer(autoencoder_cfg= dataset_cfg.autoencoder,
-                                                 input_shape=len(all_var), 
+                                                 input_shape=len(selected_var), 
                                                  device=device)
         dataset.split()
         dataset = autoencoder_trainer.train(dataset=dataset, 

@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
+from torch.utils.data import DataLoader
 import random
 import numpy as np
 import pandas as pd
@@ -352,8 +353,8 @@ def update_intervention_policy_and_graph(cfg, interv_policy, graph, datasets):
     path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
     c_names = cfg.model.c_info['names']
     original_c_names = datasets[0].c_info['names']
-    name_to_index = {name: i for i, name in enumerate(original_c_names)}
-    c_index = [name_to_index[name] for name in c_names]
+    dict_names_to_index = {name: i for i, name in enumerate(original_c_names)}
+    c_index = [dict_names_to_index[name] for name in c_names]
 
     # Update policy
     updated_policy = []
@@ -407,11 +408,130 @@ def update_config_with_subgroup_clients(cfg, graph, datasets, subgraphs_concept_
                 if node_name in cfg_predrift.engine.model.graph_labels:
                     level_policy.append(name_to_index[node_name])
             if len(level_policy) > 0:
-                updated_policy.append(level_policy)
+                 updated_policy.append(level_policy)
         with open_dict(cfg_predrift):
             cfg_predrift.engine.test_interv_policy = updated_policy
 
     return cfg_predrift
+
+
+def filter_dataloaders_by_concepts(train_dataloaders, val_dataloaders, subgroup_clients, subgraphs_concept_names, all_concept_names, cache_path):
+    """
+    Filter dataloaders for clients in subgroup_clients to keep only concepts from their subgraphs.
+    Uses a custom collate_fn to filter concepts dynamically during batch creation.
+    
+    Args:
+        train_dataloaders: list of training DataLoaders
+        val_dataloaders: list of validation DataLoaders
+        subgroup_clients: list of client IDs to filter (1-indexed)
+        subgraphs_concept_names: dict mapping subgraph IDs to concept names
+        all_concept_names: list of all concept names in original order
+        cache_path: path to cache directory for identifying subgraphs
+    
+    Returns:
+        tuple: (filtered_train_dataloaders, filtered_val_dataloaders)
+    """
+    from src.data.utils import create_filtering_collate_fn
+    
+    # Compute subgroup_concepts from subgraphs of clients in subgroup_clients
+    subgroup_concepts = set()
+    for cid in subgroup_clients:
+        subgraph_id = identify_subgraph(cache_path, cid)
+        if subgraph_id is not None:
+            client_concepts = subgraphs_concept_names[f'subgraph_{subgraph_id}']
+            subgroup_concepts.update(client_concepts)
+    
+    # Create concept mask - indices to keep
+    concept_indices_to_keep = [i for i, name in enumerate(all_concept_names) if name in subgroup_concepts]
+    kept_concept_names = [all_concept_names[i] for i in concept_indices_to_keep]
+    
+    print(f"\033[96m[filter_dataloaders] Filtering concepts for clients {subgroup_clients}\033[0m")
+    print(f"\033[96m[filter_dataloaders] Keeping {len(concept_indices_to_keep)}/{len(all_concept_names)} concepts: {kept_concept_names}\033[0m")
+    
+    for cid in subgroup_clients:
+        loader_idx = cid - 1  # convert from 1-indexed to 0-indexed
+        
+        if loader_idx >= len(train_dataloaders):
+            warnings.warn(f"Client {cid} not found in dataloaders (index {loader_idx} >= {len(train_dataloaders)})")
+            continue
+            
+        # Filter training dataloader by wrapping collate_fn
+        if train_dataloaders[loader_idx] is not None:
+            old_loader = train_dataloaders[loader_idx]
+            dataset = old_loader.dataset
+            
+            # Create filtering collate function
+            original_collate_fn = old_loader.collate_fn
+            filtering_collate_fn = create_filtering_collate_fn(original_collate_fn, concept_indices_to_keep)
+            
+            # Create new DataLoader with filtering collate_fn
+            train_dataloaders[loader_idx] = DataLoader(
+                dataset,
+                batch_size=old_loader.batch_size,
+                shuffle=True if hasattr(old_loader.sampler, '_shuffle') else False,
+                num_workers=old_loader.num_workers,
+                pin_memory=old_loader.pin_memory,
+                drop_last=old_loader.drop_last,
+                collate_fn=filtering_collate_fn
+            )
+            
+            # Update c_info in the underlying dataset(s) if accessible
+            def update_c_info_recursive(ds):
+                if isinstance(ds, ConcatDataset):
+                    for sub_ds in ds.datasets:
+                        update_c_info_recursive(sub_ds)
+                elif hasattr(ds, 'dataset'):  # Subset
+                    update_c_info_recursive(ds.dataset)
+                elif hasattr(ds, 'c_info'):
+                    original_c_info = ds.c_info
+                    kept_cardinality = [original_c_info['cardinality'][i] for i in concept_indices_to_keep]
+                    ds.c_info = {
+                        'names': kept_concept_names,
+                        'cardinality': kept_cardinality
+                    }
+            
+            update_c_info_recursive(dataset)
+            print(f"\033[96m[filter_dataloaders] Client {cid} train: created filtering collate_fn for {len(concept_indices_to_keep)} concepts\033[0m")
+        
+        # Filter validation dataloader by wrapping collate_fn
+        if val_dataloaders[loader_idx] is not None:
+            old_loader = val_dataloaders[loader_idx]
+            dataset = old_loader.dataset
+            
+            # Create filtering collate function
+            original_collate_fn = old_loader.collate_fn
+            filtering_collate_fn = create_filtering_collate_fn(original_collate_fn, concept_indices_to_keep)
+            
+            # Create new DataLoader with filtering collate_fn
+            val_dataloaders[loader_idx] = DataLoader(
+                dataset,
+                batch_size=old_loader.batch_size,
+                shuffle=False,
+                num_workers=old_loader.num_workers,
+                pin_memory=old_loader.pin_memory,
+                drop_last=old_loader.drop_last,
+                collate_fn=filtering_collate_fn
+            )
+            
+            # Update c_info in the underlying dataset(s) if accessible
+            def update_c_info_recursive(ds):
+                if isinstance(ds, ConcatDataset):
+                    for sub_ds in ds.datasets:
+                        update_c_info_recursive(sub_ds)
+                elif hasattr(ds, 'dataset'):  # Subset
+                    update_c_info_recursive(ds.dataset)
+                elif hasattr(ds, 'c_info'):
+                    original_c_info = ds.c_info
+                    kept_cardinality = [original_c_info['cardinality'][i] for i in concept_indices_to_keep]
+                    ds.c_info = {
+                        'names': kept_concept_names,
+                        'cardinality': kept_cardinality
+                    }
+            
+            update_c_info_recursive(dataset)
+            print(f"\033[96m[filter_dataloaders] Client {cid} val: created filtering collate_fn for {len(concept_indices_to_keep)} concepts\033[0m")
+    
+    return train_dataloaders, val_dataloaders
 
 def get_parents(graph, i):
     # get the indices of the parents of the node i

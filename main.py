@@ -43,6 +43,7 @@ from src.utils import (
     compute_validation_loss,
     shadow_mlp_scores_loader,
     score_blackbox_loss_loader,
+    filter_dataloaders_by_concepts
 )
 
 from src.dra import (
@@ -298,6 +299,8 @@ def main(cfg: DictConfig) -> None:
             test_dataloader = DataLoader(datasets[0].data['test'], batch_size=cfg.dataset.batch_size, collate_fn=static_graph_collate)
 
         engine = instantiate(cfg.engine)
+        
+        
         try:
             trainer = Trainer(cfg)
             trainer.logger.log_hyperparams(parse_hyperparams(cfg))
@@ -491,6 +494,15 @@ def main(cfg: DictConfig) -> None:
                     subgraphs_concept_names,
                     interv_policy,
                     subgroup_clients=predrift_clients,
+                )
+                # Filter dataloaders for predrift clients
+                train_dataloaders, val_dataloaders = filter_dataloaders_by_concepts(
+                    train_dataloaders, 
+                    val_dataloaders, 
+                    predrift_clients,
+                    subgraphs_concept_names,
+                    datasets[0].c_info['names'],
+                    path
                 )
 
 

@@ -19,6 +19,29 @@ def static_graph_collate(batch):
         "graph": batch[0]["graph"],  # Add the graph once
     }
 
+def create_filtering_collate_fn(original_collate_fn, concept_indices_to_keep):
+    """
+    Create a collate_fn that filters concepts to keep only specified indices.
+    
+    Args:
+        original_collate_fn: The original collate function
+        concept_indices_to_keep: List of concept indices to keep
+    
+    Returns:
+        A wrapper collate function that filters concepts
+    """
+    def filtering_collate(batch):
+        # Call original collate
+        result = original_collate_fn(batch)
+        
+        # Filter concepts if present
+        if 'c' in result and result['c'] is not None:
+            result['c'] = result['c'][:, concept_indices_to_keep]
+        
+        return result
+    
+    return filtering_collate
+
 def reduce_dataset(_dataset, index_to_keep):
     dataset = deepcopy(_dataset)
     if dataset.X is not None:
