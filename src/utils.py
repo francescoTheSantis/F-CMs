@@ -415,7 +415,7 @@ def update_config_with_subgroup_clients(cfg, graph, datasets, subgraphs_concept_
     return cfg_predrift
 
 
-def filter_dataloaders_by_concepts(train_dataloaders, val_dataloaders, subgroup_clients, subgraphs_concept_names, all_concept_names, cache_path):
+def filter_dataloaders_by_concepts(train_dataloaders, val_dataloaders, cfg_predrift, subgroup_clients, subgraphs_concept_names, all_concept_names, cache_path):
     """
     Filter dataloaders for clients in subgroup_clients to keep only concepts from their subgraphs.
     Uses a custom collate_fn to filter concepts dynamically during batch creation.
@@ -443,10 +443,9 @@ def filter_dataloaders_by_concepts(train_dataloaders, val_dataloaders, subgroup_
     
     # Create concept mask - indices to keep
     concept_indices_to_keep = [i for i, name in enumerate(all_concept_names) if name in subgroup_concepts]
-    kept_concept_names = [all_concept_names[i] for i in concept_indices_to_keep]
     
     print(f"\033[96m[filter_dataloaders] Filtering concepts for clients {subgroup_clients}\033[0m")
-    print(f"\033[96m[filter_dataloaders] Keeping {len(concept_indices_to_keep)}/{len(all_concept_names)} concepts: {kept_concept_names}\033[0m")
+    print(f"\033[96m[filter_dataloaders] Keeping {len(concept_indices_to_keep)}/{len(all_concept_names)} concepts: {subgroup_concepts}\033[0m")
     
     for cid in subgroup_clients:
         loader_idx = cid - 1  # convert from 1-indexed to 0-indexed
@@ -462,7 +461,7 @@ def filter_dataloaders_by_concepts(train_dataloaders, val_dataloaders, subgroup_
             
             # Create filtering collate function
             original_collate_fn = old_loader.collate_fn
-            filtering_collate_fn = create_filtering_collate_fn(original_collate_fn, concept_indices_to_keep)
+            filtering_collate_fn = create_filtering_collate_fn(original_collate_fn, concept_indices_to_keep, cfg_predrift, all_concept_names)
             
             # Create new DataLoader with filtering collate_fn
             train_dataloaders[loader_idx] = DataLoader(
@@ -486,7 +485,7 @@ def filter_dataloaders_by_concepts(train_dataloaders, val_dataloaders, subgroup_
                     original_c_info = ds.c_info
                     kept_cardinality = [original_c_info['cardinality'][i] for i in concept_indices_to_keep]
                     ds.c_info = {
-                        'names': kept_concept_names,
+                        'names': subgroup_concepts,
                         'cardinality': kept_cardinality
                     }
             
@@ -500,7 +499,7 @@ def filter_dataloaders_by_concepts(train_dataloaders, val_dataloaders, subgroup_
             
             # Create filtering collate function
             original_collate_fn = old_loader.collate_fn
-            filtering_collate_fn = create_filtering_collate_fn(original_collate_fn, concept_indices_to_keep)
+            filtering_collate_fn = create_filtering_collate_fn(original_collate_fn, concept_indices_to_keep, cfg_predrift, all_concept_names)
             
             # Create new DataLoader with filtering collate_fn
             val_dataloaders[loader_idx] = DataLoader(
@@ -524,7 +523,7 @@ def filter_dataloaders_by_concepts(train_dataloaders, val_dataloaders, subgroup_
                     original_c_info = ds.c_info
                     kept_cardinality = [original_c_info['cardinality'][i] for i in concept_indices_to_keep]
                     ds.c_info = {
-                        'names': kept_concept_names,
+                        'names': subgroup_concepts,
                         'cardinality': kept_cardinality
                     }
             

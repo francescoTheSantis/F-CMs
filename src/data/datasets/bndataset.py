@@ -61,14 +61,17 @@ class BNDataset():
         # self.bn_model is biased after this point
         self.data['train'] = _BNDataset(bn_model = self.bn_model,
                                         n_samples = int(self.dataset_n_samples*(1-self.val_size-self.test_size)),
+                                        concept_names = self.c_info['names'],
                                         task_name = self.y_info['names'][0]
         )
         self.data['val'] = _BNDataset(bn_model = self.bn_model,
                                       n_samples = int(self.dataset_n_samples*self.val_size),
+                                      concept_names = self.c_info['names'],
                                       task_name = self.y_info['names'][0],
         )
         self.data['test'] = _BNDataset(bn_model = self.bn_model,
                                        n_samples = int(self.dataset_n_samples*self.test_size),
+                                       concept_names = self.c_info['names'],
                                        task_name = self.y_info['names'][0],
         )
         self.data['train'].split_type = 'train'
@@ -80,6 +83,7 @@ class _BNDataset(torch.utils.data.Dataset):
                     bn_model: dict,
                     n_samples: int, 
                     task_name: str,
+                    concept_names: list,
                     bias_kwargs: dict = {}):
         
         super().__init__()
@@ -92,8 +96,8 @@ class _BNDataset(torch.utils.data.Dataset):
 
         inference = BayesianModelSampling(self.bn_model)
         self.data = inference.forward_sample(size=self.n_samples)
-        
-        concept_names = [name for name in list(self.data.columns) if name != task_name]
+        assert self.data.loc[:,concept_names].columns.tolist() == concept_names, "Concept names do not match!"
+        #assert concept_names == self.c_info['names'], "Concept names do not match!"
         reordered_names = concept_names + [task_name]
         self.y = torch.Tensor(self.data.loc[:,task_name].values).float().unsqueeze(1)
         self.c = torch.Tensor(self.data.loc[:,concept_names].values).float()

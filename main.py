@@ -499,6 +499,7 @@ def main(cfg: DictConfig) -> None:
                 train_dataloaders, val_dataloaders = filter_dataloaders_by_concepts(
                     train_dataloaders, 
                     val_dataloaders, 
+                    cfg_predrift,
                     predrift_clients,
                     subgraphs_concept_names,
                     datasets[0].c_info['names'],
@@ -522,15 +523,15 @@ def main(cfg: DictConfig) -> None:
             if rnd < cfg.learning.subgraphs.rnd_drift:
                 # pre-drift phase: use only first n_clients info: concepts, subgraph, etc...
                 start_n_client = 0
-                if cfg_predrift is None:
-                    cfg_predrift = update_config_with_subgroup_clients(
-                        cfg,
-                        graph,
-                        datasets,
-                        subgraphs_concept_names,
-                        interv_policy,
-                        subgroup_clients=predrift_clients,
-                    )
+                #if cfg_predrift is None:
+                #    cfg_predrift = update_config_with_subgroup_clients(
+                #        cfg,
+                #        graph,
+                #        datasets,
+                #        subgraphs_concept_names,
+                #        interv_policy,
+                #        subgroup_clients=predrift_clients,
+                #    )
                 cfg_round = cfg_predrift
             else:
                 # post-drift phase: use last n_clients info: concepts, subgraph, etc...

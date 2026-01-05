@@ -19,7 +19,7 @@ def static_graph_collate(batch):
         "graph": batch[0]["graph"],  # Add the graph once
     }
 
-def create_filtering_collate_fn(original_collate_fn, concept_indices_to_keep):
+def create_filtering_collate_fn(original_collate_fn, concept_indices_to_keep, cfg_predrift, all_concept_names):
     """
     Create a collate_fn that filters concepts to keep only specified indices.
     
@@ -37,6 +37,15 @@ def create_filtering_collate_fn(original_collate_fn, concept_indices_to_keep):
         # Filter concepts if present
         if 'c' in result and result['c'] is not None:
             result['c'] = result['c'][:, concept_indices_to_keep]
+            # order result['c'] according to cfg.predrift.c_name_index
+            #now the column name of result['c'] corresponds to all_concept_names[concept_indices_to_keep], I want to order them according to cfg_predrift.c_name_index
+            if cfg_predrift is not None and 'c_name_index' in cfg_predrift.model:
+                c_name_index = cfg_predrift.model['c_name_index']
+                # get the names of the concepts in result['c']
+                current_c_names = [all_concept_names[i] for i in concept_indices_to_keep]
+                # get the indices to reorder current_c_names according to c_name_index
+                reorder_indices = [current_c_names.index(name) for name in c_name_index if name in current_c_names]
+                result['c'] = result['c'][:, reorder_indices]
         
         return result
     
