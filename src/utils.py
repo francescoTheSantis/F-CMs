@@ -127,10 +127,12 @@ def set_old_parameters(engine, parameters, parameter_keys, verbose: bool = False
 
     for k, v in zip(parameter_keys, parameters):
         if k not in new_state:
+            print(f"Key {k} not found in the current model state_dict.")
             missing += 1
             continue
         old_tensor = torch.tensor(v)
         if new_state[k].shape != old_tensor.shape:
+            print(f"Shape mismatch for key {k}: expected {new_state[k].shape}, got {old_tensor.shape}.")
             mismatched += 1
             continue
         if old_tensor.dtype != new_state[k].dtype:
@@ -396,9 +398,10 @@ def update_config_with_subgroup_clients(cfg, graph, datasets, subgraphs_concept_
     # Update cfg with filtered graph and policy
     cfg_predrift = maybe_update_config_with_graph(cfg_predrift, filtered_graph, filtered_interv_policy)
 
+    assert cfg_predrift.engine.model.graph_labels == list(cfg_predrift.model.c_name_index.keys())
     # replace in cfg_predrift.test_interv_policy the indices with respect to the current graph
     if cfg_predrift.engine.get('test_interv_policy', None) is not None:
-        name_to_index = {name: i for i, name in enumerate(cfg_predrift.engine.model.graph_labels)}
+        name_to_index = cfg_predrift.model.c_name_index
         original_index_to_name = {i: name for i, name in enumerate(datasets[0].c_info['names'])}
         updated_policy = []
         for level in cfg_predrift.engine.test_interv_policy:
@@ -472,25 +475,7 @@ def filter_dataloaders_by_concepts(train_dataloaders, val_dataloaders, cfg_predr
                 pin_memory=old_loader.pin_memory,
                 drop_last=old_loader.drop_last,
                 collate_fn=filtering_collate_fn
-            )
-            
-            # Update c_info in the underlying dataset(s) if accessible
-            def update_c_info_recursive(ds):
-                if isinstance(ds, ConcatDataset):
-                    for sub_ds in ds.datasets:
-                        update_c_info_recursive(sub_ds)
-                elif hasattr(ds, 'dataset'):  # Subset
-                    update_c_info_recursive(ds.dataset)
-                elif hasattr(ds, 'c_info'):
-                    original_c_info = ds.c_info
-                    kept_cardinality = [original_c_info['cardinality'][i] for i in concept_indices_to_keep]
-                    ds.c_info = {
-                        'names': subgroup_concepts,
-                        'cardinality': kept_cardinality
-                    }
-            
-            update_c_info_recursive(dataset)
-            print(f"\033[96m[filter_dataloaders] Client {cid} train: created filtering collate_fn for {len(concept_indices_to_keep)} concepts\033[0m")
+            )           
         
         # Filter validation dataloader by wrapping collate_fn
         if val_dataloaders[loader_idx] is not None:
@@ -511,24 +496,6 @@ def filter_dataloaders_by_concepts(train_dataloaders, val_dataloaders, cfg_predr
                 drop_last=old_loader.drop_last,
                 collate_fn=filtering_collate_fn
             )
-            
-            # Update c_info in the underlying dataset(s) if accessible
-            def update_c_info_recursive(ds):
-                if isinstance(ds, ConcatDataset):
-                    for sub_ds in ds.datasets:
-                        update_c_info_recursive(sub_ds)
-                elif hasattr(ds, 'dataset'):  # Subset
-                    update_c_info_recursive(ds.dataset)
-                elif hasattr(ds, 'c_info'):
-                    original_c_info = ds.c_info
-                    kept_cardinality = [original_c_info['cardinality'][i] for i in concept_indices_to_keep]
-                    ds.c_info = {
-                        'names': subgroup_concepts,
-                        'cardinality': kept_cardinality
-                    }
-            
-            update_c_info_recursive(dataset)
-            print(f"\033[96m[filter_dataloaders] Client {cid} val: created filtering collate_fn for {len(concept_indices_to_keep)} concepts\033[0m")
     
     return train_dataloaders, val_dataloaders
 
@@ -1046,7 +1013,7 @@ def create_folders():
     os.makedirs('histories', exist_ok=True)
 
 
-def maybe_freeze_parameters(c,  y_to_freeze, model, learning, freezing = True):
+def maybe_freeze_parameters(train_dataloader,  y_to_freeze, model, learning, freezing = True):
     """
     This function freezes the model parameters related to the concepts masked for the client when learning = 'federated'
     Args:
@@ -1057,6 +1024,12 @@ def maybe_freeze_parameters(c,  y_to_freeze, model, learning, freezing = True):
     Returns:
         None
     """
+    # voglio applicare filtering collate a train_dataloader
+    new_dataloader = copy.deepcopy(train_dataloader)
+    batch = next(iter(new_dataloader))
+    c = batch['c'] if 'c' in batch else None
+
+
     if (learning == "local_federated" or learning=="federated") and freezing:
 
         c_indices_to_freeze = torch.where(c[0] == -1)[0].tolist()

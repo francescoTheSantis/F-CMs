@@ -578,7 +578,7 @@ def main(cfg: DictConfig) -> None:
 
                 # freeze if required
                 maybe_freeze_parameters(
-                    c=train_dataloaders[cid].dataset.c,
+                    train_dataloader = train_dataloaders[cid],
                     y_to_freeze = True if val_dataloaders[cid].dataset.y[0]==-1 else False, # to change if we can incorporate y in train_dataloaders[cid].dataset
                     model=local_engine.model,
                     learning=cfg.learning.mode,
