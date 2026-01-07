@@ -752,6 +752,7 @@ def main(cfg: DictConfig) -> None:
             n_keep = keep_upto + 1
 
             # Trim history
+            print(f"\033[94mValidation loss history before trimming: {history['loss_val_avg']}\033[0m")
             history["round"] = history["round"][:n_keep]
             history["loss_val_avg"] = history["loss_val_avg"][:n_keep]
             for cid in range(n_clients):

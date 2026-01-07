@@ -57,7 +57,7 @@ class C2BM(BaseModel):
         self.cat_latent = cat_latent
         
         # print in red the graph
-        print("\033[91m[C2BM] Using graph:\n", self.graph.numpy(), "\033[0m")
+        # print("\033[91m[C2BM] Using graph:\n", self.graph.numpy(), "\033[0m")
         
         # Setup concept loss weight
         self._setup_concept_loss_weight(concept_loss_weight)
