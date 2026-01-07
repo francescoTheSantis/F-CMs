@@ -347,7 +347,8 @@ def maybe_update_config_with_graph(cfg: DictConfig, graph, interv_policy) -> Dic
 
 def update_intervention_policy_and_graph(cfg, interv_policy, graph, datasets):
 
-
+    if cfg is None:
+        return None, None
     # Get the subgraph given the client id
     #for file in os.listdir(path):
     #    if ('trainset_'+str(cfg.client_id)) in file:
@@ -399,7 +400,7 @@ def update_config_from_data_subgroup_clients(cfg, subgroup_clients, datasets, su
        
     return cfg_predrift
 
-def maybe_update_config_with_graph_subgroup_clients(cfg_predrift, predrift_clients, graph_predrift,policy_predrift):
+def maybe_update_config_with_graph_subgroup_clients(cfg_predrift, predrift_clients, graph_predrift,policy_predrift, datasets):
          
     if predrift_clients is None:
         return cfg_predrift
@@ -444,6 +445,9 @@ def filter_dataloaders_by_concepts(train_dataloaders, val_dataloaders, cfg_predr
         tuple: (filtered_train_dataloaders, filtered_val_dataloaders)
     """
     from src.data.utils import create_filtering_collate_fn
+
+    if cfg_predrift is None or subgroup_clients is None:
+        return train_dataloaders, val_dataloaders
     
     # Compute subgroup_concepts from subgraphs of clients in subgroup_clients
     subgroup_concepts = set()

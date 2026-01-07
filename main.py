@@ -331,7 +331,7 @@ def main(cfg: DictConfig) -> None:
         
         # set seed for reproducibility
         torch.set_num_threads(num_threads)
-        #seed_everything(cfg.seed)
+        seed_everything(cfg.seed)
         
         # read client data
         train_dataloaders, val_dataloaders, test_dataloaders = load_dataloaders(cfg, path, n_clients * cfg.learning.subgraphs.get('dataset_client_multiplier', 1))
@@ -367,11 +367,16 @@ def main(cfg: DictConfig) -> None:
             # check postdrift clients have subgraphs that cover all the subgraphs
             postdrift_subgraphs = set()
             for cid in postdrift_clients:
-                sg_name = identify_subgraph(datasets, subgraphs_concept_names, train_dataloaders[cid], cfg)
-                postdrift_subgraphs.add(sg_name)
-            
+                subgraph_id = identify_subgraph(path, cid)
+                subgraph = subgraphs_concept_names[f'subgraph_{subgraph_id}']
+                # I want to add the subgraph, not the nodes
+                postdrift_subgraphs.add(frozenset(subgraph))
+     
             # check if postdrift_subgraphs cover all subgraphs, not nodes but subgraphs
-            all_subgraphs = set(subgraphs_concept_names.keys())
+            all_subgraphs = set()
+            for sg in subgraphs_concept_names.values():
+                all_subgraphs.add(frozenset(sg))
+
             if postdrift_subgraphs != all_subgraphs:
                 raise ValueError("Post-drift clients do not cover all subgraphs. Adjust post-drift clients to include all subgraphs.")
 
@@ -430,13 +435,14 @@ def main(cfg: DictConfig) -> None:
             cfg = maybe_update_config_with_graph_subgroup_clients(cfg, postdrift_clients, graph_postdrift,interv_policy_postdrift)
         
         else:
-            if predrift_clients is not None:
-                interv_policy_predrift, graph_predrift = update_intervention_policy_and_graph(
-                        cfg_predrift, interv_policy, graph, datasets
-                )
+
+            interv_policy_predrift, graph_predrift = update_intervention_policy_and_graph(
+                    cfg_predrift, interv_policy, graph, datasets
+            )
 
 
-        cfg_predrift = maybe_update_config_with_graph_subgroup_clients(cfg_predrift, predrift_clients, graph_predrift,interv_policy_predrift)
+
+        cfg_predrift = maybe_update_config_with_graph_subgroup_clients(cfg_predrift, predrift_clients, graph_predrift,interv_policy_predrift, datasets)
         
   
         # Filter dataloaders for predrift clients
