@@ -1,3 +1,4 @@
+from scipy import datasets
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -214,7 +215,7 @@ def update_config_from_client(cfg: DictConfig, datasets, cid: int) -> DictConfig
     return cfg
 
 
-def update_config_from_data(cfg: DictConfig, datasets, subgraphs_concept_names, subset_concepts = None, subset_clients = None) -> DictConfig:
+def update_config_from_data(cfg: DictConfig, datasets, subgraphs_concept_names, subset_concepts = None, subset_clients = None, node_order = None) -> DictConfig:
     """ can be used to update the config based on the data, e.g., set input and output size """ 
 
     with open_dict(cfg):
@@ -254,6 +255,9 @@ def update_config_from_data(cfg: DictConfig, datasets, subgraphs_concept_names, 
                 c_info = datasets[0].c_info
                 total_clients = cfg.learning.n_clients*cfg.learning.subgraphs.get('dataset_client_multiplier', 1)
             else:
+                #order subset_concepts according to node_order
+                if node_order is not None:
+                    subset_concepts = [name for name in node_order if name in subset_concepts]
                 original_c_names = subset_concepts
                 c_info = {'names': subset_concepts, 'cardinality': [datasets[0].c_info['cardinality'][datasets[0].c_info['names'].index(name)] for name in subset_concepts]}
                 total_clients = len(subset_clients)
@@ -374,8 +378,11 @@ def update_intervention_policy_and_graph(cfg, interv_policy, graph, datasets):
     updated_graph = graph.loc[c_names+cfg.model.y_info['names'], c_names+cfg.model.y_info['names']]
     return updated_policy, updated_graph
 
-def update_config_with_subgroup_clients(cfg, graph, datasets, subgraphs_concept_names, interv_policy, subgroup_clients):
+def update_config_from_data_subgroup_clients(cfg, subgroup_clients, datasets, subgraphs_concept_names, node_order ):
     
+    if subgroup_clients is None:
+        return None
+
     # Get concepts from subgroup clients subgraphs
     subgroup_concepts = set()
     for cid in subgroup_clients:
@@ -388,15 +395,17 @@ def update_config_with_subgroup_clients(cfg, graph, datasets, subgraphs_concept_
     # Create a temporary cfg with filtered c_info for use with update_intervention_policy_and_graph
     subgroup_concepts_list = list(subgroup_concepts)
     cfg_predrift = copy.deepcopy(cfg)
-    cfg_predrift = update_config_from_data(cfg_predrift, datasets, subgraphs_concept_names, subset_concepts = subgroup_concepts_list, subset_clients = subgroup_clients) 
+    cfg_predrift = update_config_from_data(cfg_predrift, datasets, subgraphs_concept_names, subset_concepts = subgroup_concepts_list, subset_clients = subgroup_clients, node_order = node_order) 
        
-    # Use update_intervention_policy_and_graph to filter graph and policy
-    filtered_interv_policy, filtered_graph = update_intervention_policy_and_graph(
-        cfg_predrift, interv_policy, graph, datasets
-    )
-     
+    return cfg_predrift
+
+def maybe_update_config_with_graph_subgroup_clients(cfg_predrift, predrift_clients, graph_predrift,policy_predrift):
+         
+    if predrift_clients is None:
+        return cfg_predrift
+    
     # Update cfg with filtered graph and policy
-    cfg_predrift = maybe_update_config_with_graph(cfg_predrift, filtered_graph, filtered_interv_policy)
+    cfg_predrift = maybe_update_config_with_graph(cfg_predrift, graph_predrift, policy_predrift)
 
     assert cfg_predrift.engine.model.graph_labels == list(cfg_predrift.model.c_name_index.keys())
     # replace in cfg_predrift.test_interv_policy the indices with respect to the current graph
@@ -557,164 +566,156 @@ def remove_cycles(graph, start_node):
     return graph
 
 
-def _find_cycle_edges(adj_matrix: np.ndarray):
-    n = adj_matrix.shape[0]
-    visited = [False] * n
-    in_stack = [False] * n
-    parent = [-1] * n
-
-    def dfs(node):
-        visited[node] = True
-        in_stack[node] = True
-        for neighbor in range(n):
-            if adj_matrix[node][neighbor] != 1:
-                continue
-            if not visited[neighbor]:
-                parent[neighbor] = node
-                cycle = dfs(neighbor)
-                if cycle is not None:
-                    return cycle
-            elif in_stack[neighbor]:
-                cycle_edges = []
-                cur = node
-                while cur != neighbor:
-                    p = parent[cur]
-                    if p == -1:
-                        break
-                    cycle_edges.append((p, cur))
-                    cur = p
-                cycle_edges.append((node, neighbor))
-                return cycle_edges
-        in_stack[node] = False
-        return None
-
-    for node in range(n):
-        if not visited[node]:
-            cycle = dfs(node)
-            if cycle is not None:
-                return cycle
-    return None
-
-
-def _break_cycles_by_confidence(adj_matrix: np.ndarray, scores: np.ndarray):
-    adj = adj_matrix.copy()
-    removed_edges = []
-    while True:
-        cycle_edges = _find_cycle_edges(adj)
-        if not cycle_edges:
-            break
-        edge_to_remove = min(
-            cycle_edges,
-            key=lambda e: (scores[e[0], e[1]], e[0], e[1]),
-        )
-        adj[edge_to_remove[0], edge_to_remove[1]] = 0
-        removed_edges.append(edge_to_remove)
-    return adj, removed_edges
 
 
 def aggregate_graph_proposals(
+    client_selection: Optional[List[float]],
     local_graphs: List[pd.DataFrame],
-    local_confidences: Optional[List[pd.DataFrame]] = None,
     weights: Optional[List[float]] = None,
-    node_order: Optional[List[str]] = None,
-    tau: float = 0.5,
-    resolve_conflicts: bool = True,
-    require_dag: bool = False,
-    missing: str = "ignore",
+    cfg: Optional[List[str]] = None,
+    task_node: Optional[str] = None,
 ):
     if not local_graphs:
         raise ValueError("local_graphs cannot be empty.")
-    if local_confidences is not None and len(local_confidences) != len(local_graphs):
-        raise ValueError("local_confidences must match local_graphs length.")
     if weights is None:
         weights = [1.0] * len(local_graphs)
     if len(weights) != len(local_graphs):
         raise ValueError("weights must match local_graphs length.")
 
-    if node_order is None:
-        node_order = []
-        seen = set()
-        for g in local_graphs:
-            for name in g.index.tolist():
-                if name not in seen:
-                    node_order.append(name)
-                    seen.add(name)
-    node_to_idx = {name: i for i, name in enumerate(node_order)}
+    # Use client selection to filter local_graphs and weights
+    if client_selection is None:
+        return None, None
+    
+    selected_graphs = []
+    selected_weights = []
+    
+    for client in client_selection:
+        selected_graphs.append(local_graphs[client-1])
+        selected_weights.append(weights[client-1])
 
+    
+    if not selected_graphs:
+        raise ValueError("No clients selected based on client_selection.")
+    
+    local_graphs = selected_graphs
+    weights = selected_weights
+    
+    # Get union of all nodes from local graphs
+    all_nodes = set()
+    for graph in local_graphs:
+        all_nodes.update(graph.index.tolist())
+        all_nodes.update(graph.columns.tolist())
+    
+
+    # Ensure all nodes from local graphs are in the same order of cfg.engine.c_names_index
+    if cfg is not None and task_node is not None:
+        node_order = cfg.engine.c_names_index.keys()
+        node_order = [node for node in node_order if node in all_nodes]
+        node_order.append(task_node)
+    else:
+        node_order = sorted(all_nodes)
+    
     n_nodes = len(node_order)
-    score_sum = np.zeros((n_nodes, n_nodes), dtype=float)
-    weight_sum = np.zeros((n_nodes, n_nodes), dtype=float)
+    
+    
+    # Initialize matrices for aggregation
+    # For each pair (i,j) where i<j, we track 3 options: i->j, j->i, no edge
+    weighted_votes_forward = np.zeros((n_nodes, n_nodes))  # votes for edge i->j
+    weighted_votes_backward = np.zeros((n_nodes, n_nodes))  # votes for edge j->i
+    weighted_votes_noedge = np.zeros((n_nodes, n_nodes))  # votes for no edge
+    total_weight_pairs = np.zeros((n_nodes, n_nodes))  # total weight for each pair
+    
+    # Aggregate votes from each local graph
+    for graph_idx, local_graph in enumerate(local_graphs):
+        client_weight = weights[graph_idx]
+        
+        for i, node_i in enumerate(node_order):
+            for j, node_j in enumerate(node_order):
+                if i >= j:  # Only consider i < j to avoid double counting
+                    continue
+                
+                # Check presence of nodes in local graph
+                has_couple = (node_i in local_graph.index and node_j in local_graph.columns)
 
-    for idx, g in enumerate(local_graphs):
-        if not isinstance(g, pd.DataFrame):
-            raise ValueError("local_graphs must contain pandas DataFrames with node labels.")
-        scores_df = g if local_confidences is None else local_confidences[idx]
-        if not isinstance(scores_df, pd.DataFrame):
-            scores_df = pd.DataFrame(scores_df, index=g.index, columns=g.columns)
-        if scores_df.shape[0] != scores_df.shape[1]:
-            raise ValueError("Each local graph must be a square adjacency matrix.")
-        if scores_df.index.tolist() != scores_df.columns.tolist():
-            raise ValueError("Local graph indices must match columns order.")
-
-        local_nodes = scores_df.index.tolist()
-        keep = [i for i, name in enumerate(local_nodes) if name in node_to_idx]
-        if not keep:
-            continue
-
-        local_scores = scores_df.to_numpy(dtype=float)
-        local_scores = local_scores[np.ix_(keep, keep)]
-        idxs = [node_to_idx[local_nodes[i]] for i in keep]
-
-        full = np.full((n_nodes, n_nodes), np.nan, dtype=float)
-        full[np.ix_(idxs, idxs)] = local_scores
-        np.fill_diagonal(full, 0.0)
-
-        if missing == "ignore":
-            mask = ~np.isnan(full)
-            score_sum += weights[idx] * np.where(mask, full, 0.0)
-            weight_sum += weights[idx] * mask
-        elif missing == "zero":
-            full = np.nan_to_num(full, nan=0.0)
-            score_sum += weights[idx] * full
-            weight_sum += weights[idx]
-        else:
-            raise ValueError("missing must be either 'ignore' or 'zero'.")
-
-    bar_scores = np.zeros_like(score_sum)
-    valid = weight_sum > 0
-    bar_scores[valid] = score_sum[valid] / weight_sum[valid]
-
-    adj = (bar_scores >= tau) & valid
-    adj = adj.astype(int)
-    np.fill_diagonal(adj, 0)
-
-    uncertain_edges = []
-    if resolve_conflicts:
-        for i in range(n_nodes):
-            for j in range(i + 1, n_nodes):
-                if adj[i, j] == 1 and adj[j, i] == 1:
-                    if bar_scores[i, j] > bar_scores[j, i]:
-                        adj[j, i] = 0
-                    elif bar_scores[i, j] < bar_scores[j, i]:
-                        adj[i, j] = 0
+                
+                edge_i_j = 0
+                edge_j_i = 0
+                
+                if has_couple:
+                    edge_i_j = local_graph.loc[node_i, node_j]
+                    edge_j_i = local_graph.loc[node_j, node_i]
+                
+                # Count this client's vote for the pair (i,j)
+                if has_couple:
+                    total_weight_pairs[i, j] += client_weight
+                    
+                    if edge_i_j == 1 and edge_j_i == 0:
+                        # Vote for i->j
+                        weighted_votes_forward[i, j] += client_weight
+                    elif edge_j_i == 1 and edge_i_j == 0:
+                        # Vote for j->i
+                        weighted_votes_backward[i, j] += client_weight
                     else:
-                        adj[i, j] = 0
-                        adj[j, i] = 0
-                        uncertain_edges.append((node_order[i], node_order[j]))
+                        # Vote for no edge (both 0 or both 1 which is invalid, treat as no edge)
+                        weighted_votes_noedge[i, j] += client_weight
+                    
+  
+    # Initialize adjacency matrix based on weighted majority voting
+    adj = np.zeros((n_nodes, n_nodes), dtype=int)
+    uncertain_edges = []
+    
+    for i in range(n_nodes):
+        for j in range(i + 1, n_nodes):  # Only process each pair once
+            if total_weight_pairs[i, j] == 0:
+                continue
+            
+            # Get votes for the 3 options
+            vote_forward = weighted_votes_forward[i, j]
+            vote_backward = weighted_votes_backward[i, j]
+            vote_noedge = weighted_votes_noedge[i, j]
+            
+            # Find the option with maximum votes (weighted majority wins)
+            max_vote = max(vote_forward, vote_backward, vote_noedge)
+            
+            # Check for ties
+            tie_count = sum([
+                vote_forward == max_vote,
+                vote_backward == max_vote,
+                vote_noedge == max_vote
+            ])
+            
+            if tie_count > 1:
+                raise NotImplementedError("Conflict resolution for ties is not implemented.")
 
-    removed_cycle_edges = []
-    if require_dag:
-        adj, removed_edges = _break_cycles_by_confidence(adj, bar_scores)
-        removed_cycle_edges = [
-            (node_order[i], node_order[j]) for i, j in removed_edges
-        ]
-
+            else:
+                # Use simple majority without conflict resolution
+                if vote_forward == max_vote and vote_forward > 0:
+                    adj[i, j] = 1
+                elif vote_backward == max_vote and vote_backward > 0:
+                    adj[j, i] = 1
+    
+    # Handle cycles if DAG is required
     graph_df = pd.DataFrame(adj, index=node_order, columns=node_order, dtype=int)
+    start_node = n_nodes - 1
+    graph_df = remove_cycles(graph_df, start_node)
+    
+    # Check that task node has at least one parent
+    if task_node is not None:
+        if task_node in graph_df.columns:
+            # Get incoming edges to task node (parents)
+            task_column = graph_df[task_node]
+            num_parents = task_column.sum()
+            
+            if num_parents == 0:
+                raise ValueError(f"Task node '{task_node}' has no parents in the aggregated graph. "
+                               f"At least one parent is required for the task node.")
+
     meta = {
-        "scores": pd.DataFrame(bar_scores, index=node_order, columns=node_order),
-        "weights": pd.DataFrame(weight_sum, index=node_order, columns=node_order),
+        "weights": pd.DataFrame(total_weight_pairs, index=node_order, columns=node_order),
+        "votes_forward": pd.DataFrame(weighted_votes_forward, index=node_order, columns=node_order),
+        "votes_backward": pd.DataFrame(weighted_votes_backward, index=node_order, columns=node_order),
+        "votes_noedge": pd.DataFrame(weighted_votes_noedge, index=node_order, columns=node_order),
         "uncertain_edges": uncertain_edges,
-        "removed_cycle_edges": removed_cycle_edges,
     }
     return graph_df, meta
 
@@ -2165,3 +2166,21 @@ def plot_training_metrics(history: Dict[str, Any], save_dir: str = ".") -> None:
     
     plt.close('all')
     print(f"Training plots saved to {save_dir}/")
+
+def build_local_graphs(client_ids, cfg, train_dataloaders, y_presence, y_name, graph = None):
+    local_graphs = []
+    local_weights = []
+    for client_id in client_ids:
+        loader = train_dataloaders[client_id - 1]
+        node_names = cfg.engine.c_names_id[client_id]
+        #node_names = list(client_nodes)
+        if not node_names:
+            continue
+        if y_presence[client_id - 1]:
+            node_names.append(y_name)
+        if graph is not None:
+            local_graphs.append(graph.loc[node_names, node_names])
+        else:
+            raise NotImplementedError("Graph construction from data is not implemented.")
+        local_weights.append(len(loader.dataset))
+    return local_graphs, local_weights

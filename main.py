@@ -23,7 +23,7 @@ import time
 from src.utils import (
     seed_everything, 
     maybe_freeze_parameters, 
-    update_config_with_subgroup_clients,
+    update_config_from_data_subgroup_clients,
     aggregate_graph_proposals,
     model_is_causal,
     aggregate, 
@@ -43,7 +43,9 @@ from src.utils import (
     compute_validation_loss,
     shadow_mlp_scores_loader,
     score_blackbox_loss_loader,
-    filter_dataloaders_by_concepts
+    filter_dataloaders_by_concepts,
+    build_local_graphs,
+    maybe_update_config_with_graph_subgroup_clients
 )
 
 from src.dra import (
@@ -329,7 +331,7 @@ def main(cfg: DictConfig) -> None:
         
         # set seed for reproducibility
         torch.set_num_threads(num_threads)
-        seed_everything(cfg.seed)
+        #seed_everything(cfg.seed)
         
         # read client data
         train_dataloaders, val_dataloaders, test_dataloaders = load_dataloaders(cfg, path, n_clients * cfg.learning.subgraphs.get('dataset_client_multiplier', 1))
@@ -337,6 +339,14 @@ def main(cfg: DictConfig) -> None:
         print("\033[94mNumber of samples per client:\033[0m")
         for i in range(len(train_dataloaders)):
             print(f"\033[94mClient {i}: {len(train_dataloaders[i].dataset)} samples\033[0m")
+
+        # identify if y is present or not for the clients
+        y_present = []
+        for cid in range(len(val_dataloaders)):
+            if val_dataloaders[cid].dataset.y[0]!=-1:
+                y_present.append(True)
+            else:
+                y_present.append(False)
        
         t0 = time.time()
         best_loss = float('inf')
@@ -348,163 +358,97 @@ def main(cfg: DictConfig) -> None:
             history["loss_val_client"][cid] = []
         mia_accuracies, mia_epsilons = initialize_mia_results(n_clients)
         n_dataset_clients = len(train_dataloaders)
-        predrift_clients = list(range(1, n_clients + 1))
-        postdrift_clients = list(range(n_clients + 1, min(2 * n_clients, n_dataset_clients) + 1))
-        if not postdrift_clients:
-            postdrift_clients = predrift_clients
 
-        def _client_has_task_labels(loader):
-            y = getattr(loader.dataset, "y", None)
-            if y is None:
-                return False
-            if torch.is_tensor(y):
-                return not torch.all(y == -1)
-            return True
+        # determine clients for possible predrift and postdrift phases
+        if cfg.learning.subgraphs.rnd_drift > 1:
+            predrift_clients = list(range(1, n_clients + 1))
+            postdrift_clients = list(range(n_clients + 1, min(2 * n_clients, n_dataset_clients) + 1))
 
-        def _build_local_graphs(client_ids):
-            local_graphs = []
-            local_weights = []
-            for client_id in client_ids:
-                subgraph_id = identify_subgraph(path, client_id)
-                if subgraph_id is None:
-                    continue
-                node_names = list(
-                    subgraphs_concept_names.get(f"subgraph_{subgraph_id}", [])
-                )
-                if not node_names:
-                    continue
-                loader = train_dataloaders[client_id - 1]
-                if _client_has_task_labels(loader):
-                    for y_name in datasets[0].y_info["names"]:
-                        if y_name not in node_names:
-                            node_names.append(y_name)
-                local_graphs.append(graph.loc[node_names, node_names])
-                local_weights.append(len(loader.dataset))
-            return local_graphs, local_weights
+            # check postdrift clients have subgraphs that cover all the subgraphs
+            postdrift_subgraphs = set()
+            for cid in postdrift_clients:
+                sg_name = identify_subgraph(datasets, subgraphs_concept_names, train_dataloaders[cid], cfg)
+                postdrift_subgraphs.add(sg_name)
+            
+            # check if postdrift_subgraphs cover all subgraphs, not nodes but subgraphs
+            all_subgraphs = set(subgraphs_concept_names.keys())
+            if postdrift_subgraphs != all_subgraphs:
+                raise ValueError("Post-drift clients do not cover all subgraphs. Adjust post-drift clients to include all subgraphs.")
 
-        def _ensure_task_has_parent(agg_graph, task_name, fallback_graph):
-            if task_name not in agg_graph.columns:
-                raise ValueError(f"Task node {task_name} not found in aggregated graph.")
-            task_idx = agg_graph.columns.get_loc(task_name)
-            if agg_graph.iloc[:, task_idx].sum() == 0:
-                warnings.warn(
-                    "Aggregated graph has no parents for the task; "
-                    "restoring task parents from the original graph."
-                )
-                agg_graph = agg_graph.copy()
-                fallback_col = fallback_graph.loc[agg_graph.index, task_name]
-                agg_graph.iloc[:, task_idx] = fallback_col.values
-                agg_graph.iat[task_idx, task_idx] = 0
-            return agg_graph
+        else:
+            predrift_clients = None
+            postdrift_clients = list(range(1, n_clients + 1))
+            
 
-        cfg_predrift = None
+        # determine node order
+        node_order = datasets[0].c_info["names"] + datasets[0].y_info["names"]
+
+        # update cfg.engine and cfg.engine.model for pre-drift clients, if predrft_clients is empty return None
+        cfg_predrift = update_config_from_data_subgroup_clients(cfg, 
+                                                           predrift_clients, 
+                                                           datasets, 
+                                                           subgraphs_concept_names, 
+                                                           node_order)
         cfg_postdrift = cfg
+
+
+        # determine whether to use graph aggregation
         use_graph_agg = cfg.learning.subgraphs.get("aggregate_graph", False)
         if use_graph_agg:
-            node_order = datasets[0].c_info["names"] + datasets[0].y_info["names"]
-            agg_tau = cfg.learning.subgraphs.get("aggregate_tau", 0.5)
-            agg_missing = cfg.learning.subgraphs.get("aggregate_missing", "ignore")
-            agg_resolve_conflicts = cfg.learning.subgraphs.get("aggregate_resolve_conflicts", True)
-            agg_require_dag = cfg.learning.subgraphs.get("aggregate_require_dag", model_is_causal(cfg.model))
+            
+            # build local graphs for all clients
+            local_graphs, local_weights = build_local_graphs(predrift_clients+ postdrift_clients, 
+                                                             cfg, 
+                                                             train_dataloaders, 
+                                                             y_present, 
+                                                             datasets[0].y_info["names"][0], graph)
 
-            local_graphs, local_weights = _build_local_graphs(predrift_clients)
-            if local_graphs:
-                graph_predrift, _ = aggregate_graph_proposals(
-                    local_graphs,
-                    weights=local_weights,
-                    node_order=node_order,
-                    tau=agg_tau,
-                    resolve_conflicts=agg_resolve_conflicts,
-                    require_dag=agg_require_dag,
-                    missing=agg_missing,
-                )
-                graph_predrift = _ensure_task_has_parent(
-                    graph_predrift, datasets[0].y_info["names"][0], graph
-                )
-                y_index_predrift = graph_predrift.columns.get_loc(
-                    datasets[0].y_info["names"][0]
-                )
-                interv_policy_predrift, _ = get_intervention_policy(
-                    graph_predrift, y_index_predrift
-                )
-                cfg_predrift = update_config_with_subgroup_clients(
-                    cfg,
-                    graph_predrift,
-                    datasets,
-                    subgraphs_concept_names,
-                    interv_policy_predrift,
-                    subgroup_clients=predrift_clients,
-                )
-            else:
-                warnings.warn(
-                    "No local graphs found for pre-drift aggregation; using existing graph."
-                )
-                cfg_predrift = update_config_with_subgroup_clients(
-                    cfg,
-                    graph,
-                    datasets,
-                    subgraphs_concept_names,
-                    interv_policy,
-                    subgroup_clients=predrift_clients,
-                )
+            # aggregate graphs for pre-drift and post-drift clients
+            # predrift
+            graph_predrift, _ = aggregate_graph_proposals(
+                client_selection = predrift_clients,
+                local_graphs=local_graphs,
+                weights=local_weights,
+                cfg_predrift=cfg_predrift,
+                task_node=datasets[0].y_info["names"][0]
+            )
 
-            local_graphs, local_weights = _build_local_graphs(postdrift_clients)
-            if local_graphs:
-                graph_postdrift, _ = aggregate_graph_proposals(
-                    local_graphs,
-                    weights=local_weights,
-                    node_order=node_order,
-                    tau=agg_tau,
-                    resolve_conflicts=agg_resolve_conflicts,
-                    require_dag=agg_require_dag,
-                    missing=agg_missing,
-                )
-                graph_postdrift = _ensure_task_has_parent(
-                    graph_postdrift, datasets[0].y_info["names"][0], graph
-                )
-                y_index_postdrift = graph_postdrift.columns.get_loc(
-                    datasets[0].y_info["names"][0]
-                )
-                interv_policy_postdrift, _ = get_intervention_policy(
-                    graph_postdrift, y_index_postdrift
-                )
-                cfg_postdrift = update_config_with_subgroup_clients(
-                    cfg,
-                    graph_postdrift,
-                    datasets,
-                    subgraphs_concept_names,
-                    interv_policy_postdrift,
-                    subgroup_clients=postdrift_clients,
-                )
-            else:
-                warnings.warn(
-                    "No local graphs found for post-drift aggregation; using existing graph."
-                )
-                cfg_postdrift = cfg
+            # postdrift
+            graph_postdrift, _ = aggregate_graph_proposals(
+                client_selection = postdrift_clients,
+                local_graphs=local_graphs,
+                weights=local_weights,
+                cfg_postdrift=cfg_postdrift,
+                task_node=datasets[0].y_info["names"][0]
+            )
 
-            if cfg_predrift is None:
-                cfg_predrift = cfg_postdrift
+            interv_policy_predrift, ip_names_predrift = get_intervention_policy(graph_predrift, 
+                                                                                y_index = graph_predrift.columns.get_loc(datasets[0].y_info["names"][0]))
+            interv_policy_postdrift, ip_names_postdrift = get_intervention_policy(graph_postdrift,
+                                                                            y_index = graph_postdrift.columns.get_loc(datasets[0].y_info["names"][0]))
+            
+            cfg = maybe_update_config_with_graph_subgroup_clients(cfg, postdrift_clients, graph_postdrift,interv_policy_postdrift)
+        
         else:
-            # if exists cfg.learning.subgraphs.rnd_drft
-            if cfg.learning.subgraphs.rnd_drift > 1:
-                cfg_predrift = update_config_with_subgroup_clients(
-                    cfg,
-                    graph,
-                    datasets,
-                    subgraphs_concept_names,
-                    interv_policy,
-                    subgroup_clients=predrift_clients,
+            if predrift_clients is not None:
+                interv_policy_predrift, graph_predrift = update_intervention_policy_and_graph(
+                        cfg_predrift, interv_policy, graph, datasets
                 )
-                # Filter dataloaders for predrift clients
-                train_dataloaders, val_dataloaders = filter_dataloaders_by_concepts(
-                    train_dataloaders, 
-                    val_dataloaders, 
-                    cfg_predrift,
-                    predrift_clients,
-                    subgraphs_concept_names,
-                    datasets[0].c_info['names'],
-                    path
-                )
+
+
+        cfg_predrift = maybe_update_config_with_graph_subgroup_clients(cfg_predrift, predrift_clients, graph_predrift,interv_policy_predrift)
+        
+  
+        # Filter dataloaders for predrift clients
+        train_dataloaders, val_dataloaders = filter_dataloaders_by_concepts(
+            train_dataloaders, 
+            val_dataloaders, 
+            cfg_predrift,
+            predrift_clients,
+            subgraphs_concept_names,
+            datasets[0].c_info['names'],
+            path
+        )
 
 
         init_cfg = cfg_predrift if cfg_predrift is not None else cfg_postdrift
