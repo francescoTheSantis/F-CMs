@@ -410,7 +410,15 @@ def maybe_update_config_with_graph_subgroup_clients(cfg_predrift, predrift_clien
     # Update cfg with filtered graph and policy
     cfg_predrift = maybe_update_config_with_graph(cfg_predrift, graph_predrift, policy_predrift)
 
-    assert cfg_predrift.engine.model.graph_labels == list(cfg_predrift.model.c_name_index.keys())
+    graph_labels = OmegaConf.select(cfg_predrift, "engine.model.graph_labels", default=None)
+    if model_is_causal(cfg_predrift.model):
+        assert graph_labels is not None, "graph_labels missing from causal model config"
+        assert graph_labels == list(cfg_predrift.model.c_name_index.keys())
+    else:
+        # Non-causal models do not store graph information; fall back to concept names
+        if graph_labels is None:
+            graph_labels = list(cfg_predrift.model.c_name_index.keys())
+
     # replace in cfg_predrift.test_interv_policy the indices with respect to the current graph
     if cfg_predrift.engine.get('test_interv_policy', None) is not None:
         name_to_index = cfg_predrift.model.c_name_index
@@ -420,7 +428,7 @@ def maybe_update_config_with_graph_subgroup_clients(cfg_predrift, predrift_clien
             level_policy = []
             for node in level:
                 node_name = original_index_to_name[node]
-                if node_name in cfg_predrift.engine.model.graph_labels:
+                if graph_labels is None or node_name in graph_labels:
                     level_policy.append(name_to_index[node_name])
             if len(level_policy) > 0:
                  updated_policy.append(level_policy)
