@@ -5,8 +5,8 @@ import warnings
 import hydra # type: ignore
 import pickle
 from torch.utils.data import DataLoader
-from causal_discovery.causal_discovery_block import causal_discovery
-from completion.completion_block import complete_graph_with_llm
+# from src.causal_discovery.causal_discovery_block import causal_discovery
+# from src.completion.completion_block import complete_graph_with_llm
 from src.data.utils import static_graph_collate
 from pytorch_lightning.loggers import WandbLogger # type: ignore
 from src.trainer import Trainer
@@ -49,12 +49,6 @@ from src.dra import (
 
 # data loading
 from src.data.dataset_block import get_dataset
-
-# causal discovery
-from src.causal_discovery.causal_discovery_block import causal_discovery
-
-# graph completion block
-from src.completion.completion_block import complete_graph_with_llm
 
 #from src.server import get_evaluate_fn
 #from src.strategy import CustomFedAvgWithModelSaving
@@ -164,7 +158,7 @@ def main(cfg: DictConfig) -> None:
             graph = pickle.load(f)
     else:
         # graph construction
-        if len(dataset)>1:
+        if len(datasets)>1:
             raise NotImplementedError("Multiple datasets are not supported in the current version for graph construction.")
         else:
             if true_graph is None or cfg.dataset.load_true_graph == False:
@@ -707,7 +701,7 @@ def main(cfg: DictConfig) -> None:
             print(f"\033[92m✅ aggregated  val_loss={w_loss:.4f}\033[0m")
 
             # check improvement
-            if w_loss < best_loss:
+            if w_loss < best_loss and rnd > cfg.learning.subgraphs.rnd_drift:
                 best_loss = w_loss
                 best_round = rnd
                 no_improvement_count = 0
