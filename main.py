@@ -460,6 +460,8 @@ def main(cfg: DictConfig) -> None:
                 task_node=datasets[0].y_info["names"][0]
             )
 
+            maybe_plot_graph(graph_predrift, 'graph_predrift')
+
             # postdrift
             graph_postdrift, _ = aggregate_graph_proposals(
                 client_selection = postdrift_clients,
@@ -468,6 +470,8 @@ def main(cfg: DictConfig) -> None:
                 config=cfg_postdrift,
                 task_node=datasets[0].y_info["names"][0]
             )
+
+            maybe_plot_graph(graph_postdrift, 'graph_postdrift')
 
             interv_policy_predrift, ip_names_predrift = get_intervention_policy(graph_predrift, 
                                                                                 y_index = graph_predrift.columns.get_loc(datasets[0].y_info["names"][0]) if graph_predrift is not None else None)
