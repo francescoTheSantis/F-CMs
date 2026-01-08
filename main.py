@@ -5,8 +5,8 @@ import warnings
 import hydra # type: ignore
 import pickle
 from torch.utils.data import DataLoader
-# from src.causal_discovery.causal_discovery_block import causal_discovery
-# from src.completion.completion_block import complete_graph_with_llm
+from src.causal_discovery.causal_discovery_block import causal_discovery
+#from src.completion.completion_block import complete_graph_with_llm
 from src.data.utils import static_graph_collate
 from pytorch_lightning.loggers import WandbLogger # type: ignore
 from src.trainer import Trainer
@@ -154,8 +154,15 @@ def main(cfg: DictConfig) -> None:
     print(OmegaConf.to_yaml(cfg))
 
     if cfg.dataset.load_graph:
-        with open(os.path.join(dataset_directory, "graph.pkl"), 'rb') as f:
-            graph = pickle.load(f)
+        try:
+            if true_graph is None or cfg.dataset.load_true_graph == False:
+                with open(os.path.join(dataset_directory, "learned_graph.pkl"), 'rb') as f:
+                    graph = pickle.load(f)
+
+            else:
+                graph = true_graph
+        except FileNotFoundError:
+            print("Graph file not found. Change the config or run graph learning.")
     else:
         # graph construction
         if len(datasets)>1:
@@ -163,30 +170,31 @@ def main(cfg: DictConfig) -> None:
         else:
             if true_graph is None or cfg.dataset.load_true_graph == False:
                 # estimate causal graph with causal structural learning algorithms
-                predicted_graph = causal_discovery(cfg, dataset, true_graph)
+                graph = causal_discovery(cfg, dataset, true_graph)
                 #if true_graph is not None:
                 #    hamming = hamming_distance(true_graph, predicted_graph)
                 #    print('(after CD) structural hamming distance: ', hamming)    
 
                 # complete the causal graph with LLM and RAG
-                completed_graph = complete_graph_with_llm(cfg, predicted_graph, cfg.dataset.name)
+                #completed_graph = complete_graph_with_llm(cfg, predicted_graph, cfg.dataset.name)
                 #if true_graph is not None:
                 #    hamming = hamming_distance(true_graph, completed_graph)
                 #     print('(after LLM + RAG) structural hamming distance: ', hamming)
                 graph, dataset = remove_problematic_edges(graph, dataset)
                 graph = remove_cycles(graph, y_index)
-                graph = completed_graph
+                #graph = completed_graph
+                with open(os.path.join(dataset_directory, "learned_graph.pkl"), 'wb') as f:
+                    pickle.dump(graph, f)
             else:
-                graph = true_graph.copy()
+                graph = true_graph
 
-        with open(os.path.join(dataset_directory, "graph.pkl"), 'wb') as f:
-            pickle.dump(graph, f)
+
     
     # interv graph must be always the true graph if available
     if true_graph is not None:
-       interv_graph = true_graph.copy()
+       interv_graph = true_graph
     else:
-       interv_graph = graph.copy()
+       interv_graph = graph
             
     # get the causal graph
     #if cfg.dataset.load_true_graph:
@@ -431,11 +439,16 @@ def main(cfg: DictConfig) -> None:
         if use_graph_agg:
             
             # build local graphs for all clients
-            local_graphs, local_weights = build_local_graphs(predrift_clients+ postdrift_clients, 
+            if predrift_clients is None:
+                all_clients = postdrift_clients
+            else:
+                all_clients = predrift_clients + postdrift_clients
+
+            local_graphs, local_weights = build_local_graphs(all_clients, 
                                                              cfg, 
                                                              train_dataloaders, 
-                                                             y_present, 
-                                                             datasets[0].y_info["names"][0], graph, modality = agg_graph_cfg.local_graphs)
+                                                             datasets[0].y_info["names"][0], 
+                                                             graph)
 
             # aggregate graphs for pre-drift and post-drift clients
             # predrift
@@ -443,7 +456,7 @@ def main(cfg: DictConfig) -> None:
                 client_selection = predrift_clients,
                 local_graphs=local_graphs,
                 weights=local_weights,
-                cfg_predrift=cfg_predrift,
+                config=cfg_predrift,
                 task_node=datasets[0].y_info["names"][0]
             )
 
@@ -452,16 +465,14 @@ def main(cfg: DictConfig) -> None:
                 client_selection = postdrift_clients,
                 local_graphs=local_graphs,
                 weights=local_weights,
-                cfg_postdrift=cfg_postdrift,
+                config=cfg_postdrift,
                 task_node=datasets[0].y_info["names"][0]
             )
 
             interv_policy_predrift, ip_names_predrift = get_intervention_policy(graph_predrift, 
-                                                                                y_index = graph_predrift.columns.get_loc(datasets[0].y_info["names"][0]))
-            # intervention policy postidrft remains the one on the true graph to guarantee consistency among the models
-            interv_policy_postdrift = interv_policy
-            
-            cfg = maybe_update_config_with_graph_subgroup_clients(cfg, postdrift_clients, graph_postdrift,interv_policy_postdrift)
+                                                                                y_index = graph_predrift.columns.get_loc(datasets[0].y_info["names"][0]) if graph_predrift is not None else None)
+            # Note: intervention policy postidrft remains the one on the true graph to guarantee consistency among the models            
+            cfg = maybe_update_config_with_graph(cfg, graph_postdrift, interv_policy)
         
         else:
 

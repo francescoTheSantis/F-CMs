@@ -35,8 +35,8 @@ from torch.utils.data import (
     random_split,
 )
 
-# from src.causal_discovery.causal_discovery_block import causal_discovery
-# from src.completion.completion_block import complete_graph_with_llm
+from src.causal_discovery.causal_discovery_block import causal_discovery
+from src.completion.completion_block import complete_graph_with_llm
 
 def load_dataloaders(cfg: DictConfig, path: str, n_clients: int):
     combined_dataset = OmegaConf.select(cfg, 'combined_datasets.other_datasets', default=None)
@@ -583,12 +583,16 @@ def remove_cycles(graph, start_node):
 def alterate_graph(graph: pd.DataFrame, prob: float) -> pd.DataFrame:
     """
     Alter a local graph by randomly inverting, eliminating, or adding edges.
-    Preserves the constraint that the task node (assumed to be the last node) 
-    has at least one parent.
+    Alters exactly prob * total_number_of_possible_edges pairs.
+    For each pair of nodes (i,j) with i<j, operations are:
+    - If edge i->j exists: invert it (becomes j->i) or eliminate it
+    - If edge j->i exists: invert it (becomes i->j) or eliminate it
+    - If no edge exists: add i->j or add j->i
+    Preserves the constraint that the task node (last node) has at least one parent.
     
     Args:
         graph (pd.DataFrame): Adjacency matrix of the graph (directed edges)
-        prob (float): Probability of altering each edge (between 0 and 1)
+        prob (float): Fraction of edge pairs to alter (between 0 and 1)
     
     Returns:
         pd.DataFrame: Altered adjacency matrix
@@ -605,28 +609,56 @@ def alterate_graph(graph: pd.DataFrame, prob: float) -> pd.DataFrame:
     task_node_idx = n_nodes - 1
     task_node_name = graph.columns[task_node_idx]
     
-    # Get all possible edges (pairs of nodes)
-    for i in range(n_nodes):
-        for j in range(n_nodes):
-            if i == j:  # Skip self-loops
-                continue
-            
-            # Apply alteration with probability 'prob'
-            if random.random() < prob:
-                current_edge = adj_matrix[i, j]
+    # Collect all possible pairs of nodes (i,j) where i < j
+    all_pairs = [(i, j) for i in range(n_nodes) for j in range(i + 1, n_nodes)]
+    total_pairs = len(all_pairs)
+    
+    # Calculate how many pairs to alter
+    n_pairs_to_alter = int(prob * total_pairs)
+    
+    # Randomly select pairs to alter
+    if n_pairs_to_alter > 0:
+        pairs_to_alter = random.sample(all_pairs, n_pairs_to_alter)
+    else:
+        pairs_to_alter = []
+    
+    # Process selected pairs
+    for i, j in pairs_to_alter:
+        edge_i_j = adj_matrix[i, j]  # Edge from i to j
+        edge_j_i = adj_matrix[j, i]  # Edge from j to i
+        
+        # Determine current state and possible operations
+        if edge_i_j == 1 and edge_j_i == 0:
+            # Edge i->j exists: can invert (j->i) or eliminate (no edge)
+            operation = random.choice(['invert', 'eliminate'])
+            if operation == 'invert':
+                adj_matrix[i, j] = 0
+                adj_matrix[j, i] = 1
+            else:  # eliminate
+                adj_matrix[i, j] = 0
                 
-                # Randomly choose an operation: invert (0), eliminate (1), or add (2)
-                operation = random.choice([0, 1, 2])
+        elif edge_j_i == 1 and edge_i_j == 0:
+            # Edge j->i exists: can invert (i->j) or eliminate (no edge)
+            operation = random.choice(['invert', 'eliminate'])
+            if operation == 'invert':
+                adj_matrix[j, i] = 0
+                adj_matrix[i, j] = 1
+            else:  # eliminate
+                adj_matrix[j, i] = 0
                 
-                if operation == 0:  # Invert edge
-                    adj_matrix[i, j] = 1 - current_edge
-                elif operation == 1:  # Eliminate edge
-                    adj_matrix[i, j] = 0
-                else:  # Add edge
-                    adj_matrix[i, j] = 1
+        else:  # No edge exists (or both exist, which shouldn't happen in DAG)
+            # Add i->j or add j->i
+            operation = random.choice(['add_forward', 'add_backward'])
+            if operation == 'add_forward':
+                adj_matrix[i, j] = 1
+                adj_matrix[j, i] = 0
+            else:  # add_backward
+                adj_matrix[j, i] = 1
+                adj_matrix[i, j] = 0
     
     # Reconstruct the graph
     altered_graph = pd.DataFrame(adj_matrix, index=graph.index, columns=graph.columns, dtype=int)
+    altered_graph = remove_cycles(altered_graph, task_node_idx)
     
     # Ensure the task node has at least one parent
     task_column = altered_graph[task_node_name]
@@ -638,6 +670,7 @@ def alterate_graph(graph: pd.DataFrame, prob: float) -> pd.DataFrame:
         if concept_indices:
             random_parent = random.choice(concept_indices)
             altered_graph.iloc[random_parent, task_node_idx] = 1
+        altered_graph = remove_cycles(altered_graph, task_node_idx)
     
     return altered_graph
 
@@ -645,9 +678,13 @@ def aggregate_graph_proposals(
     client_selection: Optional[List[float]],
     local_graphs: List[pd.DataFrame],
     weights: Optional[List[float]] = None,
-    cfg: Optional[List[str]] = None,
+    config: Optional[List[str]] = None,
     task_node: Optional[str] = None,
 ):
+
+    # Use client selection to filter local_graphs and weights
+    if client_selection is None:
+        return None, None
     if not local_graphs:
         raise ValueError("local_graphs cannot be empty.")
     if weights is None:
@@ -655,9 +692,7 @@ def aggregate_graph_proposals(
     if len(weights) != len(local_graphs):
         raise ValueError("weights must match local_graphs length.")
 
-    # Use client selection to filter local_graphs and weights
-    if client_selection is None:
-        return None, None
+
     
     selected_graphs = []
     selected_weights = []
@@ -681,10 +716,9 @@ def aggregate_graph_proposals(
     
 
     # Ensure all nodes from local graphs are in the same order of cfg.engine.c_names_index
-    if cfg is not None and task_node is not None:
-        node_order = cfg.engine.c_names_index.keys()
+    if config is not None and task_node is not None:
+        node_order = list(config.engine.model.c_name_index.keys())
         node_order = [node for node in node_order if node in all_nodes]
-        node_order.append(task_node)
     else:
         node_order = sorted(all_nodes)
     
@@ -943,6 +977,8 @@ def check_graph(graph_levels, true_graph):
   
                     
 def get_intervention_policy(graph, y_index):
+    if graph is None:
+        return None, None  
     # get the levels of the graph
     torch_values_graph = torch.tensor(graph.values)
     levels = get_graph_levels(torch_values_graph, y_index)
@@ -2240,22 +2276,31 @@ def plot_training_metrics(history: Dict[str, Any], save_dir: str = ".") -> None:
     plt.close('all')
     print(f"Training plots saved to {save_dir}/")
 
-def build_local_graphs(client_ids, cfg, train_dataloaders, y_presence, y_name, graph = None, modality = 'from_true_graph'):
+def build_local_graphs(client_ids, cfg, train_dataloaders, y_name, graph = None):
+    
+    cfg_local = copy.deepcopy(cfg)
+    modality = cfg_local.learning.subgraphs.aggregate_graph.local_graphs
+    perc_alterations = cfg_local.learning.subgraphs.aggregate_graph.perc_clients_alterations
+    graph_alteration_prob = cfg_local.learning.subgraphs.aggregate_graph.graph_alteration_prob
+
+    # Determine which clients will have their graphs altered
+    n_clients = len(client_ids)
+    n_clients_to_alter = int(perc_alterations * n_clients)
+    clients_to_alter = set(random.sample(client_ids, n_clients_to_alter))
+
     local_graphs = []
     local_weights = []
     for client_id in client_ids:
         loader = train_dataloaders[client_id - 1]
-        node_names = cfg.engine.c_names_id[client_id]
-        #node_names = list(client_nodes)
-        if not node_names:
-            continue
-        if y_presence[client_id - 1]:
-            node_names.append(y_name)
+        node_names = cfg_local.engine.c_names_id[client_id]
+        node_names.append(y_name)
         if modality == 'from_true_graph':
             if graph is None:
                 raise ValueError("Graph must be provided when modality is 'from_true_graph'.")
             local_graph = graph.loc[node_names, node_names]
-            local_graph = alterate_graph(local_graph, cfg.subgraphs.graph_alteration_prob)
+            # Only alter graph if this client is selected
+            if client_id in clients_to_alter:
+                local_graph = alterate_graph(local_graph, graph_alteration_prob)
             local_graphs.append(local_graph)
         else:
             local_graph = causal_discovery(cfg, train_dataloaders[client_id - 1].dataset.c, true_graph)

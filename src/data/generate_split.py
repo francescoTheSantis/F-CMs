@@ -928,8 +928,8 @@ def generate_split(cfg, datasets, graph, y_index):
         # Get the subgraph for each client
         subgraphs, subgraphs_concept_names, subgraphs_with_add_nodes, add_nodes_values, add_nodes_names = get_subgraphs(graph, 
                                                                          y_index, 
-                                                                         min_number_subgraphs= cfg.learning.subgraphs.get('min_number_subgraphs', 3),
-                                                                         max_number_subgraphs = cfg.learning.subgraphs.get('max_number_subgraphs', 10),
+                                                                         min_number_subgraphs= cfg.learning.subgraphs.get('min_number_subgraphs', 2),
+                                                                         max_number_subgraphs = cfg.learning.subgraphs.get('max_number_subgraphs', cfg.learning.n_clients),
                                                                          modality=cfg.learning.subgraphs.modality,
                                                                          #concept_in_common=cfg.learning.subgraphs.concept_in_common,
                                                                          #task_in_common=cfg.learning.subgraphs.task_in_common,
