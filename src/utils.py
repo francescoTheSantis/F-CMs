@@ -35,6 +35,8 @@ from torch.utils.data import (
     random_split,
 )
 
+from causal_discovery.causal_discovery_block import causal_discovery
+from completion.completion_block import complete_graph_with_llm
 
 def load_dataloaders(cfg: DictConfig, path: str, n_clients: int):
     combined_dataset = OmegaConf.select(cfg, 'combined_datasets.other_datasets', default=None)
@@ -570,7 +572,66 @@ def remove_cycles(graph, start_node):
     return graph
 
 
-
+def alterate_graph(graph: pd.DataFrame, prob: float) -> pd.DataFrame:
+    """
+    Alter a local graph by randomly inverting, eliminating, or adding edges.
+    Preserves the constraint that the task node (assumed to be the last node) 
+    has at least one parent.
+    
+    Args:
+        graph (pd.DataFrame): Adjacency matrix of the graph (directed edges)
+        prob (float): Probability of altering each edge (between 0 and 1)
+    
+    Returns:
+        pd.DataFrame: Altered adjacency matrix
+    """
+    if prob <= 0 or prob > 1:
+        return graph.copy()
+    
+    # Work with a copy of the graph
+    altered_graph = graph.copy()
+    adj_matrix = altered_graph.values
+    n_nodes = len(graph)
+    
+    # Identify the task node (assumed to be the last node)
+    task_node_idx = n_nodes - 1
+    task_node_name = graph.columns[task_node_idx]
+    
+    # Get all possible edges (pairs of nodes)
+    for i in range(n_nodes):
+        for j in range(n_nodes):
+            if i == j:  # Skip self-loops
+                continue
+            
+            # Apply alteration with probability 'prob'
+            if random.random() < prob:
+                current_edge = adj_matrix[i, j]
+                
+                # Randomly choose an operation: invert (0), eliminate (1), or add (2)
+                operation = random.choice([0, 1, 2])
+                
+                if operation == 0:  # Invert edge
+                    adj_matrix[i, j] = 1 - current_edge
+                elif operation == 1:  # Eliminate edge
+                    adj_matrix[i, j] = 0
+                else:  # Add edge
+                    adj_matrix[i, j] = 1
+    
+    # Reconstruct the graph
+    altered_graph = pd.DataFrame(adj_matrix, index=graph.index, columns=graph.columns, dtype=int)
+    
+    # Ensure the task node has at least one parent
+    task_column = altered_graph[task_node_name]
+    num_parents = task_column.sum()
+    
+    if num_parents == 0:
+        # Randomly add an edge from a concept node to the task node
+        concept_indices = list(range(task_node_idx))
+        if concept_indices:
+            random_parent = random.choice(concept_indices)
+            altered_graph.iloc[random_parent, task_node_idx] = 1
+    
+    return altered_graph
 
 def aggregate_graph_proposals(
     client_selection: Optional[List[float]],
@@ -2171,7 +2232,7 @@ def plot_training_metrics(history: Dict[str, Any], save_dir: str = ".") -> None:
     plt.close('all')
     print(f"Training plots saved to {save_dir}/")
 
-def build_local_graphs(client_ids, cfg, train_dataloaders, y_presence, y_name, graph = None):
+def build_local_graphs(client_ids, cfg, train_dataloaders, y_presence, y_name, graph = None, modality = 'from_true_graph'):
     local_graphs = []
     local_weights = []
     for client_id in client_ids:
@@ -2182,9 +2243,18 @@ def build_local_graphs(client_ids, cfg, train_dataloaders, y_presence, y_name, g
             continue
         if y_presence[client_id - 1]:
             node_names.append(y_name)
-        if graph is not None:
-            local_graphs.append(graph.loc[node_names, node_names])
+        if modality == 'from_true_graph':
+            if graph is None:
+                raise ValueError("Graph must be provided when modality is 'from_true_graph'.")
+            local_graph = graph.loc[node_names, node_names]
+            local_graph = alterate_graph(local_graph, cfg.subgraphs.graph_alteration_prob)
+            local_graphs.append(local_graph)
         else:
-            raise NotImplementedError("Graph construction from data is not implemented.")
+            local_graph = causal_discovery(cfg, train_dataloaders[client_id - 1].dataset.c, true_graph)
+            local_graph = complete_graph_with_llm(cfg, local_graph, cfg.dataset.name)
+            local_graph, dataset = remove_problematic_edges(local_graph, train_dataloaders[client_id - 1].dataset)
+            local_graph = remove_cycles(local_graph, y_index=dataset.y_index)
+            local_graphs.append(local_graph)
+
         local_weights.append(len(loader.dataset))
     return local_graphs, local_weights

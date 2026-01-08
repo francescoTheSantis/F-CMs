@@ -5,6 +5,8 @@ import warnings
 import hydra # type: ignore
 import pickle
 from torch.utils.data import DataLoader
+from causal_discovery.causal_discovery_block import causal_discovery
+from completion.completion_block import complete_graph_with_llm
 from src.data.utils import static_graph_collate
 from pytorch_lightning.loggers import WandbLogger # type: ignore
 from src.trainer import Trainer
@@ -25,24 +27,16 @@ from src.utils import (
     maybe_freeze_parameters, 
     update_config_from_data_subgroup_clients,
     aggregate_graph_proposals,
-    model_is_causal,
     aggregate, 
     get_parameters, 
     set_parameters, 
     set_old_parameters,
     load_dataloaders,
     identify_subgraph,
-    score_blackbox_batch,
-    score_whitebox_batch,
     dataprocess_auditing,
-    evaluate_privacy,
     initialize_mia_results,
-    run_sia_attack,
-    flat_trainable_params_tensor,
     plot_training_metrics,
     compute_validation_loss,
-    shadow_mlp_scores_loader,
-    score_blackbox_loss_loader,
     filter_dataloaders_by_concepts,
     build_local_graphs,
     maybe_update_config_with_graph_subgroup_clients
@@ -57,10 +51,10 @@ from src.dra import (
 from src.data.dataset_block import get_dataset
 
 # causal discovery
-#from src.causal_discovery.causal_discovery_block import causal_discovery
+from src.causal_discovery.causal_discovery_block import causal_discovery
 
 # graph completion block
-#from src.completion.completion_block import complete_graph_with_llm
+from src.completion.completion_block import complete_graph_with_llm
 
 #from src.server import get_evaluate_fn
 #from src.strategy import CustomFedAvgWithModelSaving
@@ -123,7 +117,7 @@ def main(cfg: DictConfig) -> None:
     # instantiate the dataset, split into train, val, test
     # preprocess all of them and save the preprocessed dataset
     dataset, true_graph, dataset_directory = get_dataset(cfg.dataset, cfg.device, seed=cfg.seed)
-    graph = true_graph
+
 
     combined_dataset = OmegaConf.select(cfg, 'combined_datasets.other_datasets', default=None)
     if combined_dataset is not None:
@@ -165,6 +159,41 @@ def main(cfg: DictConfig) -> None:
     
     print(OmegaConf.to_yaml(cfg))
 
+    if cfg.dataset.load_graph:
+        with open(os.path.join(dataset_directory, "graph.pkl"), 'rb') as f:
+            graph = pickle.load(f)
+    else:
+        # graph construction
+        if len(dataset)>1:
+            raise NotImplementedError("Multiple datasets are not supported in the current version for graph construction.")
+        else:
+            if true_graph is None or cfg.dataset.load_true_graph == False:
+                # estimate causal graph with causal structural learning algorithms
+                predicted_graph = causal_discovery(cfg, dataset, true_graph)
+                #if true_graph is not None:
+                #    hamming = hamming_distance(true_graph, predicted_graph)
+                #    print('(after CD) structural hamming distance: ', hamming)    
+
+                # complete the causal graph with LLM and RAG
+                completed_graph = complete_graph_with_llm(cfg, predicted_graph, cfg.dataset.name)
+                #if true_graph is not None:
+                #    hamming = hamming_distance(true_graph, completed_graph)
+                #     print('(after LLM + RAG) structural hamming distance: ', hamming)
+                graph, dataset = remove_problematic_edges(graph, dataset)
+                graph = remove_cycles(graph, y_index)
+                graph = completed_graph
+            else:
+                graph = true_graph.copy()
+
+        with open(os.path.join(dataset_directory, "graph.pkl"), 'wb') as f:
+            pickle.dump(graph, f)
+    
+    # interv graph must be always the true graph if available
+    if true_graph is not None:
+       interv_graph = true_graph.copy()
+    else:
+       interv_graph = graph.copy()
+            
     # get the causal graph
     #if cfg.dataset.load_true_graph:
     #    graph = true_graph
@@ -216,7 +245,7 @@ def main(cfg: DictConfig) -> None:
     #}
 
     # use the graph to define an intervention policy at test time
-    interv_policy, ip_names = get_intervention_policy(graph, y_index)
+    interv_policy, ip_names = get_intervention_policy(interv_graph, y_index)
     print('intervention policy:', interv_policy)
     print('intervention policy names:', ip_names)
 
@@ -397,8 +426,14 @@ def main(cfg: DictConfig) -> None:
         cfg_postdrift = cfg
 
 
-        # determine whether to use graph aggregation
-        use_graph_agg = cfg.learning.subgraphs.get("aggregate_graph", False)
+        # determine whether to use graph aggregation, see if there is the dictionary "aggregate_graph" with local_graphs not none
+        use_graph_agg = False
+        if hasattr(cfg.learning.subgraphs, "aggregate_graph"):
+            agg_graph_cfg = cfg.learning.subgraphs.aggregate_graph
+            if agg_graph_cfg is not None and hasattr(agg_graph_cfg, "local_graphs"):
+                if agg_graph_cfg.local_graphs is not None and agg_graph_cfg.local_graphs != "none":
+                    use_graph_agg = True
+
         if use_graph_agg:
             
             # build local graphs for all clients
@@ -406,7 +441,7 @@ def main(cfg: DictConfig) -> None:
                                                              cfg, 
                                                              train_dataloaders, 
                                                              y_present, 
-                                                             datasets[0].y_info["names"][0], graph)
+                                                             datasets[0].y_info["names"][0], graph, modality = agg_graph_cfg.local_graphs)
 
             # aggregate graphs for pre-drift and post-drift clients
             # predrift
@@ -429,8 +464,8 @@ def main(cfg: DictConfig) -> None:
 
             interv_policy_predrift, ip_names_predrift = get_intervention_policy(graph_predrift, 
                                                                                 y_index = graph_predrift.columns.get_loc(datasets[0].y_info["names"][0]))
-            interv_policy_postdrift, ip_names_postdrift = get_intervention_policy(graph_postdrift,
-                                                                            y_index = graph_postdrift.columns.get_loc(datasets[0].y_info["names"][0]))
+            # intervention policy postidrft remains the one on the true graph to guarantee consistency among the models
+            interv_policy_postdrift = interv_policy
             
             cfg = maybe_update_config_with_graph_subgroup_clients(cfg, postdrift_clients, graph_postdrift,interv_policy_postdrift)
         
