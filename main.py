@@ -419,7 +419,7 @@ def main(cfg: DictConfig) -> None:
         # determine node order
         node_order = datasets[0].c_info["names"] + datasets[0].y_info["names"]
 
-        # update cfg.engine and cfg.engine.model for pre-drift clients, if predrft_clients is empty return None
+        # update c_name_index, c_names_id, c_names_ood dictionaries based on predrift clients
         cfg_predrift = update_config_from_data_subgroup_clients(cfg, 
                                                            predrift_clients, 
                                                            datasets, 
@@ -456,7 +456,7 @@ def main(cfg: DictConfig) -> None:
                 client_selection = predrift_clients,
                 local_graphs=local_graphs,
                 weights=local_weights,
-                config=cfg_predrift,
+                config_input=cfg_predrift,
                 task_node=datasets[0].y_info["names"][0]
             )
 
@@ -467,31 +467,40 @@ def main(cfg: DictConfig) -> None:
                 client_selection = postdrift_clients,
                 local_graphs=local_graphs,
                 weights=local_weights,
-                config=cfg_postdrift,
+                config_input=cfg_postdrift,
                 task_node=datasets[0].y_info["names"][0]
             )
 
             maybe_plot_graph(graph_postdrift, 'graph_postdrift')
 
+            # update intervention policy for pre-drift clients
             interv_policy_predrift, ip_names_predrift = get_intervention_policy(graph_predrift, 
                                                                                 y_index = graph_predrift.columns.get_loc(datasets[0].y_info["names"][0]) if graph_predrift is not None else None)
             # Note: intervention policy postidrft remains the one on the true graph to guarantee consistency among the models            
             cfg = maybe_update_config_with_graph(cfg, graph_postdrift, interv_policy)
         
         else:
-
+            # update graph and intervention policy based on predrift clients
             interv_policy_predrift, graph_predrift = update_intervention_policy_and_graph(
                     cfg_predrift, interv_policy, graph, datasets
             )
 
 
-
+        # update config predrift with the graph and intervention policy updated based on predrift clients
         cfg_predrift = maybe_update_config_with_graph_subgroup_clients(cfg_predrift, predrift_clients, graph_predrift,interv_policy_predrift, datasets)
         
   
         # Filter dataloaders for predrift clients
-        train_dataloaders, val_dataloaders = filter_dataloaders_by_concepts(
+        train_dataloaders = filter_dataloaders_by_concepts(
             train_dataloaders, 
+            cfg_predrift,
+            predrift_clients,
+            subgraphs_concept_names,
+            datasets[0].c_info['names'],
+            path
+        )
+
+        val_dataloaders = filter_dataloaders_by_concepts(
             val_dataloaders, 
             cfg_predrift,
             predrift_clients,
@@ -500,6 +509,16 @@ def main(cfg: DictConfig) -> None:
             path
         )
 
+        # if there is just the pre-drift phase, also filter test dataloaders
+        if cfg.learning.subgraphs.rnd_drift > n_rounds:
+            test_dataloaders = filter_dataloaders_by_concepts(
+                test_dataloaders, 
+                cfg_predrift,
+                predrift_clients,
+                subgraphs_concept_names,
+                datasets[0].c_info['names'],
+                path
+            )
 
         init_cfg = cfg_predrift if cfg_predrift is not None else cfg_postdrift
         init_engine = instantiate(init_cfg.engine)
@@ -716,14 +735,21 @@ def main(cfg: DictConfig) -> None:
             print(f"\033[92m✅ aggregated  val_loss={w_loss:.4f}\033[0m")
 
             # check improvement
-            if w_loss < best_loss and rnd > cfg.learning.subgraphs.rnd_drift:
-                best_loss = w_loss
-                best_round = rnd
-                no_improvement_count = 0
-                os.makedirs("checkpoints", exist_ok=True)
-                torch.save(local_engine.model.state_dict(), f"checkpoints/model_round_{rnd}.pth")
-            else:
-                no_improvement_count += 1
+            check_improvements = False
+            if cfg.learning.subgraphs.rnd_drift > n_rounds:
+                check_improvements = True
+            elif rnd > cfg.learning.subgraphs.rnd_drift:
+                check_improvements = True
+
+            if check_improvements:
+                if w_loss < best_loss:
+                    best_loss = w_loss
+                    best_round = rnd
+                    no_improvement_count = 0
+                    os.makedirs("checkpoints", exist_ok=True)
+                    torch.save(local_engine.model.state_dict(), f"checkpoints/model_round_{rnd}.pth")
+                else:
+                    no_improvement_count += 1
 
             # early stopping if no improvement after 'patience' rounds
             if no_improvement_count >= patience:

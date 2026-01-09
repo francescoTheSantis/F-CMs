@@ -232,10 +232,10 @@ def generate_base_subgraph(graph, task_indices, randomize = True, nodes_not_allo
 
             path_to_root = find_path_to_root(graph, start_node=i, randomize=randomize, nodes_not_allowed=nodes_not_allowed)
             # reverse path to have from root to node
-            path_to_root= path_to_root[::-1] if path_to_root is not None else []
+            path_to_root= path_to_root[::-1] if path_to_root is not None else None
             root = path_to_root[0] if path_to_root is not None else None
             if root is None:
-                raise ValueError(f"No root found for node {i}")
+                raise ValueError(f"I cannot find a path to root for node {i} that not include nodes_not_allowed {nodes_not_allowed}")
  
             #current_path = find_path_to_target_or_leaf(graph, start_node=root, end_node=i, randomize=True, nodes_not_allowed=nodes_not_allowed)
             #if path_to_root is not None:
@@ -492,6 +492,8 @@ def get_subgraphs(graph, y_index, min_number_subgraphs = 3, max_number_subgraphs
                             if node in y_index_graph:
                                 # Generate the subgraph directly from this root to y_index
                                 subgraph_from_missing_root = find_path_to_target_or_leaf(graph, start_node=node, end_node=y_index, randomize=True, nodes_not_allowed=add_nodes_values)
+                                if subgraph_from_missing_root is None:
+                                    raise ValueError(f"Could not generate subgraph from missing root {node} to task {y_index} that do not include additional nodes {add_nodes_values}.")
                                 break
                             else:
                                 curr_childrens = torch.where(torch_graph[node,:] == 1)[0].tolist()

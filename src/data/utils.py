@@ -47,6 +47,7 @@ def create_filtering_collate_fn(original_collate_fn, concept_indices_to_keep, cf
                 reorder_indices = [current_c_names.index(name) for name in c_name_index if name in current_c_names]
                 result['c'] = result['c'][:, reorder_indices]
         
+        result['graph'] = cfg_predrift.engine.model.graph.copy()  # Ensure graph is included from cfg_predrift
         return result
     
     return filtering_collate

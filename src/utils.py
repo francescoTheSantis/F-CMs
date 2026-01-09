@@ -438,14 +438,13 @@ def maybe_update_config_with_graph_subgroup_clients(cfg_predrift, predrift_clien
     return cfg_predrift
 
 
-def filter_dataloaders_by_concepts(train_dataloaders, val_dataloaders, cfg_predrift, subgroup_clients, subgraphs_concept_names, all_concept_names, cache_path):
+def filter_dataloaders_by_concepts(dataloaders, cfg_predrift, subgroup_clients, subgraphs_concept_names, all_concept_names, cache_path):
     """
     Filter dataloaders for clients in subgroup_clients to keep only concepts from their subgraphs.
     Uses a custom collate_fn to filter concepts dynamically during batch creation.
     
     Args:
-        train_dataloaders: list of training DataLoaders
-        val_dataloaders: list of validation DataLoaders
+        dataloaders: list of DataLoaders
         subgroup_clients: list of client IDs to filter (1-indexed)
         subgraphs_concept_names: dict mapping subgraph IDs to concept names
         all_concept_names: list of all concept names in original order
@@ -457,7 +456,7 @@ def filter_dataloaders_by_concepts(train_dataloaders, val_dataloaders, cfg_predr
     from src.data.utils import create_filtering_collate_fn
 
     if cfg_predrift is None or subgroup_clients is None:
-        return train_dataloaders, val_dataloaders
+        return dataloaders
     
     # Compute subgroup_concepts from subgraphs of clients in subgroup_clients
     subgroup_concepts = set()
@@ -476,13 +475,13 @@ def filter_dataloaders_by_concepts(train_dataloaders, val_dataloaders, cfg_predr
     for cid in subgroup_clients:
         loader_idx = cid - 1  # convert from 1-indexed to 0-indexed
         
-        if loader_idx >= len(train_dataloaders):
-            warnings.warn(f"Client {cid} not found in dataloaders (index {loader_idx} >= {len(train_dataloaders)})")
+        if loader_idx >= len(dataloaders):
+            warnings.warn(f"Client {cid} not found in dataloaders (index {loader_idx} >= {len(dataloaders)})")
             continue
             
         # Filter training dataloader by wrapping collate_fn
-        if train_dataloaders[loader_idx] is not None:
-            old_loader = train_dataloaders[loader_idx]
+        if dataloaders[loader_idx] is not None:
+            old_loader = dataloaders[loader_idx]
             dataset = old_loader.dataset
             
             # Create filtering collate function
@@ -490,7 +489,7 @@ def filter_dataloaders_by_concepts(train_dataloaders, val_dataloaders, cfg_predr
             filtering_collate_fn = create_filtering_collate_fn(original_collate_fn, concept_indices_to_keep, cfg_predrift, all_concept_names)
             
             # Create new DataLoader with filtering collate_fn
-            train_dataloaders[loader_idx] = DataLoader(
+            dataloaders[loader_idx] = DataLoader(
                 dataset,
                 batch_size=old_loader.batch_size,
                 shuffle=True if hasattr(old_loader.sampler, '_shuffle') else False,
@@ -499,28 +498,8 @@ def filter_dataloaders_by_concepts(train_dataloaders, val_dataloaders, cfg_predr
                 drop_last=old_loader.drop_last,
                 collate_fn=filtering_collate_fn
             )           
-        
-        # Filter validation dataloader by wrapping collate_fn
-        if val_dataloaders[loader_idx] is not None:
-            old_loader = val_dataloaders[loader_idx]
-            dataset = old_loader.dataset
-            
-            # Create filtering collate function
-            original_collate_fn = old_loader.collate_fn
-            filtering_collate_fn = create_filtering_collate_fn(original_collate_fn, concept_indices_to_keep, cfg_predrift, all_concept_names)
-            
-            # Create new DataLoader with filtering collate_fn
-            val_dataloaders[loader_idx] = DataLoader(
-                dataset,
-                batch_size=old_loader.batch_size,
-                shuffle=False,
-                num_workers=old_loader.num_workers,
-                pin_memory=old_loader.pin_memory,
-                drop_last=old_loader.drop_last,
-                collate_fn=filtering_collate_fn
-            )
-    
-    return train_dataloaders, val_dataloaders
+     
+    return dataloaders
 
 def get_parents(graph, i):
     # get the indices of the parents of the node i
@@ -678,10 +657,11 @@ def aggregate_graph_proposals(
     client_selection: Optional[List[float]],
     local_graphs: List[pd.DataFrame],
     weights: Optional[List[float]] = None,
-    config: Optional[List[str]] = None,
+    config_input: Optional[List[str]] = None,
     task_node: Optional[str] = None,
 ):
 
+    config = copy.deepcopy(config_input)
     # Use client selection to filter local_graphs and weights
     if client_selection is None:
         return None, None
@@ -1192,8 +1172,8 @@ def maybe_freeze_parameters(train_dataloader,  y_to_freeze, model, learning, fre
             print("Parameters frozen for concepts:", c_to_freeze)
 
             # check
-            for name, param in model.named_parameters():
-                print(f"{name}: requires_grad = {param.requires_grad}")
+            #for name, param in model.named_parameters():
+            #    print(f"{name}: requires_grad = {param.requires_grad}")
 
     return None
 
