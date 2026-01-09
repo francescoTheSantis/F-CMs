@@ -192,9 +192,9 @@ def main(cfg: DictConfig) -> None:
     
     # interv graph must be always the true graph if available
     if true_graph is not None:
-       interv_graph = true_graph
+       interv_graph = true_graph.copy()
     else:
-       interv_graph = graph
+       interv_graph = graph.copy()
             
     # get the causal graph
     #if cfg.dataset.load_true_graph:
@@ -372,12 +372,12 @@ def main(cfg: DictConfig) -> None:
             print(f"\033[94mClient {i}: {len(train_dataloaders[i].dataset)} samples\033[0m")
 
         # identify if y is present or not for the clients
-        y_present = []
-        for cid in range(len(val_dataloaders)):
-            if val_dataloaders[cid].dataset.y[0]!=-1:
-                y_present.append(True)
-            else:
-                y_present.append(False)
+        #y_present = []
+        #for cid in range(len(val_dataloaders)):
+        #    if val_dataloaders[cid].dataset.y[0]!=-1:
+        #        y_present.append(True)
+        #    else:
+        #         y_present.append(False)
        
         t0 = time.time()
         best_loss = float('inf')

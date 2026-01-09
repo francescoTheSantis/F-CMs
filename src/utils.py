@@ -1192,8 +1192,8 @@ def maybe_freeze_parameters(train_dataloader,  y_to_freeze, model, learning, fre
             print("Parameters frozen for concepts:", c_to_freeze)
 
             # check
-            #for name, param in model.named_parameters():
-            #    print(f"{name}: requires_grad = {param.requires_grad}")
+            for name, param in model.named_parameters():
+                print(f"{name}: requires_grad = {param.requires_grad}")
 
     return None
 
@@ -2278,6 +2278,7 @@ def plot_training_metrics(history: Dict[str, Any], save_dir: str = ".") -> None:
 
 def build_local_graphs(client_ids, cfg, train_dataloaders, y_name, graph = None):
     
+    global_graph = graph.copy() if graph is not None else None
     cfg_local = copy.deepcopy(cfg)
     modality = cfg_local.learning.subgraphs.aggregate_graph.local_graphs
     perc_alterations = cfg_local.learning.subgraphs.aggregate_graph.perc_clients_alterations
@@ -2295,9 +2296,9 @@ def build_local_graphs(client_ids, cfg, train_dataloaders, y_name, graph = None)
         node_names = cfg_local.engine.c_names_id[client_id]
         node_names.append(y_name)
         if modality == 'from_true_graph':
-            if graph is None:
+            if global_graph is None:
                 raise ValueError("Graph must be provided when modality is 'from_true_graph'.")
-            local_graph = graph.loc[node_names, node_names]
+            local_graph = global_graph.loc[node_names, node_names]
             # Only alter graph if this client is selected
             if client_id in clients_to_alter:
                 local_graph = alterate_graph(local_graph, graph_alteration_prob)
