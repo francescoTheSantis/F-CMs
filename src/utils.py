@@ -402,7 +402,7 @@ def update_config_from_data_subgroup_clients(cfg, subgroup_clients, datasets, su
        
     return cfg_predrift
 
-def maybe_update_config_with_graph_subgroup_clients(cfg_predrift, predrift_clients, graph_predrift,policy_predrift, datasets):
+def maybe_update_config_with_graph_subgroup_clients(cfg_predrift, predrift_clients, graph_predrift,policy_predrift, interv_policy_predrift_constructed, datasets):
          
     if predrift_clients is None:
         return cfg_predrift
@@ -420,20 +420,21 @@ def maybe_update_config_with_graph_subgroup_clients(cfg_predrift, predrift_clien
             graph_labels = list(cfg_predrift.model.c_name_index.keys())
 
     # replace in cfg_predrift.test_interv_policy the indices with respect to the current graph
-    if cfg_predrift.engine.get('test_interv_policy', None) is not None:
-        name_to_index = cfg_predrift.model.c_name_index
-        original_index_to_name = {i: name for i, name in enumerate(datasets[0].c_info['names'])}
-        updated_policy = []
-        for level in cfg_predrift.engine.test_interv_policy:
-            level_policy = []
-            for node in level:
-                node_name = original_index_to_name[node]
-                if graph_labels is None or node_name in graph_labels:
-                    level_policy.append(name_to_index[node_name])
-            if len(level_policy) > 0:
-                 updated_policy.append(level_policy)
-        with open_dict(cfg_predrift):
-            cfg_predrift.engine.test_interv_policy = updated_policy
+    if not interv_policy_predrift_constructed:
+        if cfg_predrift.engine.get('test_interv_policy', None) is not None:
+            name_to_index = cfg_predrift.model.c_name_index
+            original_index_to_name = {i: name for i, name in enumerate(datasets[0].c_info['names'])}
+            updated_policy = []
+            for level in cfg_predrift.engine.test_interv_policy:
+                level_policy = []
+                for node in level:
+                    node_name = original_index_to_name[node]
+                    if graph_labels is None or node_name in graph_labels:
+                        level_policy.append(name_to_index[node_name])
+                if len(level_policy) > 0:
+                    updated_policy.append(level_policy)
+            with open_dict(cfg_predrift):
+                cfg_predrift.engine.test_interv_policy = updated_policy
 
     return cfg_predrift
 
@@ -510,53 +511,85 @@ def get_roots(graph):
     return graph.sum(dim=0) == 0
 
 
-def dfs(node, adj_matrix, visited, stack, remove):
+def has_cycle_dfs(node, adj_matrix, visited, in_stack):
     visited[node] = True
-    stack[node] = True
+    in_stack[node] = True
+    
     for neighbor in range(len(adj_matrix)):
-        if adj_matrix[neighbor][node] == 1:
-            if not visited[neighbor]:
-                if dfs(neighbor, adj_matrix, visited, stack, remove):
-                    return True
-            elif stack[neighbor]:
-                if remove:
-                    adj_matrix[neighbor][node] = 0
-                    print(f'The cycle has been broken by removing the edge: {neighbor} -> {node}')
+        if adj_matrix[node][neighbor] == 1:
+            if in_stack[neighbor]:
                 return True
-    stack[node] = False
+            if not visited[neighbor]:
+                if has_cycle_dfs(neighbor, adj_matrix, visited, in_stack):
+                    return True
+    
+    in_stack[node] = False
     return False
 
 
 def contains_cycle(adj_matrix):
-    visited = [False] * len(adj_matrix)
-    stack = [False] * len(adj_matrix)
-    for node in range(len(adj_matrix)):
+    n = len(adj_matrix)
+    visited = [False] * n
+    in_stack = [False] * n
+    
+    for node in range(n):
         if not visited[node]:
-            if dfs(node, adj_matrix, visited, stack, False):
+            if has_cycle_dfs(node, adj_matrix, visited, in_stack):
+                return True
+    return False
+
+
+def find_and_remove_one_cycle(adj_matrix):
+    n = len(adj_matrix)
+    visited = [False] * n
+    in_stack = [False] * n
+    
+    def dfs(node):
+        visited[node] = True
+        in_stack[node] = True
+        
+        for neighbor in range(n):
+            if adj_matrix[node][neighbor] == 1:
+                if in_stack[neighbor]:
+                    # Found cycle, remove this edge
+                    adj_matrix[node][neighbor] = 0
+                    print(f'Removed edge: {node} -> {neighbor}')
+                    return True
+                if not visited[neighbor]:
+                    if dfs(neighbor):
+                        return True
+        
+        in_stack[node] = False
+        return False
+    
+    for node in range(n):
+        if not visited[node]:
+            if dfs(node):
                 return True
     return False
 
 
 def remove_cycles(graph, start_node):
-    """
-    This function removes the cycles in the graph by removing the last visited edges
-    before the cycle is detected
-    Args:
-        graph (Dataframe): the adjacency matrix of the graph
-        start_node: the index of the task node
-    Returns:
-        graph (Dataframe): the adjacency matrix of the graph without cycles
-    """
-    adj_matrix = graph.values
-    if contains_cycle(adj_matrix):
-        while contains_cycle(adj_matrix):
-            visited = [False] * len(adj_matrix)
-            stack = [False] * len(adj_matrix)
-            dfs(start_node, adj_matrix, visited, stack, True)
-    else:
-        print('there are no cycles in the graph, therefore the graph is left untouched')
-    graph = pd.DataFrame(adj_matrix, index=graph.index, columns=graph.columns, dtype=int)
-    return graph
+    adj_matrix = graph.values.copy()
+    n = len(adj_matrix)
+    
+    if not contains_cycle(adj_matrix):
+        print('There are no cycles in the graph, therefore the graph is left untouched')
+        return graph
+    
+    max_iterations = n * n
+    iteration = 0
+    
+    while contains_cycle(adj_matrix) and iteration < max_iterations:
+        if not find_and_remove_one_cycle(adj_matrix):
+            break
+        iteration += 1
+    
+    if iteration >= max_iterations:
+        print(f'Warning: Reached maximum iterations ({max_iterations})')
+    
+    print('Cycles removed from the graph')
+    return pd.DataFrame(adj_matrix, index=graph.index, columns=graph.columns, dtype=int)
 
 
 def alterate_graph(graph: pd.DataFrame, prob: float) -> pd.DataFrame:
@@ -637,7 +670,6 @@ def alterate_graph(graph: pd.DataFrame, prob: float) -> pd.DataFrame:
     
     # Reconstruct the graph
     altered_graph = pd.DataFrame(adj_matrix, index=graph.index, columns=graph.columns, dtype=int)
-    altered_graph = remove_cycles(altered_graph, task_node_idx)
     
     # Ensure the task node has at least one parent
     task_column = altered_graph[task_node_name]
@@ -649,7 +681,7 @@ def alterate_graph(graph: pd.DataFrame, prob: float) -> pd.DataFrame:
         if concept_indices:
             random_parent = random.choice(concept_indices)
             altered_graph.iloc[random_parent, task_node_idx] = 1
-        altered_graph = remove_cycles(altered_graph, task_node_idx)
+    altered_graph = remove_cycles(altered_graph, task_node_idx)
     
     return altered_graph
 

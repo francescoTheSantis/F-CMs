@@ -476,6 +476,8 @@ def main(cfg: DictConfig) -> None:
             # update intervention policy for pre-drift clients
             interv_policy_predrift, ip_names_predrift = get_intervention_policy(graph_predrift, 
                                                                                 y_index = graph_predrift.columns.get_loc(datasets[0].y_info["names"][0]) if graph_predrift is not None else None)
+            # take in consideration that the intervention policy is already constructed relative to the graph_predrift with the node indices referred to it
+            interv_policy_predrift_constructed = True
             # Note: intervention policy postidrft remains the one on the true graph to guarantee consistency among the models            
             cfg = maybe_update_config_with_graph(cfg, graph_postdrift, interv_policy)
         
@@ -484,10 +486,12 @@ def main(cfg: DictConfig) -> None:
             interv_policy_predrift, graph_predrift = update_intervention_policy_and_graph(
                     cfg_predrift, interv_policy, graph, datasets
             )
+            # the intervention policy is not constructed from the graph_predrift, it is just a selection of the one relative to the global graph -> the node indices are still related to the global graph
+            interv_policy_predrift_constructed = False
 
 
         # update config predrift with the graph and intervention policy updated based on predrift clients
-        cfg_predrift = maybe_update_config_with_graph_subgroup_clients(cfg_predrift, predrift_clients, graph_predrift,interv_policy_predrift, datasets)
+        cfg_predrift = maybe_update_config_with_graph_subgroup_clients(cfg_predrift, predrift_clients, graph_predrift,interv_policy_predrift,  interv_policy_predrift_constructed, datasets)
         
   
         # Filter dataloaders for predrift clients

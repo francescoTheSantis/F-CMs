@@ -235,7 +235,7 @@ def generate_base_subgraph(graph, task_indices, randomize = True, nodes_not_allo
             path_to_root= path_to_root[::-1] if path_to_root is not None else None
             root = path_to_root[0] if path_to_root is not None else None
             if root is None:
-                raise ValueError(f"I cannot find a path to root for node {i} that not include nodes_not_allowed {nodes_not_allowed}")
+                raise ValueError(f"I cannot find a path to root for node {graph.columns[i]} that not include nodes_not_allowed {list(graph.columns[nodes_not_allowed])}")
  
             #current_path = find_path_to_target_or_leaf(graph, start_node=root, end_node=i, randomize=True, nodes_not_allowed=nodes_not_allowed)
             #if path_to_root is not None:
@@ -440,7 +440,7 @@ def get_subgraphs(graph, y_index, min_number_subgraphs = 3, max_number_subgraphs
 
 
     ### STEP 1: GENERATE SUBGRAPHS UNTIL COVERING ALL NODES IN THE GRAPH AND COVERING ALL EDGES AND THE NUMBER OF SUBGRAPHS IS AT LEAST min_number_subgraphs ###
-    max_retries = 10
+    max_retries = 5
     retry_count = 0
     hist_add_nodes_values = []
 
@@ -493,7 +493,7 @@ def get_subgraphs(graph, y_index, min_number_subgraphs = 3, max_number_subgraphs
                                 # Generate the subgraph directly from this root to y_index
                                 subgraph_from_missing_root = find_path_to_target_or_leaf(graph, start_node=node, end_node=y_index, randomize=True, nodes_not_allowed=add_nodes_values)
                                 if subgraph_from_missing_root is None:
-                                    raise ValueError(f"Could not generate subgraph from missing root {node} to task {y_index} that do not include additional nodes {add_nodes_values}.")
+                                    raise ValueError(f"Could not generate subgraph from root {graph.columns[node]} to task {graph.columns[y_index]} that do not include additional nodes {list(graph.columns[add_nodes_values])}.")
                                 break
                             else:
                                 curr_childrens = torch.where(torch_graph[node,:] == 1)[0].tolist()
@@ -620,7 +620,7 @@ def get_subgraphs(graph, y_index, min_number_subgraphs = 3, max_number_subgraphs
                         graph, torch_graph, y_index_graph, y_index,
                         add_nodes_modality, add_nodes_number, old_add_nodes_values=hist_add_nodes_values
                     )
-                    print(f"Restarted with new add_nodes_values: {add_nodes_values}")
+                    print(f"Restarted with new add_nodes_values: {list(graph.columns[add_nodes_values])}")
                 
                 continue
 
@@ -696,11 +696,14 @@ def get_subgraphs(graph, y_index, min_number_subgraphs = 3, max_number_subgraphs
             if not has_with or not has_without:
                 raise ValueError("After merging, subgraphs do not contain both types (with and without additional nodes) as required.")
 
-    
+    print("=== Subgraph generation completed ===")
+    print("Summary:")
     print(f"Final: {len(subgraphs)} subgraphs")
-    print(f"With additional nodes: {sum(subgraphs_with_add_nodes)}")
-    print(f"Without additional nodes: {sum(not flag for flag in subgraphs_with_add_nodes)}")
-    print(f"Parent-child pairs covered: {len(couples_covered)}/{len(couples_parents_children)}")
+    if len(add_nodes_values) > 0:
+        print("Additional nodes used:", [graph.columns[node_idx] for node_idx in add_nodes_values])
+        print(f"Subgraphs with additional nodes: {sum(subgraphs_with_add_nodes)}")
+        print(f"Subgraphs without additional nodes: {sum(not flag for flag in subgraphs_with_add_nodes)}")
+    #print(f"Parent-child pairs covered: {len(couples_covered)}/{len(couples_parents_children)}")
 
     # return a dictionary with soubgroups as keys and the nodes as values
     subgraphs = {f'subgraph_{i+1}': s for i, s in enumerate(subgraphs)}
@@ -787,8 +790,9 @@ def get_subgraphs(graph, y_index, min_number_subgraphs = 3, max_number_subgraphs
                 raise ValueError(f"Subgraph {key} is marked as NOT having additional nodes but contains {found_add_nodes}")
         
         print(f"✓ Additional nodes validation passed:")
-        print(f"  - {sum(subgraphs_with_add_nodes)} subgraphs with additional nodes contain them")
-        print(f"  - {sum(not flag for flag in subgraphs_with_add_nodes)} subgraphs without additional nodes don't contain them")
+        if len(add_nodes_values) > 0:
+            print(f"  - {sum(subgraphs_with_add_nodes)} subgraphs with additional nodes contain them")
+            print(f"  - {sum(not flag for flag in subgraphs_with_add_nodes)} subgraphs without additional nodes don't contain them")
     
     print("=== All validation checks passed ===\n")
 
