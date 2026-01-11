@@ -2316,8 +2316,42 @@ def build_local_graphs(client_ids, cfg, train_dataloaders, y_name, graph = None)
                 local_graph = alterate_graph(local_graph, graph_alteration_prob)
             local_graphs.append(local_graph)
         else:
-            local_graph = causal_discovery(cfg, train_dataloaders[client_id - 1].dataset.c, true_graph)
-            local_graph = complete_graph_with_llm(cfg, local_graph, cfg.dataset.name)
+            # select correct columns from train_dataloader
+            cfg_local = copy.deepcopy(cfg)
+            concepts_to_use = cfg_local.engine.c_names_id[client_id]
+            concepts_indices = [cfg_local.engine.model.c_name_index[c] for c in concepts_to_use]
+            dataloader = train_dataloaders[client_id - 1]
+            c_list, y_list = [], []
+            for batch in dataloader:
+                c_list.append(batch["c"][:, concepts_indices])
+                y_list.append(batch["y"])
+
+            c_data = torch.cat(c_list, dim=0).numpy()
+            y_data = torch.cat(y_list, dim=0).numpy()
+            
+            # Ensure y_data has correct shape
+            if y_data.ndim == 1:
+                y_data = y_data.reshape(-1, 1)
+            
+            # Concatenate concepts and target
+            true_graph = None
+
+            # Create a dataset-like object with the correct structure for causal_discovery
+            class LocalDataset:
+                def __init__(self, c_data, y_data, c_names, y_name):
+                    # Create a simple object to hold data
+                    class Data:
+                        pass
+                    self.data = {'train': Data()}
+                    self.data['train'].c = c_data
+                    self.data['train'].y = y_data
+                    self.c_info = {'names': c_names}
+                    self.y_info = {'names': [y_name]}
+            
+            local_dataset = LocalDataset(c_data, y_data, concepts_to_use, y_name)
+            
+            local_graph = causal_discovery(cfg, local_dataset, true_graph, save_file_name='predicted_graph_local_client_' + str(client_id))
+            local_graph = complete_graph_with_llm(cfg_local, local_graph, cfg_local.dataset.name)
             local_graph, dataset = remove_problematic_edges(local_graph, train_dataloaders[client_id - 1].dataset)
             local_graph = remove_cycles(local_graph, y_index=dataset.y_index)
             local_graphs.append(local_graph)

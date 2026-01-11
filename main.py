@@ -23,6 +23,7 @@ import warnings
 import time
 
 from src.utils import (
+    model_is_causal,
     seed_everything, 
     maybe_freeze_parameters, 
     update_config_from_data_subgroup_clients,
@@ -430,7 +431,7 @@ def main(cfg: DictConfig) -> None:
 
         # determine whether to use graph aggregation, see if there is the dictionary "aggregate_graph" with local_graphs not none
         use_graph_agg = False
-        if hasattr(cfg.learning.subgraphs, "aggregate_graph"):
+        if hasattr(cfg.learning.subgraphs, "aggregate_graph") and model_is_causal(cfg.model):
             agg_graph_cfg = cfg.learning.subgraphs.aggregate_graph
             if agg_graph_cfg is not None and hasattr(agg_graph_cfg, "local_graphs"):
                 if agg_graph_cfg.local_graphs is not None and agg_graph_cfg.local_graphs != "none":
@@ -493,7 +494,7 @@ def main(cfg: DictConfig) -> None:
         # update config predrift with the graph and intervention policy updated based on predrift clients
         cfg_predrift = maybe_update_config_with_graph_subgroup_clients(cfg_predrift, predrift_clients, graph_predrift,interv_policy_predrift,  interv_policy_predrift_constructed, datasets)
         
-  
+
         # Filter dataloaders for predrift clients
         train_dataloaders = filter_dataloaders_by_concepts(
             train_dataloaders, 
@@ -524,6 +525,8 @@ def main(cfg: DictConfig) -> None:
                 path
             )
 
+
+        # start federated learning rounds
         init_cfg = cfg_predrift if cfg_predrift is not None else cfg_postdrift
         init_engine = instantiate(init_cfg.engine)
         global_params = get_parameters(init_engine)

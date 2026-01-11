@@ -24,7 +24,7 @@ def process_data_for_causal_discovery(data, label_names, causal_discovery_librar
     if causal_discovery_library=="causallearn":
         if not isinstance(data.c, torch.Tensor):
             data.c = torch.tensor(data.c, dtype=torch.long)
-            data.y = torch.tensor(data.c, dtype=torch.long)
+            data.y = torch.tensor(data.y, dtype=torch.long)
         processed_data = torch.cat((data.c, data.y), dim=1)
 
     #elif model_name == "pc":
@@ -138,7 +138,7 @@ def postprocess_graph(predicted_graph,
     adj = pd.DataFrame(G.numpy(), index=label_names, columns=label_names, dtype=int)  
     return adj
 
-def causal_discovery(cfg, dataset, true_graph=None):
+def causal_discovery(cfg, dataset, true_graph=None, save_file_name=None):
     if cfg.causal_discovery is not None:
         if cfg.causal_discovery.name == 'llm':
             labels_names = dataset.c_info['names'] + dataset.y_info['names']
@@ -170,7 +170,7 @@ def causal_discovery(cfg, dataset, true_graph=None):
                                                 cfg.causal_discovery.get('type'),
                                                 cfg.causal_discovery.get('causal_discovery_library'))
 
-            maybe_plot_graph(predicted_graph, 'predicted_graph')
+            maybe_plot_graph(predicted_graph, save_file_name)
             print('done')
         return predicted_graph
     else:
