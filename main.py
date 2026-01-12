@@ -259,6 +259,7 @@ def main(cfg: DictConfig) -> None:
     if cfg.learning.mode == "centralized":
         subgraphs, subgraphs_concept_names, subgraphs_with_add_nodes, add_nodes_values, add_nodes_names = None, None, None, None, None
     else:
+        seed_everything(cfg.get("seed"))
         subgraphs, subgraphs_concept_names, subgraphs_with_add_nodes, add_nodes_values, add_nodes_names = generate_split(cfg, datasets, graph, y_index)
         
         ## Save subgraphs_concept_names, add_nodes_values, and subgraphs_with_add_nodes
@@ -742,8 +743,7 @@ def main(cfg: DictConfig) -> None:
 
             # log aggregated val metrics (weighted)
             w_loss = sum(l * s for l, s in zip(val_losses, sizes)) / sum(sizes)
-            val_accs = np.asarray(val_accs, dtype=float)
-            sizes = np.asarray(sizes, dtype=float)
+            val_accs = np.asarray(val_accs, dtype=float); sizes = np.asarray(sizes, dtype=float)
             mask = ~np.isnan(val_accs)          # keep only clients that actually have an accuracy
             if mask.any():
                 y_acc = (val_accs[mask] * sizes[mask]).sum() / sizes[mask].sum()
