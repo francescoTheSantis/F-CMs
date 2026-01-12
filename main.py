@@ -60,7 +60,7 @@ from src.utils import clean_empty_configs, update_config_from_data, maybe_update
 from src.data.utils import update_datasets, construct_combined_true_graph
 from src.plots import maybe_plot_graph
 from src.my_hydra import parse_hyperparams
-from src.data.generate_split import generate_split, get_subgraph_dict
+from src.data.generate_split import generate_split, get_subgraph_dict, generate_split_with_fallback
 from collections import OrderedDict
 from typing import List, Dict, Tuple
 
@@ -259,8 +259,16 @@ def main(cfg: DictConfig) -> None:
     if cfg.learning.mode == "centralized":
         subgraphs, subgraphs_concept_names, subgraphs_with_add_nodes, add_nodes_values, add_nodes_names = None, None, None, None, None
     else:
-        seed_everything(cfg.get("seed"))
-        subgraphs, subgraphs_concept_names, subgraphs_with_add_nodes, add_nodes_values, add_nodes_names = generate_split(cfg, datasets, graph, y_index)
+        # seed_everything(cfg.get("seed"))
+        # subgraphs, subgraphs_concept_names, subgraphs_with_add_nodes, add_nodes_values, add_nodes_names = generate_split(cfg, datasets, graph, y_index)
+        subgraphs, subgraphs_concept_names, subgraphs_with_add_nodes, add_nodes_values, add_nodes_names = \
+            generate_split_with_fallback(
+                cfg, datasets, graph, y_index,
+                seed_everything_fn=seed_everything,  # <-- pass your seeding function
+                step=100,
+                max_tries=20,
+            )        
+        
         
         ## Save subgraphs_concept_names, add_nodes_values, and subgraphs_with_add_nodes
         #model_name = cfg.model._target_.split('.')[-1] if hasattr(cfg.model, '_target_') else 'model'

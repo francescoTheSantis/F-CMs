@@ -2,6 +2,7 @@ import torch
 import numpy as np
 from env import CACHE
 from torch.utils.data import DataLoader
+from typing import Callable, Any, Tuple, Optional
 from torch.utils.data import Dataset
 from src.data.utils import static_graph_collate
 import pickle
@@ -1155,3 +1156,48 @@ class CustomDataset(Dataset):
             'y': self.y[idx],
             'graph': self.graph
         }
+
+from typing import Tuple, Any, Optional, Callable
+
+def generate_split_with_fallback(
+    cfg: dict,
+    datasets: Any,
+    graph: Any,
+    y_index: Any,
+    *,
+    seed_key: str = "seed",
+    step: int = 100,
+    max_tries: int = 20,
+    seed_everything_fn: Optional[Callable[[int], None]] = None,
+) -> Tuple[Any, Any, Any, Any, Any]:
+    """
+    Calls `generate_split(cfg, datasets, graph, y_index)` with seed fallbacks.
+    On each failure, tries seed = base_seed + k*step for k=0..max_tries-1.
+    Always restores the original seed in cfg and reseeds it (if seed_everything_fn is given).
+    """
+    original_seed = cfg.get(seed_key, 0)
+    base_seed = int(original_seed) if original_seed is not None else 0
+
+    last_err: Optional[Exception] = None
+    try:
+        for k in range(max_tries):
+            trial_seed = base_seed + k * step
+            try:
+                cfg[seed_key] = trial_seed
+                if seed_everything_fn is not None:
+                    seed_everything_fn(trial_seed)
+
+                return generate_split(cfg, datasets, graph, y_index)
+
+            except Exception as e:
+                last_err = e
+
+        raise RuntimeError(
+            f"generate_split failed after {max_tries} attempts "
+            f"(base_seed={base_seed}, step={step}, key='{seed_key}')."
+        ) from last_err
+
+    finally:
+        cfg[seed_key] = original_seed
+        if seed_everything_fn is not None:
+            seed_everything_fn(int(original_seed) if original_seed is not None else 0)
