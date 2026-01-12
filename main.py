@@ -743,6 +743,7 @@ def main(cfg: DictConfig) -> None:
             # log aggregated val metrics (weighted)
             w_loss = sum(l * s for l, s in zip(val_losses, sizes)) / sum(sizes)
             val_accs = np.asarray(val_accs, dtype=float)
+            sizes = np.asarray(sizes, dtype=float)
             mask = ~np.isnan(val_accs)          # keep only clients that actually have an accuracy
             if mask.any():
                 y_acc = (val_accs[mask] * sizes[mask]).sum() / sizes[mask].sum()
