@@ -440,7 +440,7 @@ def get_subgraphs(graph, y_index, min_number_subgraphs = 3, max_number_subgraphs
 
 
     ### STEP 1: GENERATE SUBGRAPHS UNTIL COVERING ALL NODES IN THE GRAPH AND COVERING ALL EDGES AND THE NUMBER OF SUBGRAPHS IS AT LEAST min_number_subgraphs ###
-    max_retries = 5
+    max_retries = 3
     retry_count = 0
     hist_add_nodes_values = []
 
@@ -462,7 +462,7 @@ def get_subgraphs(graph, y_index, min_number_subgraphs = 3, max_number_subgraphs
     while_iterations = 0
     while check_condition():
         while_iterations = while_iterations +1
-        if while_iterations > 100:
+        if while_iterations > 500:
             raise ValueError("Exceeded maximum iterations while generating subgraphs. Please revise additional nodes logic or the number of subgraphs to generate.")
         
         try:
@@ -475,6 +475,7 @@ def get_subgraphs(graph, y_index, min_number_subgraphs = 3, max_number_subgraphs
                 # Generate task indices
 
                 # Randomly include some node chosen in the whole graph (excluding roots and nodes in y_index) in such a way to be able to cover the whole graph
+                subgraph_from_missing_root_none = False
                 task_indices = []
                 remaining_nodes = [node for node in nodes_to_cover if node not in roots and node not in y_index_graph and node not in nodes_covered]
                 if len(remaining_nodes) != 0:
@@ -483,6 +484,7 @@ def get_subgraphs(graph, y_index, min_number_subgraphs = 3, max_number_subgraphs
 
                 # Add remaining roots if any
                 if remaining_nodes == []:
+                    
                     # there can still be missing nodes that are roots not in y_index_graph
                     missing_roots = [node for node in nodes_to_cover if (node not in nodes_covered) and (node in roots)]
                     if missing_roots !=[]:
@@ -493,7 +495,12 @@ def get_subgraphs(graph, y_index, min_number_subgraphs = 3, max_number_subgraphs
                                 # Generate the subgraph directly from this root to y_index
                                 subgraph_from_missing_root = find_path_to_target_or_leaf(graph, start_node=node, end_node=y_index, randomize=True, nodes_not_allowed=add_nodes_values)
                                 if subgraph_from_missing_root is None:
-                                    raise ValueError(f"Could not generate subgraph from root {graph.columns[node]} to task {graph.columns[y_index]} that do not include additional nodes {list(graph.columns[add_nodes_values])}.")
+                                    if retry_count == max_retries:
+                                        subgraph_from_missing_root_none = True
+                                        subgraph_from_missing_root = find_path_to_target_or_leaf(graph, start_node=node, end_node=y_index, randomize=True)
+                                        print(f" Warning: There are problems in generating subgraphs from root {graph.columns[node]} to task {graph.columns[y_index]} that do not include additional nodes {list(graph.columns[add_nodes_values])}. I will add a subgraph with additional nodes.")
+                                    else:
+                                        raise ValueError(f"Could not generate subgraph from root {graph.columns[node]} to task {graph.columns[y_index]} that do not include additional nodes {list(graph.columns[add_nodes_values])}.")
                                 break
                             else:
                                 curr_childrens = torch.where(torch_graph[node,:] == 1)[0].tolist()
@@ -536,7 +543,7 @@ def get_subgraphs(graph, y_index, min_number_subgraphs = 3, max_number_subgraphs
 
                 else:
                     # Complex case: include or exclude additional nodes
-                    if n_subgraphs_generated % 2 == 0 and n_subgraphs_add_nodes_generated < n_subgraphs_add_nodes_to_generate:
+                    if (n_subgraphs_generated % 2 == 0 and n_subgraphs_add_nodes_generated < n_subgraphs_add_nodes_to_generate) or subgraph_from_missing_root_none:
                         # Include additional nodes
                         if subgraph_from_missing_root is not None:
                             subgraph = subgraph_from_missing_root
@@ -546,7 +553,7 @@ def get_subgraphs(graph, y_index, min_number_subgraphs = 3, max_number_subgraphs
                         has_add_nodes = True
                     
                     else:
-                        # NOTE: PAY ATTENTION WITH SUBGRAOHS FROM MISSING ROOT
+                        # NOTE: PAY ATTENTION WITH SUBGRAPHS FROM MISSING ROOT
                         # Exclude additional nodes
                         if subgraph_from_missing_root is not None:
                             subgraph = subgraph_from_missing_root
@@ -555,6 +562,8 @@ def get_subgraphs(graph, y_index, min_number_subgraphs = 3, max_number_subgraphs
                                                             nodes_not_allowed=add_nodes_values)
                         has_add_nodes = False
 
+            if while_iterations > 100:
+                raise ValueError("Exceeded maximum iterations. I will change the add_nodes_values and restart subgraph generation.")
       
             # Check for duplicate subgraphs
             if set(subgraph) in map(set, subgraphs):
@@ -590,12 +599,13 @@ def get_subgraphs(graph, y_index, min_number_subgraphs = 3, max_number_subgraphs
             retry_count = 0  # Reset on success
             subgraph_from_missing_root = None
 
+
         except (ValueError, IndexError, AttributeError) as e:
             retry_count += 1
             hist_add_nodes_values.append(add_nodes_values[0])
             print(f"Error generating subgraph (attempt {retry_count}/{max_retries}): {e}")
             
-            if retry_count >= max_retries:
+            if retry_count > max_retries:
                 print(f"Max retries reached. Restarting subgraph generation from the beginning.")
                 
                 # Re-initialize all variables
@@ -621,6 +631,7 @@ def get_subgraphs(graph, y_index, min_number_subgraphs = 3, max_number_subgraphs
                         add_nodes_modality, add_nodes_number, old_add_nodes_values=hist_add_nodes_values
                     )
                     print(f"Restarted with new add_nodes_values: {list(graph.columns[add_nodes_values])}")
+                    while_iterations = 0
                 
                 continue
 
@@ -748,6 +759,16 @@ def get_subgraphs(graph, y_index, min_number_subgraphs = 3, max_number_subgraphs
 
     # 0. Check that number of subgraphs is less than n
     assert len(subgraphs) <= max_number_subgraphs, "Number of subgraphs must be lower than n"
+
+    # 0.bis Check that if there are add_nodes, at least one subgraph has them and one doesn't
+    if dict_subgraph_with_add_nodes:
+        has_with = any(subgraphs_with_add_nodes)
+        has_without = any(not flag for flag in subgraphs_with_add_nodes)
+        if not has_with:
+            raise ValueError("At least one subgraph with additional nodes is required, but none found.")
+        if not has_without:
+            raise ValueError("At least one subgraph without additional nodes is required, but none found.")
+        print(f"✓ Subgraphs with and without additional nodes are present.")
     
     # 1. Check that all nodes are covered by the union of subgraphs
     all_nodes_in_graph = set(range(len(graph)))

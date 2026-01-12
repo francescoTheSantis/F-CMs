@@ -2261,14 +2261,15 @@ def plot_training_metrics(history: Dict[str, Any], save_dir: str = ".") -> None:
         ax.set_ylabel('Validation Loss')
         ax.set_title(f'Client {cid}')
         ax.grid(True, linestyle='--', alpha=0.7)
-        
+            
     axes[-1].set_xlabel('Round')
     plt.tight_layout()
     plt.savefig(f"{save_dir}/client_validation_losses.png", dpi=300)
     
     # 2. Average validation loss across clients
     plt.figure(figsize=(10, 6))
-    avg_loss = np.mean([history["loss_val_client"][cid] for cid in range(n_clients)], axis=0)
+    # avg_loss = np.mean([history["loss_val_client"][cid] for cid in range(n_clients)], axis=0)
+    avg_loss = history["loss_val_avg"]
     plt.plot(rounds, avg_loss, 'o-', color='red', 
              linewidth=2, label='Average Validation Loss')
     
@@ -2276,7 +2277,7 @@ def plot_training_metrics(history: Dict[str, Any], save_dir: str = ".") -> None:
     for cid in range(n_clients):
         client_losses = history["loss_val_client"][cid]
         plt.plot(rounds, client_losses, '--', alpha=0.3, label=f'Client {cid}')
-    
+
     plt.xlabel('Round')
     plt.ylabel('Validation Loss')
     plt.title('Average Validation Loss Across Clients')
@@ -2285,6 +2286,26 @@ def plot_training_metrics(history: Dict[str, Any], save_dir: str = ".") -> None:
     plt.tight_layout()
     plt.savefig(f"{save_dir}/average_validation_loss.png", dpi=300)
     
+    
+    # 2. Average validation accuracy across clients
+    plt.figure(figsize=(10, 6))
+    # avg_loss = np.mean([history["loss_val_client"][cid] for cid in range(n_clients)], axis=0)
+    plt.plot(rounds, history["y_acc_val_avg"], 'o-', color='red', 
+             linewidth=2, label='Average Validation Accuracy')
+    
+    # Optionally overlay individual client trends for comparison
+    for cid in range(n_clients):
+        client_losses = history["y_acc_val_client"][cid]
+        plt.plot(rounds, client_losses, '--', alpha=0.3, label=f'Client {cid}')
+    
+    plt.xlabel('Round')
+    plt.ylabel('Validation Accuracy')
+    plt.title('Average Validation Accuracy Across Clients')
+    plt.legend()
+    plt.grid(True, linestyle='--', alpha=0.7)
+    plt.tight_layout()
+    plt.savefig(f"{save_dir}/average_validation_accuracy.png", dpi=300)
+
     plt.close('all')
     print(f"Training plots saved to {save_dir}/")
 

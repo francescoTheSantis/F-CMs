@@ -363,7 +363,7 @@ def main(cfg: DictConfig) -> None:
         
         # set seed for reproducibility
         torch.set_num_threads(num_threads)
-        seed_everything(cfg.seed)
+        # seed_everything(cfg.seed)
         
         # read client data
         train_dataloaders, val_dataloaders, test_dataloaders = load_dataloaders(cfg, path, n_clients * cfg.learning.subgraphs.get('dataset_client_multiplier', 1))
@@ -385,9 +385,10 @@ def main(cfg: DictConfig) -> None:
         best_round = 0
         no_improvement_count = 0
         sia_accuracies = []
-        history = {"round": [], "loss_val_avg": [], "loss_val_client": {}}
+        history = {"round": [], "loss_val_avg": [], "loss_val_client": {}, "y_acc_val_avg": [], "y_acc_val_client": {}}
         for cid in range(n_clients):
             history["loss_val_client"][cid] = []
+            history["y_acc_val_client"][cid] = []
         mia_accuracies, mia_epsilons = initialize_mia_results(n_clients)
         n_dataset_clients = len(train_dataloaders)
 
@@ -535,7 +536,7 @@ def main(cfg: DictConfig) -> None:
         for rnd in range(1, n_rounds + 1):
             print(f"\033[92m\n--> ROUND {rnd}/{n_rounds}\033[0m")
             client_params: List[Tuple[List[torch.Tensor], int]] = []
-            val_losses, sizes = [], []
+            val_losses, val_accs, sizes = [], [], []
             
             # ------------------------------------------------------------
             # Setup configuration based on drift round
@@ -612,10 +613,10 @@ def main(cfg: DictConfig) -> None:
                 local_engine.model.to(cfg.device) # put back to device
                 n_samples = len(train_dataloaders[cid].dataset)
                                     
-                # local validation
-                if val_dataloaders[cid] is not None:
-                    avg_loss = compute_validation_loss(local_engine.model, val_dataloaders[cid], cfg)
-                    history["loss_val_client"][n].append(avg_loss)
+                # # local validation
+                # if val_dataloaders[cid] is not None:
+                #     avg_loss = compute_validation_loss(local_engine.model, val_dataloaders[cid], cfg)
+                #     history["loss_val_client"][n].append(avg_loss)
     
                 # collect weights for aggregation
                 client_params.append((get_parameters(local_engine), n_samples))
@@ -733,13 +734,24 @@ def main(cfg: DictConfig) -> None:
             for cid in range(start_n_client, start_n_client + n_clients):
                 val_metrics = trainer.validate(local_engine, val_dataloaders[cid])[0]  #{'val/c/asia': 0.0, 'val/c/bronc': 0.0, 'val/c/either': 0.0, 'val/c/lung': 0.0, 'val/c/smoke': 0.0, 'val/c/tub': 0.0, 'val/c/xray': 0.0, 'val_loss': nan}
                 val_losses.append(val_metrics['val_loss'])
+                val_accs.append(val_metrics.get('val/y/y_accuracy', np.nan))  
+                 # log per-client val metrics
+                history["loss_val_client"][cid - start_n_client].append(val_metrics['val_loss'])
+                history["y_acc_val_client"][cid - start_n_client].append(val_metrics.get('val/y/y_accuracy', np.nan))
                 sizes.append(len(val_dataloaders[cid].dataset))
 
             # log aggregated val metrics (weighted)
             w_loss = sum(l * s for l, s in zip(val_losses, sizes)) / sum(sizes)
+            val_accs = np.asarray(val_accs, dtype=float)
+            mask = ~np.isnan(val_accs)          # keep only clients that actually have an accuracy
+            if mask.any():
+                y_acc = (val_accs[mask] * sizes[mask]).sum() / sizes[mask].sum()
+            else:
+                y_acc = np.nan
             history["round"].append(rnd)
             history["loss_val_avg"].append(w_loss)
-            print(f"\033[92m✅ aggregated  val_loss={w_loss:.4f}\033[0m")
+            history["y_acc_val_avg"].append(y_acc)
+            print(f"\033[92m✅ aggregated  val_loss={w_loss:.4f}, val/y/y_accuracy={y_acc:.4f}  \033[0m")
 
             # check improvement
             check_improvements = False
@@ -782,9 +794,11 @@ def main(cfg: DictConfig) -> None:
             print(f"\033[94mValidation loss history before trimming: {history['loss_val_avg']}\033[0m")
             history["round"] = history["round"][:n_keep]
             history["loss_val_avg"] = history["loss_val_avg"][:n_keep]
+            history["y_acc_val_avg"] = history["y_acc_val_avg"][:n_keep]
             for cid in range(n_clients):
                 if cid in history["loss_val_client"]:
                     history["loss_val_client"][cid] = history["loss_val_client"][cid][:n_keep]
+                    history["y_acc_val_client"][cid] = history["y_acc_val_client"][cid][:n_keep]
 
             # Trim SIA (per-round)
             if isinstance(sia_accuracies, list) and len(sia_accuracies) > 0:

@@ -222,6 +222,7 @@ class BaseModel(nn.Module, ABC):
         else:
             concept_loss = 0.0
         
+        count = 0
         for name, c_hat in c_hat_dict.items():
             if name not in self.c_name_index:
                 continue
@@ -238,8 +239,12 @@ class BaseModel(nn.Module, ABC):
             
             if reduction == "none":
                 concept_loss = concept_loss + concept_loss_i
+                count += 1
             else:
                 concept_loss = concept_loss + concept_loss_i
+                count += 1
+        
+        concept_loss = concept_loss / max(count, 1)
         
         return concept_loss
 
