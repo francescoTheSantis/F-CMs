@@ -808,6 +808,9 @@ def main(cfg: DictConfig) -> None:
                 if cid in history["loss_val_client"]:
                     history["loss_val_client"][cid] = history["loss_val_client"][cid][:n_keep]
                     history["y_acc_val_client"][cid] = history["y_acc_val_client"][cid][:n_keep]
+            # save history to json
+            with open("results/training_history.json", "w") as fp:
+                json.dump(history, fp, indent=2)
 
             # Trim SIA (per-round)
             if isinstance(sia_accuracies, list) and len(sia_accuracies) > 0:

@@ -32,7 +32,10 @@ paths = [
     # "/home/admin/Federated-C2BM/outputs/multirun/2025-11-12/13-18-41",
     # "/home/admin/Federated-C2BM/outputs/multirun/2025-11-12/16-46-58",
     # "/home/admin/Federated-C2BM/outputs/multirun/2025-12-01/03-26-27"
-    "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2026-01-08/12-46-39"
+    # "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2026-01-08/12-46-39"
+    # "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2026-01-13/17-00-51"
+    "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2026-01-13/17-07-41"
+    # "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2026-01-13/16-14-19_test_2"
 ]
 
 # folder to save processed results
@@ -118,24 +121,6 @@ plot_single_c_on_y(performance, custom_order, model_styles, visualization_folder
 
 ### Intervention plot for level interventions ###
 plot_level_interventions(performance, custom_order, model_styles, visualization_folder, c_info)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -234,39 +219,71 @@ def _find_history_files(paths, history_filename="training_history.json"):
     return sorted(set(history_files))
 
 
-def _normalize_history(history):
+def _standardize_history(history):
     for key in ("loss_val_client", "y_acc_val_client"):
         if key not in history:
             continue
         raw = history[key]
         if isinstance(raw, dict):
-            normalized = {}
+            standardized = {}
             for k, v in raw.items():
                 try:
                     k = int(k)
                 except (TypeError, ValueError):
                     pass
-                normalized[k] = v
-            history[key] = normalized
+                standardized[k] = v
+            history[key] = standardized
         elif isinstance(raw, list):
             history[key] = {i: v for i, v in enumerate(raw)}
     return history
 
 
-def _load_histories(history_files):
-    histories = []
+def _find_experiment_root(history_path, max_depth=5):
+    current = os.path.dirname(history_path)
+    for _ in range(max_depth):
+        conf_path = os.path.join(current, ".hydra", "config.yaml")
+        if os.path.isfile(conf_path):
+            return current, conf_path
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+    return None, None
+
+
+def _load_histories_by_model(history_files):
+    histories_by_model = {}
+    dataset_names = set()
     for path in history_files:
         try:
             with open(path, "r") as fp:
                 history = json.load(fp)
-            history = _normalize_history(history)
+            history = _standardize_history(history)
             if "round" not in history:
                 print(f"[training_history] Missing 'round' in {path}, skipping.")
                 continue
-            histories.append(history)
+            _, conf_path = _find_experiment_root(path)
+            model_name = None
+            dataset_name = None
+            if conf_path is not None:
+                try:
+                    with open(conf_path, "r") as file:
+                        conf = yaml.safe_load(file)
+                    model_name = conf.get("model", {}).get("name")
+                    dataset_name = conf.get("dataset", {}).get("name")
+                except Exception as exc:
+                    print(f"[training_history] Failed to read config for {path}: {exc}")
+            if not model_name:
+                print(f"[training_history] Missing model name for {path}, skipping.")
+                continue
+            histories_by_model.setdefault(model_name, []).append(history)
+            if dataset_name:
+                dataset_names.add(dataset_name)
         except Exception as exc:
             print(f"[training_history] Failed to load {path}: {exc}")
-    return histories
+    if len(dataset_names) > 1:
+        print(f"[training_history] Multiple datasets detected: {sorted(dataset_names)}")
+    return histories_by_model
 
 
 def _common_rounds(histories):
@@ -282,7 +299,7 @@ def _common_rounds(histories):
     return common
 
 
-def _collect_client_ids(histories, key="loss_val_client"):
+def _collect_client_ids(histories, key="loss_val_client", mode="intersection"):
     client_sets = []
     for history in histories:
         clients = history.get(key, {})
@@ -290,6 +307,12 @@ def _collect_client_ids(histories, key="loss_val_client"):
             client_sets.append(set(clients.keys()))
     if not client_sets:
         return []
+
+    if mode == "union":
+        union = set.union(*client_sets)
+        if any(union != s for s in client_sets):
+            print(f"[training_history] Client ids differ across histories, using {len(union)} union clients.")
+        return sorted(union)
 
     common = set.intersection(*client_sets)
     if not common:
@@ -355,116 +378,232 @@ def _mean_and_ci(values, confidence=0.95):
     ci = _ci_multiplier(confidence, n) * sem
     return mean, ci, n
 
+marker_size = 6
+model_styles = {
+    'cem': {'marker': 'P', 'name': 'CEM', 'color': 'tab:blue', 'size': marker_size},
+    'cbm_linear': {'marker': '*', 'name': 'CBM+Linear', 'color': 'tab:red', 'size': marker_size},
+    'cbm_mlp': {'marker': '^', 'name': 'CBM+MLP', 'color': 'tab:purple', 'size': marker_size},
+    'blackbox': {'marker': 'o', 'name': 'BlackBox', 'color': 'tab:black', 'size': marker_size},
+    'blackbox_multi': {'marker': 'o', 'name': 'BlackBox (Multi)', 'color': 'tab:grey', 'size': marker_size},
+    'cgm': {'marker': 'D', 'name': 'CGM', 'color': 'tab:orange', 'size': marker_size},
+    'c2bm': {'marker': 's', 'name': 'C2BM', 'color': 'tab:green', 'size': marker_size},
+}
 
 def plot_training_metrics_across_seeds(
     paths,
     save_dir="figs",
     history_filename="training_history.json",
     confidence=0.95,
-    show_client_trends=True,
+    model_styles=None,
+    font_sizes=None,
 ):
     """
-    Aggregate training histories across seeds and plot mean with confidence intervals.
+    Aggregate training histories across seeds per model and plot mean with confidence intervals.
 
     Args:
         paths: List of multirun directories, experiment directories, or direct history files.
         save_dir: Directory to save plots.
         history_filename: Name of the history file saved under each experiment results folder.
         confidence: Confidence level for the interval (default: 0.95).
-        show_client_trends: Overlay per-client mean curves on average plots.
+        model_styles: Mapping from model name to style metadata (marker, color, size, name).
+        font_sizes: Dict with keys base/title/label/tick/legend to control font sizes.
     """
     os.makedirs(save_dir, exist_ok=True)
     history_files = _find_history_files(paths, history_filename=history_filename)
-    histories = _load_histories(history_files)
+    histories_by_model = _load_histories_by_model(history_files)
 
-    if not histories:
+    if not histories_by_model:
         print("[training_history] No histories loaded.")
         return
 
-    rounds = _common_rounds(histories)
+    if model_styles is None:
+        model_styles = globals().get("model_styles", {})
+
+    if model_styles:
+        model_order = list(model_styles.keys())
+        ordered_models = [m for m in model_order if m in histories_by_model]
+        skipped_models = sorted([m for m in histories_by_model.keys() if m not in model_styles])
+        if skipped_models:
+            print(f"[training_history] Skipping models without styles: {skipped_models}")
+        histories_by_model = {m: histories_by_model[m] for m in ordered_models}
+        models = ordered_models
+    else:
+        models = sorted(histories_by_model.keys())
+
+    if not models:
+        print("[training_history] No models found after filtering.")
+        return
+
+    all_histories = []
+    for model in models:
+        model_histories = histories_by_model.get(model, [])
+        all_histories.extend(model_histories)
+        print(f"[training_history] {model}: {len(model_histories)} histories")
+
+    rounds = _common_rounds(all_histories)
     if not rounds:
         print("[training_history] No common rounds across histories.")
         return
 
-    client_ids = _collect_client_ids(histories, key="loss_val_client")
-    n_seeds = len(histories)
-    print(f"[training_history] Aggregating {n_seeds} histories across {len(rounds)} rounds.")
+    client_ids = _collect_client_ids(all_histories, key="loss_val_client", mode="union")
+    print(f"[training_history] Aggregating {len(all_histories)} histories across {len(rounds)} rounds.")
+
+    default_font_sizes = {
+        "base": 16,
+        "title": 18,
+        "label": 16,
+        "tick": 14,
+        "legend": 14,
+    }
+    if font_sizes is None:
+        font_sizes = default_font_sizes
+    else:
+        font_sizes = {**default_font_sizes, **font_sizes}
+
+    rc_backup = plt.rcParams.copy()
+    plt.rcParams.update({
+        "font.size": font_sizes["base"],
+        "axes.titlesize": font_sizes["title"],
+        "axes.labelsize": font_sizes["label"],
+        "xtick.labelsize": font_sizes["tick"],
+        "ytick.labelsize": font_sizes["tick"],
+        "legend.fontsize": font_sizes["legend"],
+    })
+
+    color_cycle = plt.rcParams.get("axes.prop_cycle", None)
+    if color_cycle is not None:
+        colors = color_cycle.by_key().get("color", [])
+    else:
+        colors = []
+    if not colors:
+        colors = ["tab:blue", "tab:orange", "tab:green", "tab:red", "tab:purple"]
+
+    def _style_for(model_name, idx):
+        style = model_styles.get(model_name, {})
+        color = style.get("color", colors[idx % len(colors)])
+        marker = style.get("marker", "o")
+        label = style.get("name", model_name)
+        size = style.get("size", 8)
+        return color, marker, label, size
 
     # 1. Per-client validation loss with confidence intervals.
-    if client_ids:
-        fig_height = max(4, min(12, 2 * len(client_ids)))
-        fig, axes = plt.subplots(len(client_ids), 1, figsize=(10, fig_height), sharex=True)
-        if len(client_ids) == 1:
-            axes = [axes]
+    try:
+        if client_ids:
+            fig_height = max(4, min(12, 2 * len(client_ids)))
+            fig, axes = plt.subplots(len(client_ids), 1, figsize=(10, fig_height), sharex=True)
+            if len(client_ids) == 1:
+                axes = [axes]
 
-        for cid, ax in zip(client_ids, axes):
-            values = _aligned_series(histories, rounds, "loss_val_client", client_id=cid)
-            mean, ci, _ = _mean_and_ci(values, confidence=confidence)
-            ax.plot(rounds, mean, "o-", color="tab:blue", linewidth=2)
-            ax.fill_between(rounds, mean - ci, mean + ci, color="tab:blue", alpha=0.2)
-            ax.set_ylabel("Validation Loss")
-            ax.set_title(f"Client {cid}")
-            ax.grid(True, linestyle="--", alpha=0.7)
+            legend_items = {}
+            for cid, ax in zip(client_ids, axes):
+                for idx, model_name in enumerate(models):
+                    model_histories = histories_by_model.get(model_name, [])
+                    values = _aligned_series(model_histories, rounds, "loss_val_client", client_id=cid)
+                    if np.all(np.isnan(values)):
+                        continue
+                    mean, ci, _ = _mean_and_ci(values, confidence=confidence)
+                    color, marker, label, size = _style_for(model_name, idx)
+                    line = ax.plot(
+                        rounds,
+                        mean,
+                        marker=marker,
+                        color=color,
+                        linewidth=2,
+                        markersize=size,
+                        label=label,
+                    )[0]
+                    ax.fill_between(rounds, mean - ci, mean + ci, color=color, alpha=0.2)
+                    legend_items.setdefault(label, line)
 
-        axes[-1].set_xlabel("Round")
-        plt.tight_layout()
-        plt.savefig(f"{save_dir}/client_validation_losses.png", dpi=300)
+                ax.set_ylabel("Validation Loss")
+                ax.set_title(f"Client {cid}")
+                ax.grid(True, linestyle="--", alpha=0.7)
 
-    # 2. Average validation loss across clients with confidence intervals.
-    plt.figure(figsize=(10, 6))
-    avg_values = _aligned_series(histories, rounds, "loss_val_avg")
-    avg_mean, avg_ci, _ = _mean_and_ci(avg_values, confidence=confidence)
-    plt.plot(rounds, avg_mean, "o-", color="red", linewidth=2, label="Average Validation Loss")
-    plt.fill_between(rounds, avg_mean - avg_ci, avg_mean + avg_ci, color="red", alpha=0.2,
-                     label=f"{int(confidence * 100)}% CI")
+            axes[-1].set_xlabel("Round")
+            if legend_items:
+                fig.legend(
+                    list(legend_items.values()),
+                    list(legend_items.keys()),
+                    loc="lower center",
+                    ncol=min(len(legend_items), 3),
+                    frameon=True,
+                    bbox_to_anchor=(0.5, -0.02),
+                )
+                fig.tight_layout(rect=[0, 0.05, 1, 1])
+            else:
+                fig.tight_layout()
+            fig.savefig(f"{save_dir}/client_validation_losses.png", dpi=300, bbox_inches="tight")
 
-    if show_client_trends and client_ids:
-        for cid in client_ids:
-            client_values = _aligned_series(histories, rounds, "loss_val_client", client_id=cid)
-            client_mean, _, _ = _mean_and_ci(client_values, confidence=confidence)
-            plt.plot(rounds, client_mean, "--", alpha=0.4, label=f"Client {cid}")
-
-    plt.xlabel("Round")
-    plt.ylabel("Validation Loss")
-    plt.title("Average Validation Loss Across Clients")
-    plt.legend()
-    plt.grid(True, linestyle="--", alpha=0.7)
-    plt.tight_layout()
-    plt.savefig(f"{save_dir}/average_validation_loss.png", dpi=300)
-
-    # 3. Average validation accuracy across clients with confidence intervals.
-    acc_values = _aligned_series(histories, rounds, "y_acc_val_avg")
-    if np.all(np.isnan(acc_values)):
-        print("[training_history] Accuracy history is empty or NaN; skipping accuracy plot.")
-    else:
+        # 2. Average validation loss across clients with confidence intervals.
         plt.figure(figsize=(10, 6))
-        acc_mean, acc_ci, _ = _mean_and_ci(acc_values, confidence=confidence)
-        plt.plot(rounds, acc_mean, "o-", color="red", linewidth=2, label="Average Validation Accuracy")
-        plt.fill_between(rounds, acc_mean - acc_ci, acc_mean + acc_ci, color="red", alpha=0.2,
-                         label=f"{int(confidence * 100)}% CI")
-
-        if show_client_trends:
-            acc_client_ids = _collect_client_ids(histories, key="y_acc_val_client")
-            for cid in acc_client_ids:
-                client_values = _aligned_series(histories, rounds, "y_acc_val_client", client_id=cid)
-                client_mean, _, _ = _mean_and_ci(client_values, confidence=confidence)
-                plt.plot(rounds, client_mean, "--", alpha=0.4, label=f"Client {cid}")
+        for idx, model_name in enumerate(models):
+            model_histories = histories_by_model.get(model_name, [])
+            avg_values = _aligned_series(model_histories, rounds, "loss_val_avg")
+            if np.all(np.isnan(avg_values)):
+                continue
+            avg_mean, avg_ci, _ = _mean_and_ci(avg_values, confidence=confidence)
+            color, marker, label, size = _style_for(model_name, idx)
+            plt.plot(
+                rounds,
+                avg_mean,
+                marker=marker,
+                color=color,
+                linewidth=2,
+                markersize=size,
+                label=label,
+            )
+            plt.fill_between(rounds, avg_mean - avg_ci, avg_mean + avg_ci, color=color, alpha=0.2)
 
         plt.xlabel("Round")
-        plt.ylabel("Validation Accuracy")
-        plt.title("Average Validation Accuracy Across Clients")
-        plt.legend()
+        plt.ylabel("Validation Loss")
+        plt.title("Average Validation Loss Across Clients")
+        plt.legend(ncol=min(len(models), 3), frameon=True)
         plt.grid(True, linestyle="--", alpha=0.7)
         plt.tight_layout()
-        plt.savefig(f"{save_dir}/average_validation_accuracy.png", dpi=300)
+        plt.savefig(f"{save_dir}/average_validation_loss.png", dpi=300, bbox_inches="tight")
 
-    plt.close("all")
-    print(f"Training plots saved to {save_dir}/")
+        # 3. Average validation accuracy across clients with confidence intervals.
+        plotted_any = False
+        plt.figure(figsize=(10, 6))
+        for idx, model_name in enumerate(models):
+            model_histories = histories_by_model.get(model_name, [])
+            acc_values = _aligned_series(model_histories, rounds, "y_acc_val_avg")
+            if np.all(np.isnan(acc_values)):
+                continue
+            acc_mean, acc_ci, _ = _mean_and_ci(acc_values, confidence=confidence)
+            color, marker, label, size = _style_for(model_name, idx)
+            plt.plot(
+                rounds,
+                acc_mean,
+                marker=marker,
+                color=color,
+                linewidth=2,
+                markersize=size,
+                label=label,
+            )
+            plt.fill_between(rounds, acc_mean - acc_ci, acc_mean + acc_ci, color=color, alpha=0.2)
+            plotted_any = True
+
+        if plotted_any:
+            plt.xlabel("Round")
+            plt.ylabel("Validation Accuracy")
+            plt.title("Average Validation Accuracy Across Clients")
+            plt.legend(ncol=min(len(models), 3), frameon=True)
+            plt.grid(True, linestyle="--", alpha=0.7)
+            plt.tight_layout()
+            plt.savefig(f"{save_dir}/average_validation_accuracy.png", dpi=300, bbox_inches="tight")
+        else:
+            print("[training_history] Accuracy history is empty or NaN; skipping accuracy plot.")
+            plt.close()
+    finally:
+        plt.close("all")
+        plt.rcParams.update(rc_backup)
+        print(f"Training plots saved to {save_dir}/")
 
 
 plot_training_metrics_across_seeds(
-    paths=["./"],
+    paths=paths,
     save_dir="figs",
     confidence=0.95,
-    show_client_trends=False,
+    model_styles=model_styles,
 )
