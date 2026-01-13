@@ -8,6 +8,7 @@ import json
 from matplotlib.ticker import FuncFormatter
 import pickle
 import math
+from statistics import NormalDist
 from src.plot_utils import *
 import argparse
 #from env import CACHE
@@ -25,12 +26,13 @@ args = parser.parse_args()
 paths = [
     #"/home/admin/Federated-C2BM/outputs/multirun/2025-11-10/18-57-50",
     #"/home/admin/Federated-C2BM/outputs/multirun/2025-11-11/18-33-54",
-    "/home/admin/Federated-C2BM/outputs/multirun/2025-11-12/07-57-37",
-    "/home/admin/Federated-C2BM/outputs/multirun/2025-11-12/08-22-54",
-    "/home/admin/Federated-C2BM/outputs/multirun/2025-11-12/09-30-44",
-    "/home/admin/Federated-C2BM/outputs/multirun/2025-11-12/13-18-41",
-    "/home/admin/Federated-C2BM/outputs/multirun/2025-11-12/16-46-58",
-    "/home/admin/Federated-C2BM/outputs/multirun/2025-12-01/03-26-27"
+    # "/home/admin/Federated-C2BM/outputs/multirun/2025-11-12/07-57-37",
+    # "/home/admin/Federated-C2BM/outputs/multirun/2025-11-12/08-22-54",
+    # "/home/admin/Federated-C2BM/outputs/multirun/2025-11-12/09-30-44",
+    # "/home/admin/Federated-C2BM/outputs/multirun/2025-11-12/13-18-41",
+    # "/home/admin/Federated-C2BM/outputs/multirun/2025-11-12/16-46-58",
+    # "/home/admin/Federated-C2BM/outputs/multirun/2025-12-01/03-26-27"
+    "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2026-01-08/12-46-39"
 ]
 
 # folder to save processed results
@@ -207,3 +209,262 @@ plot_level_interventions(performance, custom_order, model_styles, visualization_
 # label_font = {'size': 44}
 # tick_font = {'size': 28}
 # plot_intervention_results(performance, metric='accuracy', title_font=title_font, label_font=label_font, tick_font=tick_font, legend_font=legend_font)
+
+
+def _find_history_files(paths, history_filename="training_history.json"):
+    history_files = []
+    for path in paths:
+        if not os.path.exists(path):
+            print(f"[training_history] Skipping missing path: {path}")
+            continue
+        if os.path.isfile(path):
+            if os.path.basename(path) == history_filename:
+                history_files.append(path)
+            continue
+
+        candidate = os.path.join(path, "results", history_filename)
+        if os.path.isfile(candidate):
+            history_files.append(candidate)
+            continue
+
+        for root, _, files in os.walk(path):
+            if history_filename in files:
+                history_files.append(os.path.join(root, history_filename))
+
+    return sorted(set(history_files))
+
+
+def _normalize_history(history):
+    for key in ("loss_val_client", "y_acc_val_client"):
+        if key not in history:
+            continue
+        raw = history[key]
+        if isinstance(raw, dict):
+            normalized = {}
+            for k, v in raw.items():
+                try:
+                    k = int(k)
+                except (TypeError, ValueError):
+                    pass
+                normalized[k] = v
+            history[key] = normalized
+        elif isinstance(raw, list):
+            history[key] = {i: v for i, v in enumerate(raw)}
+    return history
+
+
+def _load_histories(history_files):
+    histories = []
+    for path in history_files:
+        try:
+            with open(path, "r") as fp:
+                history = json.load(fp)
+            history = _normalize_history(history)
+            if "round" not in history:
+                print(f"[training_history] Missing 'round' in {path}, skipping.")
+                continue
+            histories.append(history)
+        except Exception as exc:
+            print(f"[training_history] Failed to load {path}: {exc}")
+    return histories
+
+
+def _common_rounds(histories):
+    round_lists = [history.get("round", []) for history in histories]
+    if not round_lists:
+        return []
+
+    round_sets = [set(rounds) for rounds in round_lists]
+    base_rounds = list(round_lists[0])
+    common = [r for r in base_rounds if all(r in rs for rs in round_sets[1:])]
+    if len(common) != len(base_rounds):
+        print(f"[training_history] Using {len(common)} common rounds across histories.")
+    return common
+
+
+def _collect_client_ids(histories, key="loss_val_client"):
+    client_sets = []
+    for history in histories:
+        clients = history.get(key, {})
+        if isinstance(clients, dict):
+            client_sets.append(set(clients.keys()))
+    if not client_sets:
+        return []
+
+    common = set.intersection(*client_sets)
+    if not common:
+        union = set.union(*client_sets)
+        print("[training_history] No common client ids found, using union.")
+        return sorted(union)
+
+    if any(common != s for s in client_sets):
+        print(f"[training_history] Client ids differ across histories, using {len(common)} common clients.")
+    return sorted(common)
+
+
+def _aligned_series(histories, rounds, key, client_id=None):
+    aligned = []
+    for history in histories:
+        round_to_idx = {r: i for i, r in enumerate(history.get("round", []))}
+        if client_id is None:
+            series = history.get(key)
+        else:
+            series = history.get(key, {}).get(client_id)
+
+        if series is None:
+            aligned.append([np.nan] * len(rounds))
+            continue
+
+        values = []
+        for r in rounds:
+            idx = round_to_idx.get(r)
+            if idx is None or idx >= len(series):
+                values.append(np.nan)
+            else:
+                values.append(series[idx])
+        aligned.append(values)
+
+    return np.asarray(aligned, dtype=float)
+
+
+def _ci_multiplier(confidence, n):
+    n = np.asarray(n)
+    alpha = 1.0 - confidence
+
+    if n.size == 0:
+        return n.astype(float)
+
+    try:
+        from scipy.stats import t
+
+        multipliers = t.ppf(1.0 - alpha / 2.0, df=np.maximum(n - 1, 1))
+    except Exception:
+        z_value = NormalDist().inv_cdf(1.0 - alpha / 2.0)
+        multipliers = np.full_like(n, z_value, dtype=float)
+
+    multipliers = np.where(n > 1, multipliers, 0.0)
+    return multipliers
+
+
+def _mean_and_ci(values, confidence=0.95):
+    values = np.asarray(values, dtype=float)
+    mean = np.nanmean(values, axis=0)
+    n = np.sum(~np.isnan(values), axis=0)
+    std = np.nanstd(values, axis=0, ddof=1)
+    sem = np.where(n > 1, std / np.sqrt(n), 0.0)
+    ci = _ci_multiplier(confidence, n) * sem
+    return mean, ci, n
+
+
+def plot_training_metrics_across_seeds(
+    paths,
+    save_dir="figs",
+    history_filename="training_history.json",
+    confidence=0.95,
+    show_client_trends=True,
+):
+    """
+    Aggregate training histories across seeds and plot mean with confidence intervals.
+
+    Args:
+        paths: List of multirun directories, experiment directories, or direct history files.
+        save_dir: Directory to save plots.
+        history_filename: Name of the history file saved under each experiment results folder.
+        confidence: Confidence level for the interval (default: 0.95).
+        show_client_trends: Overlay per-client mean curves on average plots.
+    """
+    os.makedirs(save_dir, exist_ok=True)
+    history_files = _find_history_files(paths, history_filename=history_filename)
+    histories = _load_histories(history_files)
+
+    if not histories:
+        print("[training_history] No histories loaded.")
+        return
+
+    rounds = _common_rounds(histories)
+    if not rounds:
+        print("[training_history] No common rounds across histories.")
+        return
+
+    client_ids = _collect_client_ids(histories, key="loss_val_client")
+    n_seeds = len(histories)
+    print(f"[training_history] Aggregating {n_seeds} histories across {len(rounds)} rounds.")
+
+    # 1. Per-client validation loss with confidence intervals.
+    if client_ids:
+        fig_height = max(4, min(12, 2 * len(client_ids)))
+        fig, axes = plt.subplots(len(client_ids), 1, figsize=(10, fig_height), sharex=True)
+        if len(client_ids) == 1:
+            axes = [axes]
+
+        for cid, ax in zip(client_ids, axes):
+            values = _aligned_series(histories, rounds, "loss_val_client", client_id=cid)
+            mean, ci, _ = _mean_and_ci(values, confidence=confidence)
+            ax.plot(rounds, mean, "o-", color="tab:blue", linewidth=2)
+            ax.fill_between(rounds, mean - ci, mean + ci, color="tab:blue", alpha=0.2)
+            ax.set_ylabel("Validation Loss")
+            ax.set_title(f"Client {cid}")
+            ax.grid(True, linestyle="--", alpha=0.7)
+
+        axes[-1].set_xlabel("Round")
+        plt.tight_layout()
+        plt.savefig(f"{save_dir}/client_validation_losses.png", dpi=300)
+
+    # 2. Average validation loss across clients with confidence intervals.
+    plt.figure(figsize=(10, 6))
+    avg_values = _aligned_series(histories, rounds, "loss_val_avg")
+    avg_mean, avg_ci, _ = _mean_and_ci(avg_values, confidence=confidence)
+    plt.plot(rounds, avg_mean, "o-", color="red", linewidth=2, label="Average Validation Loss")
+    plt.fill_between(rounds, avg_mean - avg_ci, avg_mean + avg_ci, color="red", alpha=0.2,
+                     label=f"{int(confidence * 100)}% CI")
+
+    if show_client_trends and client_ids:
+        for cid in client_ids:
+            client_values = _aligned_series(histories, rounds, "loss_val_client", client_id=cid)
+            client_mean, _, _ = _mean_and_ci(client_values, confidence=confidence)
+            plt.plot(rounds, client_mean, "--", alpha=0.4, label=f"Client {cid}")
+
+    plt.xlabel("Round")
+    plt.ylabel("Validation Loss")
+    plt.title("Average Validation Loss Across Clients")
+    plt.legend()
+    plt.grid(True, linestyle="--", alpha=0.7)
+    plt.tight_layout()
+    plt.savefig(f"{save_dir}/average_validation_loss.png", dpi=300)
+
+    # 3. Average validation accuracy across clients with confidence intervals.
+    acc_values = _aligned_series(histories, rounds, "y_acc_val_avg")
+    if np.all(np.isnan(acc_values)):
+        print("[training_history] Accuracy history is empty or NaN; skipping accuracy plot.")
+    else:
+        plt.figure(figsize=(10, 6))
+        acc_mean, acc_ci, _ = _mean_and_ci(acc_values, confidence=confidence)
+        plt.plot(rounds, acc_mean, "o-", color="red", linewidth=2, label="Average Validation Accuracy")
+        plt.fill_between(rounds, acc_mean - acc_ci, acc_mean + acc_ci, color="red", alpha=0.2,
+                         label=f"{int(confidence * 100)}% CI")
+
+        if show_client_trends:
+            acc_client_ids = _collect_client_ids(histories, key="y_acc_val_client")
+            for cid in acc_client_ids:
+                client_values = _aligned_series(histories, rounds, "y_acc_val_client", client_id=cid)
+                client_mean, _, _ = _mean_and_ci(client_values, confidence=confidence)
+                plt.plot(rounds, client_mean, "--", alpha=0.4, label=f"Client {cid}")
+
+        plt.xlabel("Round")
+        plt.ylabel("Validation Accuracy")
+        plt.title("Average Validation Accuracy Across Clients")
+        plt.legend()
+        plt.grid(True, linestyle="--", alpha=0.7)
+        plt.tight_layout()
+        plt.savefig(f"{save_dir}/average_validation_accuracy.png", dpi=300)
+
+    plt.close("all")
+    print(f"Training plots saved to {save_dir}/")
+
+
+plot_training_metrics_across_seeds(
+    paths=["./"],
+    save_dir="figs",
+    confidence=0.95,
+    show_client_trends=False,
+)
