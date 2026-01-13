@@ -88,6 +88,10 @@ def single_c_plot(
     client_perspective=False
 ):
 
+    if input is None or input.empty:
+        print(f"[WARN] No data available for {plot_name}; skipping plot.")
+        return
+
     datasets = input['dataset'].unique()
     # Reorder datasets according to custom order
     datasets = sorted(datasets, key=lambda x: custom_order.index(x) if x in custom_order else len(custom_order))
@@ -102,9 +106,17 @@ def single_c_plot(
     n_rows = len(learning_methods)
     n_cols = len(datasets)
 
+    if n_rows == 0 or n_cols == 0 or len(model_styles) == 0:
+        print(f"[WARN] {plot_name}: nothing to plot (datasets={n_cols}, learning_methods={n_rows}, models={len(model_styles)}).")
+        return
+
+    # Spacing tweaks to avoid label/title collisions
+    axis_label_pad = 3
+    title_pad = 15
+
     figsize = (6 * n_cols, 5 * n_rows)
     fig = plt.figure(figsize=figsize)
-    gs = fig.add_gridspec(n_rows, n_cols, hspace=0.4, wspace=0.4)
+    gs = fig.add_gridspec(n_rows, n_cols, hspace=0.6, wspace=0.6)
     axes = [fig.add_subplot(gs[i, j]) for i in range(n_rows) for j in range(n_cols)]
 
     handles_labels = []
@@ -176,16 +188,16 @@ def single_c_plot(
 
             # Show x-axis label only for last row
             if i == n_rows - 1:
-                ax.set_xlabel("Concept Names", fontsize=label_size)
+                ax.set_xlabel("Concept Names", fontsize=label_size, labelpad=axis_label_pad)
 
             # Show dataset name only in top row
             if i == 0:
-                ax.set_title(dataset, fontsize=title_size)
+                ax.set_title(dataset, fontsize=title_size, pad=title_pad)
             else:
                 ax.set_title("")
 
             if j==0:
-                ax.set_ylabel("$\\Delta$ on $y$", fontsize=label_size)                
+                ax.set_ylabel("$\\Delta$ on $y$", fontsize=label_size, labelpad=axis_label_pad)                
 
         # Get average vertical position of current row
         row_axes = [axes[i * n_cols + j] for j in range(n_cols)]
@@ -194,7 +206,7 @@ def single_c_plot(
 
         # Dynamically determine a good x-position based on left-most subplot
         leftmost_ax = row_axes[0].get_position()
-        x_pos = leftmost_ax.x0 - 0.04  # Decrease this to get closer (0.02–0.03 usually works well)
+        x_pos = leftmost_ax.x0 - 0.14  # Decrease this to get closer (0.02–0.03 usually works well)
 
         # Rename the learning methods
         if plot_name == 'single_c_interventions_on_y':
@@ -217,7 +229,7 @@ def single_c_plot(
         labels,
         loc='lower center',
         ncol=len(model_styles),
-        bbox_to_anchor=(0.5, -0.02),
+        bbox_to_anchor=(0.5, -0.13),
         fontsize=legend_size,
         frameon=True
     )
@@ -226,7 +238,7 @@ def single_c_plot(
     legend.get_frame().set_alpha(legend_alpha)
 
     # Make space for row labels and legend
-    plt.tight_layout(rect=[0.08, 0.07, 1, 1])
+    plt.tight_layout(rect=[0.1, 0.12, 0.98, 0.98], pad=1.4, h_pad=1.2, w_pad=1.0)
 
     if folder:
         if clients_flag:
@@ -382,6 +394,10 @@ def level_interventions_plot(
     clients_flag=False
 ):
 
+    if input is None or input.empty:
+        print(f"[WARN] No data available for {plot_name}; skipping plot.")
+        return
+
     datasets = input['dataset'].unique()
     # Reorder datasets according to custom order
     datasets = sorted(datasets, key=lambda x: custom_order.index(x) if x in custom_order else len(custom_order))
@@ -395,9 +411,17 @@ def level_interventions_plot(
     n_rows = len(learning_methods)
     n_cols = len(datasets)
 
+    if n_rows == 0 or n_cols == 0 or len(model_styles) == 0:
+        print(f"[WARN] {plot_name}: nothing to plot (datasets={n_cols}, learning_methods={n_rows}, models={len(model_styles)}).")
+        return
+
+    # Spacing tweaks to keep labels and titles from overlapping
+    axis_label_pad = 5
+    title_pad = 15
+
     figsize = (6 * n_cols, 5 * n_rows)
     fig = plt.figure(figsize=figsize)
-    gs = fig.add_gridspec(n_rows, n_cols, hspace=0.4, wspace=0.4)
+    gs = fig.add_gridspec(n_rows, n_cols, hspace=0.6, wspace=0.6)
     axes = [fig.add_subplot(gs[i, j]) for i in range(n_rows) for j in range(n_cols)]
 
     handles_labels = []
@@ -478,19 +502,19 @@ def level_interventions_plot(
 
             # Show x-axis label only for last row
             if i == n_rows - 1:
-                ax.set_xlabel("Intervention Levels", fontsize=label_size)
+                ax.set_xlabel("Intervention Levels", fontsize=label_size, labelpad=axis_label_pad)
 
             # Show dataset name only in top row
             if i == 0:
-                ax.set_title(dataset, fontsize=title_size)
+                ax.set_title(dataset, fontsize=title_size, pad=title_pad)
             else:
                 ax.set_title("")
 
             if j==0:
                 if plot_name == 'level_interventions_on_y':
-                    ax.set_ylabel("$\\Delta$ on $y$", fontsize=label_size)
+                    ax.set_ylabel("$\\Delta$ on $y$", fontsize=label_size, labelpad=axis_label_pad)
                 elif plot_name == 'level_interventions_on_c':
-                    ax.set_ylabel("$\\Delta$ on $c$", fontsize=label_size)
+                    ax.set_ylabel("$\\Delta$ on $c$", fontsize=label_size, labelpad=axis_label_pad)
 
         # Get average vertical position of current row
         row_axes = [axes[i * n_cols + j] for j in range(n_cols)]
@@ -499,7 +523,7 @@ def level_interventions_plot(
 
         # Dynamically determine a good x-position based on left-most subplot
         leftmost_ax = row_axes[0].get_position()
-        x_pos = leftmost_ax.x0 - 0.04  # Decrease this to get closer (0.02–0.03 usually works well)
+        x_pos = leftmost_ax.x0 - 0.12  # Decrease this to get closer (0.02–0.03 usually works well)
 
         # Rename the learning methods
         learning_method = rename_learning_methods([learning_method])[0]
@@ -521,7 +545,7 @@ def level_interventions_plot(
         labels,
         loc='lower center',
         ncol=len(model_styles),
-        bbox_to_anchor=(0.5, -0.02),
+        bbox_to_anchor=(0.5, -0.08),
         fontsize=legend_size,
         frameon=True
     )
@@ -530,7 +554,7 @@ def level_interventions_plot(
     legend.get_frame().set_alpha(legend_alpha)
 
     # Make space for row labels and legend
-    plt.tight_layout(rect=[0.08, 0.07, 1, 1])
+    plt.tight_layout(rect=[0.1, 0.12, 0.98, 0.98], pad=1.4, h_pad=1.2, w_pad=1.0)
 
     if folder:
         if clients_flag:
