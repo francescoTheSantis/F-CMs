@@ -28,10 +28,10 @@ paths = [
     # "/home/admin/Federated-C2BM/outputs/multirun/2025-11-12/09-30-44",
     # "/home/admin/Federated-C2BM/outputs/multirun/2025-11-12/13-18-41",
     # "/home/admin/Federated-C2BM/outputs/multirun/2025-11-12/16-46-58",
-    # "/home/admin/Federated-C2BM/outputs/multirun/2025-12-01/03-26-27"
+    "/home/admin/Federated-C2BM/outputs/multirun/2026-01-14/13-39-01"
     # "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2026-01-08/12-46-39"
     # "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2026-01-13/17-00-51"
-    "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2026-01-13/17-07-41"
+    #"/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2026-01-13/17-07-41"
     # "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2026-01-13/16-14-19_test_2"
 ]
 
@@ -68,6 +68,8 @@ dataset_styles = {
     'alarm': {'name': 'Alarm'},
     'hailfinder': {'name': 'Hailfinder'},
     'insurance': {'name': 'Insurance'},
+    'nih_chest_images': {'name': 'NIH Chest X-Ray'},
+    'cub_causal_struct': {'name': 'CUB_CAUSAL'}
 }
 
 # Define the custom order
@@ -78,6 +80,8 @@ custom_order = [
     'Alarm',
     'Insurance',
     'Hailfinder',
+    'NIH Chest X-Ray',
+    'CUB_CAUSAL'
 ]
 
 apply_styles(performance, dataset_styles, model_styles, custom_order)
