@@ -204,7 +204,7 @@ class NIHChestDataset():
                                    'test' : {'mode': 'random', 'kwargs': {'random_prob': 0.5}}}):
         
         # check if data have been downloaded
-        if not os.path.exists(DATA_DIRECTORY / "archive.zip"):
+        if not os.path.exists(DATA_DIRECTORY / "archive.zip") and not os.path.exists(DATA_DIRECTORY / "original_nih_chest"):
             raise FileNotFoundError(f"Please download the NIH Chest X-ray dataset from https://www.kaggle.com/datasets/nih-chest-xrays/data and place the archive.zip file in {DATA_DIRECTORY}")
         if not os.path.exists(DATA_DIRECTORY / "nih_cxr14"):
             raise FileNotFoundError(f"Please download the concept annotations nih_cxr14 from https://huggingface.co/datasets/ttumyche/CheXStruct and place the nih_cxr14 directory in {DATA_DIRECTORY}")
@@ -256,10 +256,10 @@ class NIHChestDataset():
         if modality not in ['image', 'tabular']:
             raise ValueError("Modality must be either 'image' or 'tabular'")
         elif modality == 'image':
-            self.c_info = {'names': CONCEPTS_FOR_IMAGES_MODALITY,   
+            self.c_info = {'names': list(CONCEPTS_FOR_IMAGES_MODALITY),   
             'cardinality': [2,2,2,2,2,2,2,2]} # 8 concepts
         else:
-            self.c_info = {'names': CONCEPTS_FOR_TABULAR_MODALITY,
+            self.c_info = {'names': list(CONCEPTS_FOR_TABULAR_MODALITY),
             'cardinality': [2,2,2,2,2,2,2,2,2]} # 9 concepts
 
 
@@ -268,7 +268,7 @@ class NIHChestDataset():
         self.data = {}
 
     def load_ground_truth_graph(self):
-        raise NotImplementedError("There is no ground truth graph for the NIH-chest dataset.")
+        graph = None
 
 
     def split(self):
@@ -396,7 +396,7 @@ class _NIH_chest():
         # create X,c,y
         # select columns in the order specified in self.concepts_names and self.task_names
         self.c = torch.tensor(self.df[list(self.concepts_names)].values.astype(np.float32)) 
-        self.y = self.df[list(self.task_names)].values.astype(np.float32)
+        self.y = torch.tensor(self.df[list(self.task_names)].values.astype(np.float32))
         if modality == 'image':
             self.X = self.df['img_path'].values
             self.tabular_columns = None

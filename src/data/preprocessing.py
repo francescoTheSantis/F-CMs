@@ -17,8 +17,8 @@ from src.data.utils import reduce_dataset, change_task
 from src.data.datasets.colormnist import update_concept_names_ColorMNIST, onehot_to_concepts_ColorMNIST
 from src.data.datasets.fashionmnist import update_concept_names_FashionMNIST, onehot_to_concepts_FashionMNIST
 from src.data.autoencoder import AutoencoderTrainer, scale_embeddings
-#from src.data.labelfree_preprocessing import load_pretrained_clip_model, generate_img_embeddings_and_assign_concepts
-#from src.completion.concepts_retrieval import concepts_generation, filtering_concepts_from_llm
+from src.data.labelfree_preprocessing import load_pretrained_clip_model, generate_img_embeddings_and_assign_concepts
+from src.completion.concepts_retrieval import concepts_generation, filtering_concepts_from_llm
 #from src.data.datasets.synthetic import get_synthetic_datasets, SyntheticDatasetContainer
 
 def generate_img_embeddings(dataset: torch.utils.data.Dataset,
@@ -255,7 +255,55 @@ def preprocess_dataset(dataset_cfg, _dataset, device, backbone ='resnet18') -> d
         else:
             raise ValueError("The FashionMNIST dataset requires onehot_to_concepts to be set to True to change the task to color; otherwise, clothing is not causally connected to any concept")
     
+    elif dataset_name in ['cub_causal_struct', 'cub']:
+        dataset.split()
 
+        dataset.data['train'].update_lists()
+        dataset.data['val'].update_lists()
+        dataset.data['test'].update_lists()
+
+        dataset = maybe_reduce(dataset_cfg.get('reduce_fraction', None), dataset)
+        dataset = generate_img_embeddings(dataset, 
+                                          batch_size=256,
+                                          device=device,
+                                          backbone=backbone) 
+        
+    elif cfg.dataset.get('name') == 'siim_pneumothorax':
+        clip_model, clip_tokenizer, ckpt_config = load_pretrained_clip_model("r50_mcc")
+        dataset.split(ckpt_config)
+        	   
+        # if we already generated the concepts we simply read them form the respective json file,
+        # otherwise we generate them using the llm.
+        concepts_path = os.path.join(CACHE, "siim_pneumothorax")
+        if not os.path.exists(os.path.join(concepts_path, 'generated_concepts.json')):
+            # generate concepts with llm
+            concepts = concepts_generation()
+            concepts = filtering_concepts_from_llm(concepts,
+                                                    class_labels = dataset.y_info['names'],
+                                                    training_data = dataset.data["train"],
+                                                    clip_model = clip_model,
+                                                    clip_tokenizer = clip_tokenizer,
+                                                    ckpt_config = ckpt_config,
+                                                    device = device) 
+            with open(os.path.join(concepts_path, 'generated_concepts.json'), 'w') as f:
+                json.dump({'concepts': concepts}, f)
+        else:
+            with open(os.path.join(concepts_path, 'generated_concepts.json')) as f:
+                concepts = json.load(f)['concepts']          
+        dataset = generate_img_embeddings_and_assign_concepts(dataset_name = cfg.dataset.get('name'),
+                                                                dataset = dataset,
+                                                                concepts = concepts,
+                                                                clip_model = clip_model,
+                                                                clip_tokenizer = clip_tokenizer,
+                                                                ckpt_config = ckpt_config,
+                                                                batch_size=256, 
+                                                                device=device)
+        # avoid empty spaces in the concepts names
+        dataset.c_info['names'] = [concept.replace(' ', '_') for concept in dataset.c_info['names']]
+
+
+        #dataset = maybe_reduce(cfg.dataset.get('reduce_fraction', None), dataset)
+        #dataset = generate_img_embeddings(dataset, batch_size=cfg.dataset.get('batch_size'), device=device)
     elif dataset_name in ['asia', 'alarm', 'sachs', 'hailfinder', 'insurance']:
         dataset = maybe_reduce(dataset_cfg.get('reduce_fraction', None), dataset)
         

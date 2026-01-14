@@ -1,4 +1,5 @@
 import pickle
+from xml.parsers.expat import model
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
@@ -101,6 +102,11 @@ def single_c_plot(
 
     if plot_name=='single_c_interventions_on_y':
         learning_methods = reorder(learning_methods, clients_flag, client_perspective)
+
+    # Check if there's any data to plot
+    if len(learning_methods) == 0 or len(datasets) == 0:
+        print(f"Warning: No data available to plot for {plot_name}. Skipping plot.")
+        return
 
     # change models' names according to model_styles
     input['model'] = input['model'].apply(lambda x: model_styles[x]['name'] if x in model_styles else x)
@@ -1404,17 +1410,26 @@ def load_exps(exps_path, n_clients=5, args=None):
 
     def _format_results(row, graph, dataset, model, count_nan=False, task=None, worst_classifier=False):
         if model != 'blackbox':
-            values = [v for k,v in row.items() if k in row]
+            # Build values list based on the graph - include all concepts from graph
+            # If a concept is not in row (filtered out), it's a missing concept
+            values = []
+            for c_name in graph:
+                if c_name in row:
+                    values.append(row[c_name])
+                else:
+                    # Concept is missing (was filtered out) - will be treated as OOD
+                    values.append(np.nan)
+            
             if count_nan:
                 return sum([1 for x in values if math.isnan(x)]) if values else 0
             else:
                 if worst_classifier:
-                    # replace the NaN values with the performance of the worst classifier
+                    # Replace missing concepts with random classifier performance
                     if dataset is not None and dataset in c_info and c_info[dataset] is not None:
                         for idx, c_name in enumerate(graph):
-                            concept_cardinality_idx = c_info[dataset]['names'].index(c_name)
-                            concept_cardinality = c_info[dataset]['cardinality'][concept_cardinality_idx]
                             if math.isnan(values[idx]):
+                                concept_cardinality_idx = c_info[dataset]['names'].index(c_name)
+                                concept_cardinality = c_info[dataset]['cardinality'][concept_cardinality_idx]
                                 values[idx] = 1.0/concept_cardinality
                 else:
                     # eliminate nan values before computing the average
@@ -1425,12 +1440,14 @@ def load_exps(exps_path, n_clients=5, args=None):
         else:
             return 0
 
+
     # Aggregate the results in concept_acc and task_acc for each row.
-    # In the aggregation, we simply compute the expected value over the concepts on which
-    # the model was trained. Therefore, if the model didn't train on a concept (NaN value), we ignore it in the average.
+    # In the aggregation, we compute the expected value over the concepts. 
+    # For missing concepts (NaN values), we predict them using a random classifier 
+    # (uniform distribution based on concept cardinality: 1/cardinality).
     performance['concept_left_out'] = performance.apply(lambda x: _format_results(x['concept_acc'], x['graph'], x['dataset'], x['model'], count_nan=True), axis=1)
-    performance['agg_concept'] = performance.apply(lambda x: _format_results(x['concept_acc'], x['graph'], x['dataset'], x['model'], count_nan=False), axis=1)
-    performance['agg_label'] = performance.apply(lambda x: _format_results(x['concept_acc'], x['graph'], x['dataset'], x['model'], count_nan=False, task=x['task_acc']), axis=1)
+    performance['agg_concept'] = performance.apply(lambda x: _format_results(x['concept_acc'], x['graph'], x['dataset'], x['model'], count_nan=False, worst_classifier=True), axis=1)
+    performance['agg_label'] = performance.apply(lambda x: _format_results(x['concept_acc'], x['graph'], x['dataset'], x['model'], count_nan=False, task=x['task_acc'], worst_classifier=True), axis=1)
 
     return performance, c_info
 

@@ -401,6 +401,8 @@ def get_subgraphs(graph, y_index, min_number_subgraphs = 3, max_number_subgraphs
     couples_parents_children = find_all_parent_child_pairs(graph, y_index_graph)
     couples_covered = set()
     subgraph_from_missing_root = None
+    n_subgraphs_add_nodes_to_generate = 0
+    n_subgraphs_add_nodes_generated = 0
 
     # manage additional nodes to include in specific subgraphs
     if dict_subgraph_with_add_nodes:
@@ -652,12 +654,12 @@ def get_subgraphs(graph, y_index, min_number_subgraphs = 3, max_number_subgraphs
 
         # First, try to merge within groups
         # Merge subgraphs WITH additional nodes
-        #while len(subgraphs_with_add) > n_subgraphs_add_nodes_to_generate and len(subgraphs_with_add) > 1:
-        #    subgraphs_with_add = sorted(subgraphs_with_add, key=lambda x: len(x[1]))
-        #    first = subgraphs_with_add.pop(0)
-        #    second = subgraphs_with_add.pop(0)
-        #    merged = (first[0], list(set(first[1] + second[1])))
-        #    subgraphs_with_add.append(merged)
+        while len(subgraphs_with_add) > n_subgraphs_add_nodes_to_generate and len(subgraphs_with_add) > 1:
+            subgraphs_with_add = sorted(subgraphs_with_add, key=lambda x: len(x[1]))
+            first = subgraphs_with_add.pop(0)
+            second = subgraphs_with_add.pop(0)
+            merged = (first[0], list(set(first[1] + second[1])))
+            subgraphs_with_add.append(merged)
 
         # Merge subgraphs WITHOUT additional nodes
         while len(subgraphs_with_add) + len(subgraphs_without_add) > max_number_subgraphs and len(subgraphs_without_add) > 1:
@@ -953,6 +955,8 @@ def generate_split(cfg, datasets, graph, y_index):
             )
 
     else:
+        if cfg.learning.subgraphs.rnd_drift > 1:
+           assert cfg.learning.subgraphs.get('dict_subgraph_with_add_nodes', {}) != {}, "To use rnd_drift > 1, you must specify dict_subgraph_with_add_nodes in the config."
         # Get the subgraph for each client
         subgraphs, subgraphs_concept_names, subgraphs_with_add_nodes, add_nodes_values, add_nodes_names = get_subgraphs(graph, 
                                                                          y_index, 
