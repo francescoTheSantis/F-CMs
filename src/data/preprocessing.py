@@ -268,7 +268,7 @@ def preprocess_dataset(dataset_cfg, _dataset, device, backbone ='resnet18') -> d
                                           device=device,
                                           backbone=backbone) 
         
-    elif cfg.dataset.get('name') == 'siim_pneumothorax':
+    elif dataset_name == 'siim_pneumothorax':
         clip_model, clip_tokenizer, ckpt_config = load_pretrained_clip_model("r50_mcc")
         dataset.split(ckpt_config)
         	   

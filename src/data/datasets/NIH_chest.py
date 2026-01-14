@@ -242,6 +242,7 @@ class NIHChestDataset():
             shutil.move(os.path.join(DATA_DIRECTORY, "nih_cxr14", "ascending_aorta_enlargement.csv"), str(DATA_DIRECTORY) + "/nih_cxr14/radiological_findings")
             shutil.move(os.path.join(DATA_DIRECTORY, "nih_cxr14", "descending_aorta_enlargement.csv"), str(DATA_DIRECTORY) + "/nih_cxr14/radiological_findings")
             shutil.move(os.path.join(DATA_DIRECTORY, "nih_cxr14", "descending_aorta_tortuous.csv"), str(DATA_DIRECTORY) + "/nih_cxr14/radiological_findings")
+            #shutil.move(os.path.join(DATA_DIRECTORY, "nih_cxr14", "mask_number.csv"), str(DATA_DIRECTORY) + "/nih_cxr14/mask_number.csv")
         else:
             print("Files already extracted.")
 
@@ -256,14 +257,14 @@ class NIHChestDataset():
         if modality not in ['image', 'tabular']:
             raise ValueError("Modality must be either 'image' or 'tabular'")
         elif modality == 'image':
-            self.c_info = {'names': list(CONCEPTS_FOR_IMAGES_MODALITY),   
-            'cardinality': [2,2,2,2,2,2,2,2]} # 8 concepts
+            self.c_info = {'names': list(CONCEPTS_FOR_IMAGES_MODALITY - {"trachea_deviation"}),   
+            'cardinality': [2,2,2,2,2,2,2]} # 7 concepts
         else:
-            self.c_info = {'names': list(CONCEPTS_FOR_TABULAR_MODALITY),
-            'cardinality': [2,2,2,2,2,2,2,2,2]} # 9 concepts
+            self.c_info = {'names': list(CONCEPTS_FOR_TABULAR_MODALITY - {"trachea_deviation"}),
+            'cardinality': [2,2,2,2,2,2,2,2]} # 8 concepts
 
 
-        self.y_info = {'names': ['diagnosis'], 'cardinality': [15]} # 14 disease categories + No Finding
+        self.y_info = {'names': ['trachea_deviation'], 'cardinality': [2]} # 14 disease categories + No Finding
 
         self.data = {}
 
@@ -325,26 +326,51 @@ class _NIH_chest():
         # clean images
         self.df = self.df[self.df['img_id'] != '00005299_000.png'].reset_index(drop=True)
 
+        df_mask = pd.read_csv(DATA_DIRECTORY / "nih_cxr14/mask_number.csv")
+        df_abd = pd.read_csv(DATA_DIRECTORY / "nih_cxr14/abdomial_xray.csv")
+        df_win = pd.read_csv(DATA_DIRECTORY / "nih_cxr14/window.csv")
+
+        # add .png to image_file columns
+        df_mask['img_id'] = df_mask['image_file'].apply(lambda x: x + '.png')
+        df_abd['img_id'] = df_abd['image_file'].apply(lambda x: x + '.png')
+        df_win['img_id'] = df_win['image_file'].apply(lambda x: x + '.png')
+
+        # keep only images with mask_number == 1, abdominal_xray == False, window == 'Lung'
+        df_mask = df_mask[df_mask['label'] == 1]
+        df_abd = df_abd[df_abd['label'] == 1]
+        df_win = df_win[df_win['label'] == 1]
+
+        #drop all the columns except for img_id
+        df_mask = df_mask[['img_id']]
+        df_abd = df_abd[['img_id']]
+        df_win = df_win[['img_id']]
+
+        # merge with self.df to keep only the images that satisfy the three conditions
+        self.df = pd.merge(self.df, df_mask, on= "img_id", how='inner')
+        self.df = pd.merge(self.df, df_abd, on='img_id', how='inner')
+        self.df = pd.merge(self.df, df_win, on='img_id', how='inner')  
+
+
         ### ADD TASK TO THE DATAFRAME ###
         # load the task labels
-        labels = pd.read_csv(DATA_DIRECTORY / "original_nih_chest/Data_Entry_2017.csv")
-        labels = labels.rename(columns={'Image Index': 'img_id', 'Finding Labels': 'diagnosis'}) 
-        self.df = pd.merge(self.df, labels, on='img_id', how='left')
+        #labels = pd.read_csv(DATA_DIRECTORY / "original_nih_chest/Data_Entry_2017.csv")
+        #labels = labels.rename(columns={'Image Index': 'img_id', 'Finding Labels': 'diagnosis'}) 
+        #self.df = pd.merge(self.df, labels, on='img_id', how='left')
         # keep only img_id, diagnosis (task_names) and concepts_names columns
-        columns_to_keep = ['img_id'] + list(self.task_names) + list(self.concepts_names)
-        self.df = self.df[[col for col in columns_to_keep if col in self.df.columns]]
+        #columns_to_keep = ['img_id'] + list(self.task_names) + list(self.concepts_names)
+        #self.df = self.df[[col for col in columns_to_keep if col in self.df.columns]]
         
         # Filter: keep only samples with single diagnosis (no "|" character)
         # Note: checked that all the diagnoses are still represented in the training set after this filtering
-        self.df = self.df[~self.df['diagnosis'].str.contains('|', regex=False, na=False)].reset_index(drop=True)
-        print(f"After filtering for single diagnoses: {len(self.df)} samples")
+        #self.df = self.df[~self.df['diagnosis'].str.contains('|', regex=False, na=False)].reset_index(drop=True)
+        #print(f"After filtering for single diagnoses: {len(self.df)} samples")
 
         
         # Replace diagnosis name with corresponding number from TASK_DICTIONARY
-        self.df['diagnosis'] = self.df['diagnosis'].apply(lambda x: TASK_DICTIONARY.get(x, np.nan) if pd.notna(x) else np.nan)
+        #self.df['diagnosis'] = self.df['diagnosis'].apply(lambda x: TASK_DICTIONARY.get(x, np.nan) if pd.notna(x) else np.nan)
 
         # eliminate rows with NaN diagnosis
-        self.df = self.df.dropna(subset=['diagnosis']).reset_index(drop=True)
+        #self.df = self.df.dropna(subset=['diagnosis']).reset_index(drop=True)
 
         ### ADD CONCEPTS TO THE DATAFRAME ###
         # load the concepts
@@ -378,9 +404,9 @@ class _NIH_chest():
             # add concepts and raw tabular data to concepts_df
             # drop from concept_file all the columns that are not in RAW_TABULAR_DATA_COLUMNS or in TOTAL_CONCEPTS
             if self.modality == 'tabular':
-                concept_file = concept_file[[col for col in concept_file.columns if col in RAW_TABULAR_DATA_COLUMNS or col in self.concepts_names or col == 'img_id']]
+                concept_file = concept_file[[col for col in concept_file.columns if col in RAW_TABULAR_DATA_COLUMNS or col in self.concepts_names or col in self.task_names or col == 'img_id']]
             else:
-                concept_file = concept_file[[col for col in concept_file.columns if col in self.concepts_names or col == 'img_id']]   
+                concept_file = concept_file[[col for col in concept_file.columns if col in self.concepts_names or col in self.task_names or col == 'img_id']]   
             self.df = pd.merge(self.df, concept_file, on='img_id', how='left')
             
         # preprocess tabular data
@@ -406,26 +432,34 @@ class _NIH_chest():
                 self.tabular_columns = [col for col in self.df.columns if col not in list(self.concepts_names) + list(self.task_names) + ['img_path']]
             self.X = self.df[self.tabular_columns].values.astype(np.float32)
 
+        # eliminate self.df to save memory and eliminate attribute df
+        self.df = None
+        delattr(self, 'df')
+
 
     def register_graph(self, graph):
         self.graph = graph
 
     def __len__(self):
-        return len(self.df)
+        return len(self.X)
 
     def __getitem__(self, idx):
         if self.modality == 'image':
-            img_path = self.X[idx]
-            try:
-                transform = torchvision.transforms.Compose([xrv.datasets.XRayCenterCrop(),xrv.datasets.XRayResizer(224)])
-                img = imread(img_path)
-                img= normalize(img, maxval=255, reshape=True)
-                img = transform(img)
-                img = torch.from_numpy(img)       
-            except:
-                print(f"Error loading image: {img_path}")
-                raise FileNotFoundError(f"Image not found: {img_path}")  
-            x = img
+            # Check if X[idx] is already a tensor (from preprocessing like autoencoder)
+            if isinstance(self.X[idx], torch.Tensor):
+                x = self.X[idx]
+            else:
+                img_path = self.X[idx]
+                try:
+                    transform = torchvision.transforms.Compose([xrv.datasets.XRayCenterCrop(),xrv.datasets.XRayResizer(224)])
+                    img = imread(img_path)
+                    img= normalize(img, maxval=255, reshape=True)
+                    img = transform(img)
+                    img = torch.from_numpy(img)       
+                except:
+                    print(f"Error loading image: {img_path}")
+                    raise FileNotFoundError(f"Image not found: {img_path}")  
+                x = img
         else:
             x = self.X[idx]
             # all the columns that are not concepts or tasks

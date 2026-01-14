@@ -6,7 +6,7 @@ import hydra # type: ignore
 import pickle
 from torch.utils.data import DataLoader
 from src.causal_discovery.causal_discovery_block import causal_discovery
-#from src.completion.completion_block import complete_graph_with_llm
+from src.completion.completion_block import complete_graph_with_llm
 from src.data.utils import static_graph_collate
 from pytorch_lightning.loggers import WandbLogger # type: ignore
 from src.trainer import Trainer
@@ -153,6 +153,7 @@ def main(cfg: DictConfig) -> None:
         datasets = {0: dataset}
     
     print(OmegaConf.to_yaml(cfg))
+    
 
     if cfg.dataset.load_graph:
         try:
@@ -171,17 +172,18 @@ def main(cfg: DictConfig) -> None:
         else:
             if true_graph is None or cfg.dataset.load_true_graph == False:
                 # estimate causal graph with causal structural learning algorithms
-                graph = causal_discovery(cfg, dataset, true_graph)
+                graph = causal_discovery(cfg, dataset, true_graph, save_file_name="graph_causal_discovery.pkl")
                 #if true_graph is not None:
                 #    hamming = hamming_distance(true_graph, predicted_graph)
                 #    print('(after CD) structural hamming distance: ', hamming)    
 
                 # complete the causal graph with LLM and RAG
-                #completed_graph = complete_graph_with_llm(cfg, predicted_graph, cfg.dataset.name)
+                graph = complete_graph_with_llm(cfg, graph, cfg.dataset.name)
                 #if true_graph is not None:
                 #    hamming = hamming_distance(true_graph, completed_graph)
                 #     print('(after LLM + RAG) structural hamming distance: ', hamming)
                 graph, dataset = remove_problematic_edges(graph, dataset)
+                y_index = graph.columns.get_loc(datasets[0].y_info['names'][0])
                 graph = remove_cycles(graph, y_index)
                 #graph = completed_graph
                 with open(os.path.join(dataset_directory, "learned_graph.pkl"), 'wb') as f:
@@ -227,9 +229,10 @@ def main(cfg: DictConfig) -> None:
     # edge can only be directed at this stage, the following function is just here in 
     # case the CD + LLM + RAG pipeline is modified and could produce bidirected or undirected edges
     #graph, dataset = remove_problematic_edges(graph, dataset)
+    y_index = graph.columns.get_loc(datasets[0].y_info['names'][0])
     maybe_plot_graph(graph, 'graph')
 
-    y_index = graph.columns.get_loc(datasets[0].y_info['names'][0])  # it is ok also for multimodal because c_info and y_info contain all the variables of the datasets
+      # it is ok also for multimodal because c_info and y_info contain all the variables of the datasets
         # insert
     #y_index = len(graph)-1
     

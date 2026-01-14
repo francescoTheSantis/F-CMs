@@ -283,7 +283,7 @@ def generate_add_nodes_values(graph, torch_graph, y_index_graph, y_index, add_no
                     connections.append(len(parents)+ len(childrens))
 
         # filter out old_add_nodes_values
-        possible_nodes = [node for node in possible_nodes if node not in old_add_nodes_values]
+        possible_nodes = [node for node in possible_nodes if node not in old_add_nodes_values and node != y_index]
         if possible_nodes == []:
             raise ValueError("It is not possible to select additional nodes with the specified modality. Please change modality or reduce number_add_nodes.")
 
@@ -510,6 +510,8 @@ def get_subgraphs(graph, y_index, min_number_subgraphs = 3, max_number_subgraphs
                                 childrens.extend(curr_childrens)
                         
                         if subgraph_from_missing_root is None:
+                            if childrens == []:
+                                childrens = [node]
                             random_childrens = random.sample(childrens, max(len(childrens)//3, 1))
                             task_indices.extend(random_childrens) 
                             
