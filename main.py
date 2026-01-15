@@ -112,6 +112,7 @@ def main(cfg: DictConfig) -> None:
     # instantiate the dataset, split into train, val, test
     # preprocess all of them and save the preprocessed dataset
     dataset, true_graph, dataset_directory = get_dataset(cfg.dataset, cfg.device, seed=cfg.seed)
+    
 
 
     combined_dataset = OmegaConf.select(cfg, 'combined_datasets.other_datasets', default=None)
@@ -191,8 +192,6 @@ def main(cfg: DictConfig) -> None:
             else:
                 graph = true_graph
 
-
-    
     # interv graph must be always the true graph if available
     if true_graph is not None:
        interv_graph = true_graph.copy()
@@ -317,6 +316,11 @@ def main(cfg: DictConfig) -> None:
     #with open(test_path, 'rb') as f:
     #    test_dataloader = pickle.load(f)
 
+    # Add true_graph_columns to engine config if available
+    if true_graph is not None:
+        with open_dict(cfg):
+            cfg.engine.true_graph_columns = list(true_graph.columns) if hasattr(true_graph, 'columns') else None
+
     # If the training is centralized
     if cfg.learning.mode in ['centralized', 'localized']:
         
@@ -344,6 +348,8 @@ def main(cfg: DictConfig) -> None:
             val_dataloader = DataLoader(datasets[0].data['val'], batch_size=cfg.dataset.batch_size, collate_fn=static_graph_collate)
             test_dataloader = DataLoader(datasets[0].data['test'], batch_size=cfg.dataset.batch_size, collate_fn=static_graph_collate)
 
+
+        
         engine = instantiate(cfg.engine)
         
         

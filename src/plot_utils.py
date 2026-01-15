@@ -372,6 +372,722 @@ def plot_single_c_on_y(
     )
 
 
+def plot_cumulative_single_c_on_y(
+    input,
+    custom_order,
+    model_styles,
+    folder=None,
+    figsize=(20, 15),
+    title_size=16,
+    label_size=14,
+    tick_size=14,
+    legend_size=14,
+    legend_bgcolor='lightgray',
+    legend_edgecolor='black',
+    legend_alpha=0.3,
+    localized_client_id=None
+):
+    """
+    Plot cumulative delta of single concept interventions on y.
+    Concepts are ordered according to input['graph'].
+    If interventions for some concepts are missing, the line is dashed between those points.
+    
+    Args:
+        localized_client_id: ID of the specific localized client to plot (e.g., 1, 2, 3).
+                            If None, only centralized and federated methods are plotted.
+    """
+    
+    # Filter data based on localized_client_id
+    input_global = input.copy()
+    
+    if localized_client_id is not None:
+        # Keep only the specified localized client
+        localized_name = f'localized_{localized_client_id}'
+        input_global = input_global[
+            (input_global['learning'] == 'centralized') |
+            (input_global['learning'] == 'local_federated') |
+            (input_global['learning'] == localized_name)
+        ]
+        # Rename the specific localized client to 'localized' for plotting
+        input_global['learning'] = input_global['learning'].apply(
+            lambda x: 'localized' if x == localized_name else x
+        )
+    else:
+        # Keep only centralized and federated (no localized)
+        input_global = input_global[
+            (input_global['learning'] == 'centralized') |
+            (input_global['learning'] == 'local_federated')
+        ]
+    
+    input_global = input_global[['seed', 'dataset', 'model', 'learning', 'single_c_interventions_on_y', 'graph']].dropna()
+    input_global['single_c_interventions_on_y'] = input_global['single_c_interventions_on_y'].apply(delta_single_c_interventions_on_y)
+
+    # Reorder datasets and learning methods
+    datasets = input_global['dataset'].unique()
+    datasets = sorted(datasets, key=lambda x: custom_order.index(x) if x in custom_order else len(custom_order))
+    learning_methods = reorder(input_global['learning'].unique(), False, False)
+
+    # Check if there's any data to plot
+    if len(learning_methods) == 0 or len(datasets) == 0:
+        print(f"Warning: No data available to plot for cumulative_single_c_interventions_on_y. Skipping plot.")
+        return
+
+    # Change models' names according to model_styles
+    input_global['model'] = input_global['model'].apply(lambda x: model_styles[x]['name'] if x in model_styles else x)
+
+    if len(learning_methods) == 0 or len(model_styles) == 0:
+        print(f"[WARN] cumulative_single_c_interventions_on_y: nothing to plot.")
+        return
+
+    # Spacing tweaks
+    axis_label_pad = 3
+    title_pad = 15
+
+    # Create a separate plot for each dataset
+    for dataset in datasets:
+        n_rows = len(learning_methods)
+        n_cols = 1  # One column per dataset
+
+        figsize = (8, 5 * n_rows)
+        fig = plt.figure(figsize=figsize)
+        gs = fig.add_gridspec(n_rows, n_cols, hspace=0.6, wspace=0.6)
+        axes = [fig.add_subplot(gs[i, 0]) for i in range(n_rows)]
+
+        handles_labels = []
+
+        for i, learning_method in enumerate(learning_methods):
+            ax = axes[i]
+            subset = input_global[(input_global['learning'] == learning_method) & (input_global['dataset'] == dataset)]
+
+            if subset.empty:
+                ax.axis('off')
+                continue
+
+            # Get the concept order from graph
+            # Take the first row's graph (assuming same structure for same dataset/learning)
+            graph = subset.iloc[0]['graph']
+            concept_order = list(graph.keys()) if isinstance(graph, dict) else []
+            
+            if not concept_order:
+                ax.axis('off')
+                continue
+
+            x = np.arange(len(concept_order))
+
+            for model_idx, model in enumerate(model_styles.values()):
+                if model['name'] not in subset['model'].values:
+                    continue
+
+                model_subset = subset[subset['model'] == model['name']]
+                if model_subset.empty:
+                    continue
+
+                # Average over seeds
+                interventions_list = model_subset['single_c_interventions_on_y'].tolist()
+                
+                # Compute cumulative values for each seed
+                cumulative_values_per_seed = []
+                for interventions_dict in interventions_list:
+                    cumulative = 0
+                    cumulative_values = []
+                    missing_mask = []
+                    for concept in concept_order:
+                        if concept in interventions_dict:
+                            cumulative += interventions_dict[concept]
+                            cumulative_values.append(cumulative)
+                            missing_mask.append(False)
+                        else:
+                            cumulative_values.append(cumulative)  # Keep previous value
+                            missing_mask.append(True)
+                    cumulative_values_per_seed.append((cumulative_values, missing_mask))
+                
+                # Average over seeds
+                mean_cumulative = np.mean([cv for cv, _ in cumulative_values_per_seed], axis=0)
+                std_cumulative = np.std([cv for cv, _ in cumulative_values_per_seed], axis=0)
+                stderr_cumulative = 1.96 * std_cumulative / np.sqrt(len(cumulative_values_per_seed))
+                
+                # Aggregate missing mask (if any seed is missing, mark as missing)
+                missing_mask = np.any([mm for _, mm in cumulative_values_per_seed], axis=0)
+
+                color = model['color']
+
+                # Plot line with segments: solid where data exists, dashed where missing
+                for k in range(len(x) - 1):
+                    if missing_mask[k] or missing_mask[k+1]:
+                        linestyle = '--'
+                    else:
+                        linestyle = '-'
+                    
+                    ax.plot(
+                        x[k:k+2],
+                        mean_cumulative[k:k+2],
+                        color=color,
+                        linestyle=linestyle,
+                        linewidth=2,
+                        marker='o',
+                        markersize=5
+                    )
+
+                # Plot error band with different alpha based on missing data
+                for k in range(len(x) - 1):
+                    alpha_value = 0.2 if (missing_mask[k] or missing_mask[k+1]) else 0.4
+                    ax.fill_between(
+                        x[k:k+2],
+                        (mean_cumulative - stderr_cumulative)[k:k+2],
+                        (mean_cumulative + stderr_cumulative)[k:k+2],
+                        color=color,
+                        alpha=alpha_value
+                    )
+
+                if i == 0:
+                    # Create a dummy line for legend
+                    line, = ax.plot([], [], color=color, linestyle='-', linewidth=2, marker='o', label=model['name'])
+                    handles_labels.append((line, model['name']))
+
+            ax.set_xticks(x)
+            ax.set_xticklabels(concept_order, rotation=45, ha='right', fontsize=tick_size)
+            ax.tick_params(axis='y', labelsize=tick_size)
+            ax.minorticks_off()
+            ax.grid(True, alpha=0.3)
+
+            # Show x-axis label only for last row
+            if i == n_rows - 1:
+                ax.set_xlabel("Concept Names", fontsize=label_size, labelpad=axis_label_pad)
+
+            # Show dataset name only in top row
+            if i == 0:
+                ax.set_title(dataset, fontsize=title_size, pad=title_pad)
+
+            ax.set_ylabel("Cumulative $\\Delta$ on $y$", fontsize=label_size, labelpad=axis_label_pad)
+
+            # Add row label for learning method on the left
+            learning_method_name = rename_learning_methods([learning_method])[0]
+            ax_pos = ax.get_position()
+            fig.text(
+                ax_pos.x0 - 0.12,
+                ax_pos.y0 + ax_pos.height / 2,
+                learning_method_name,
+                va='center',
+                ha='right',
+                rotation='vertical',
+                fontsize=title_size
+            )
+
+        # Shared legend
+        if handles_labels:
+            handles, labels = zip(*handles_labels)
+            legend = fig.legend(
+                handles,
+                labels,
+                loc='lower center',
+                ncol=len(model_styles),
+                bbox_to_anchor=(0.5, -0.08),
+                fontsize=legend_size,
+                frameon=True
+            )
+            legend.get_frame().set_facecolor(legend_bgcolor)
+            legend.get_frame().set_edgecolor(legend_edgecolor)
+            legend.get_frame().set_alpha(legend_alpha)
+
+        plt.tight_layout(rect=[0.15, 0.08, 0.98, 0.98], pad=1.4, h_pad=1.2, w_pad=1.0)
+
+        if folder:
+            if localized_client_id is not None:
+                plt.savefig(f"{folder}/cumulative_single_c_interventions_on_y_{dataset}_client_{localized_client_id}.pdf", bbox_inches='tight')
+            else:
+                plt.savefig(f"{folder}/cumulative_single_c_interventions_on_y_{dataset}.pdf", bbox_inches='tight')
+        else:
+            raise ValueError("Folder path is required to save the figure.")
+        
+        plt.close(fig)
+
+
+def plot_cumulative_single_architecture_multi_modality(
+    input,
+    custom_order,
+    architecture_name,
+    rnd_drift_values=None,
+    folder=None,
+    figsize=(20, 15),
+    title_size=16,
+    label_size=14,
+    tick_size=14,
+    legend_size=14,
+    legend_bgcolor='lightgray',
+    legend_edgecolor='black',
+    legend_alpha=0.3,
+    localized_client_id=None
+):
+    """
+    Plot cumulative delta for a single architecture with multiple learning modalities/configurations.
+    
+    Args:
+        architecture_name: Name of the architecture to plot (e.g., 'c2bm', 'cbm')
+        rnd_drift_values: Dictionary mapping indices to rnd_drift values, e.g., {0: 0, 1: 10}
+                          or a single value to use for all rows. If None, checks input data.
+        localized_client_id: ID of the specific localized client to consider
+    """
+    
+    # Filter data for the specified architecture
+    input_filtered = input[input['model'] == architecture_name].copy()
+    
+    if input_filtered.empty:
+        print(f"Warning: No data available for architecture {architecture_name}. Skipping plot.")
+        return
+    
+    # Filter based on localized_client_id
+    if localized_client_id is not None:
+        localized_name = f'localized_{localized_client_id}'
+        input_filtered = input_filtered[
+            (input_filtered['learning'] == 'centralized') |
+            (input_filtered['learning'] == 'local_federated') |
+            (input_filtered['learning'] == localized_name)
+        ]
+        input_filtered['learning'] = input_filtered['learning'].apply(
+            lambda x: 'localized' if x == localized_name else x
+        )
+    
+    # Handle rnd_drift information
+    if 'rnd_drift' not in input_filtered.columns:
+        if rnd_drift_values is not None:
+            # If rnd_drift_values is a dict, use it to map values
+            if isinstance(rnd_drift_values, dict):
+                input_filtered['rnd_drift'] = input_filtered.index.map(lambda x: rnd_drift_values.get(x, 0))
+            else:
+                # If it's a single value, use it for all rows
+                input_filtered['rnd_drift'] = rnd_drift_values
+        else:
+            print(f"Warning: 'rnd_drift' column not found in input data and no rnd_drift_values provided. All local_federated will be treated as no drift.")
+            input_filtered['rnd_drift'] = 0
+    
+    # Also get n_rounds information if available
+    if 'n_rounds' not in input_filtered.columns:
+        print(f"Warning: 'n_rounds' column not found in input data. Will assume rnd_drift comparison without n_rounds.")
+        input_filtered['n_rounds'] = float('inf')  # Default to infinity so rnd_drift > n_rounds is always false
+    
+    # Create a new column that distinguishes local_federated by rnd_drift
+    def create_learning_label(row):
+        if row['learning'] == 'local_federated':
+            # Convert to numeric to ensure comparison works
+            rnd_drift = float(row['rnd_drift']) if row['rnd_drift'] is not None else 0
+            n_rounds = float(row['n_rounds']) if row['n_rounds'] is not None else float('inf')
+            
+            # No drift if rnd_drift == 0 or rnd_drift > n_rounds (drift never occurs)
+            if rnd_drift == 0 or rnd_drift > n_rounds:
+                return 'local_federated_no_drift'
+            else:
+                return 'local_federated_drift'
+        return row['learning']
+    
+    input_filtered['learning_label'] = input_filtered.apply(create_learning_label, axis=1)
+    
+    # Keep rnd_drift column in the filtered data
+    columns_to_keep = ['seed', 'dataset', 'model', 'learning', 'learning_label', 'rnd_drift', 'n_rounds', 'single_c_interventions_on_y', 'graph', 'true_graph']
+    input_filtered = input_filtered[[col for col in columns_to_keep if col in input_filtered.columns]]
+    input_filtered = input_filtered.dropna(subset=['single_c_interventions_on_y', 'graph'])
+    input_filtered['single_c_interventions_on_y'] = input_filtered['single_c_interventions_on_y'].apply(delta_single_c_interventions_on_y)
+
+    datasets = input_filtered['dataset'].unique()
+    datasets = sorted(datasets, key=lambda x: custom_order.index(x) if x in custom_order else len(custom_order))
+    learning_methods = input_filtered['learning_label'].unique()
+
+    if len(learning_methods) == 0 or len(datasets) == 0:
+        print(f"Warning: No data available to plot. Skipping.")
+        return
+
+    # Define colors for different learning methods
+    learning_colors = {
+        'centralized': '#1f77b4',
+        'localized': '#d62728',
+        'local_federated_no_drift': '#ff7f0e',
+        'local_federated_drift': '#2ca02c'
+    }
+    
+    # Define display names for learning methods
+    learning_display_names = {
+        'centralized': 'Centralized',
+        'localized': 'Localized',
+        'local_federated_no_drift': 'Federated (no drift)',
+        'local_federated_drift': 'Federated (with drift)'
+    }
+
+    axis_label_pad = 3
+    title_pad = 15
+
+    # Create a separate plot for each dataset
+    for dataset in datasets:
+        figsize = (10, 6)
+        fig, ax = plt.subplots(figsize=figsize)
+        handles_labels = []
+
+        subset = input_filtered[input_filtered['dataset'] == dataset]
+        
+        if subset.empty:
+            plt.close(fig)
+            continue
+
+        # Determine concept order from true_graph if available, otherwise use graph
+        if 'true_graph' in subset.columns and subset.iloc[0]['true_graph'] is not None:
+            true_graph = subset.iloc[0]['true_graph']
+            # true_graph is now a list of concept names (saved in main.py as list(true_graph.columns))
+            if isinstance(true_graph, list):
+                concept_order = true_graph 
+            else:
+                # Fallback if it's some other format
+                concept_order = list(true_graph)
+        else:
+            # Fallback to using graph
+            all_graphs = subset['graph'].tolist()
+            concept_order = list(all_graphs[0].keys()) if isinstance(all_graphs[0], dict) else all_graphs[0]
+        
+        # eliminate from concept_order the last concept of true_graph, i.e., the true task
+        concept_order = concept_order[:-1]
+
+        if not concept_order:
+            plt.close(fig)
+            continue
+
+        x = np.arange(len(concept_order))
+
+
+
+        for learning_method in learning_methods:
+            method_subset = subset[subset['learning_label'] == learning_method]
+            
+            if method_subset.empty:
+                continue
+
+            # Average over seeds
+            interventions_list = method_subset['single_c_interventions_on_y'].tolist()
+            graphs_list = method_subset['graph'].tolist()
+            
+            # Compute cumulative values for each seed
+            cumulative_values_per_seed = []
+            for interventions_dict, method_graph in zip(interventions_list, graphs_list):
+                # Determine which concepts are available for this learning method (from its graph)
+                method_concepts = list(method_graph.keys()) if isinstance(method_graph, dict) else method_graph
+                
+                cumulative = 0
+                cumulative_values = []
+                missing_mask = []
+                for concept in concept_order:
+                    # A concept is available ONLY if it's in both the method's graph AND the interventions dict
+                    if concept in method_concepts and concept in interventions_dict:
+                        cumulative += interventions_dict[concept]
+                        cumulative_values.append(cumulative)
+                        missing_mask.append(False)
+                    else:
+                        # Concept not available for this learning method
+                        cumulative_values.append(cumulative)
+                        missing_mask.append(True)
+                cumulative_values_per_seed.append((cumulative_values, missing_mask))
+            
+            # Calculate mean and std considering only seeds where concept is present
+            mean_cumulative = []
+            std_cumulative = []
+            stderr_cumulative = []
+            
+            for concept_idx in range(len(concept_order)):
+                # Get values for this concept only from seeds where it's present (not missing)
+                values_for_concept = []
+                for cumulative_values, missing_mask_seed in cumulative_values_per_seed:
+                    if not missing_mask_seed[concept_idx]:  # Concept is present in this seed
+                        values_for_concept.append(cumulative_values[concept_idx])
+                
+                if len(values_for_concept) > 0:
+                    mean_cumulative.append(np.mean(values_for_concept))
+                    std_cumulative.append(np.std(values_for_concept))
+                    stderr_cumulative.append(1.96 * np.std(values_for_concept) / np.sqrt(len(values_for_concept)))
+                else:
+                    # No valid seeds for this concept - use 0
+                    mean_cumulative.append(0)
+                    std_cumulative.append(0)
+                    stderr_cumulative.append(0)
+            
+            mean_cumulative = np.array(mean_cumulative)
+            std_cumulative = np.array(std_cumulative)
+            stderr_cumulative = np.array(stderr_cumulative)
+            
+            # Aggregate missing mask: a concept is missing if it's missing in ALL seeds
+            missing_mask = np.all([mm for _, mm in cumulative_values_per_seed], axis=0)
+
+            color = learning_colors.get(learning_method, '#333333')
+            learning_method_name = learning_display_names.get(learning_method, learning_method)
+
+            # Plot line with segments
+            for k in range(len(x) - 1):
+                if missing_mask[k+1]:
+                    linestyle = '--'
+                else:
+                    linestyle = '-'
+                
+                ax.plot(
+                    x[k:k+2],
+                    mean_cumulative[k:k+2],
+                    color=color,
+                    linestyle=linestyle,
+                    linewidth=2,
+                    marker='o',
+                    markersize=6
+                )
+
+            # Plot error band with different alpha based on missing data
+            for k in range(len(x) - 1):
+                alpha_value = 0.2 if (missing_mask[k+1]) else 0.4
+                ax.fill_between(
+                    x[k:k+2],
+                    (mean_cumulative - stderr_cumulative)[k:k+2],
+                    (mean_cumulative + stderr_cumulative)[k:k+2],
+                    color=color,
+                    alpha=alpha_value
+                )
+
+            # Create dummy line for legend
+            line, = ax.plot([], [], color=color, linestyle='-', linewidth=2, marker='o', label=learning_method_name)
+            handles_labels.append((line, learning_method_name))
+
+        ax.set_xticks(x)
+        ax.set_xticklabels(concept_order, rotation=45, ha='right', fontsize=tick_size)
+        ax.tick_params(axis='y', labelsize=tick_size)
+        ax.minorticks_off()
+        ax.grid(True, alpha=0.3)
+        ax.set_xlabel("Concept Names", fontsize=label_size, labelpad=axis_label_pad)
+        ax.set_ylabel("Cumulative $\\Delta$ on $y$", fontsize=label_size, labelpad=axis_label_pad)
+        ax.set_title(f"{dataset} - {architecture_name}", fontsize=title_size, pad=title_pad)
+
+        if handles_labels:
+            handles, labels = zip(*handles_labels)
+            legend = ax.legend(
+                handles,
+                labels,
+                loc='best',
+                fontsize=legend_size,
+                frameon=True
+            )
+            legend.get_frame().set_facecolor(legend_bgcolor)
+            legend.get_frame().set_edgecolor(legend_edgecolor)
+            legend.get_frame().set_alpha(legend_alpha)
+
+        plt.tight_layout()
+
+        if folder:
+            if localized_client_id is not None:
+                plt.savefig(f"{folder}/cumulative_{architecture_name}_multi_modality_{dataset}_client_{localized_client_id}.pdf", bbox_inches='tight')
+            else:
+                plt.savefig(f"{folder}/cumulative_{architecture_name}_multi_modality_{dataset}.pdf", bbox_inches='tight')
+        else:
+            raise ValueError("Folder path is required to save the figure.")
+        
+        plt.close(fig)
+
+
+def plot_cumulative_multi_architecture_single_modality(
+    input,
+    custom_order,
+    model_styles,
+    learning_method,
+    folder=None,
+    figsize=(20, 15),
+    title_size=16,
+    label_size=14,
+    tick_size=14,
+    legend_size=14,
+    legend_bgcolor='lightgray',
+    legend_edgecolor='black',
+    legend_alpha=0.3,
+    localized_client_id=None,
+    drift_filter=None
+):
+    """
+    Plot cumulative delta for multiple architectures with a single learning modality.
+    
+    Args:
+        learning_method: Learning method to filter (e.g., 'centralized', 'local_federated')
+        localized_client_id: ID of the specific localized client (if learning_method contains 'localized')
+        drift_filter: For 'local_federated', specify 'drift', 'no_drift', or None (both)
+    """
+    
+    # Handle localized client selection
+    if localized_client_id is not None and 'localized' in learning_method.lower():
+        localized_name = f'localized_{localized_client_id}'
+        input_filtered = input[input['learning'] == localized_name].copy()
+    else:
+        input_filtered = input[input['learning'] == learning_method].copy()
+    
+    # Handle drift filtering for local_federated
+    if learning_method == 'local_federated' and drift_filter is not None:
+        # Ensure n_rounds column exists
+        if 'n_rounds' not in input_filtered.columns:
+            input_filtered['n_rounds'] = float('inf')
+        if 'rnd_drift' not in input_filtered.columns:
+            input_filtered['rnd_drift'] = 0
+            
+        if drift_filter == 'drift':
+            # Keep only rows where drift occurs (0 < rnd_drift <= n_rounds)
+            input_filtered = input_filtered[
+                (input_filtered['rnd_drift'] > 0) & 
+                (input_filtered['rnd_drift'] <= input_filtered['n_rounds'])
+            ]
+        elif drift_filter == 'no_drift':
+            # Keep only rows where no drift (rnd_drift == 0 or rnd_drift > n_rounds)
+            input_filtered = input_filtered[
+                (input_filtered['rnd_drift'] == 0) | 
+                (input_filtered['rnd_drift'] > input_filtered['n_rounds'])
+            ]
+    
+    if input_filtered.empty:
+        print(f"Warning: No data available for learning method {learning_method}. Skipping plot.")
+        return
+    
+    input_filtered = input_filtered[['seed', 'dataset', 'model', 'learning', 'single_c_interventions_on_y', 'graph']].dropna()
+    input_filtered['single_c_interventions_on_y'] = input_filtered['single_c_interventions_on_y'].apply(delta_single_c_interventions_on_y)
+
+    datasets = input_filtered['dataset'].unique()
+    datasets = sorted(datasets, key=lambda x: custom_order.index(x) if x in custom_order else len(custom_order))
+    
+    # Change models' names according to model_styles
+    input_filtered['model'] = input_filtered['model'].apply(lambda x: model_styles[x]['name'] if x in model_styles else x)
+    
+    models = input_filtered['model'].unique()
+
+    if len(models) == 0 or len(datasets) == 0:
+        print(f"Warning: No data available to plot. Skipping.")
+        return
+
+    axis_label_pad = 3
+    title_pad = 15
+
+    # Create a separate plot for each dataset
+    for dataset in datasets:
+        figsize = (10, 6)
+        fig, ax = plt.subplots(figsize=figsize)
+        handles_labels = []
+
+        subset = input_filtered[input_filtered['dataset'] == dataset]
+        
+        if subset.empty:
+            plt.close(fig)
+            continue
+
+        # Get concept order from graph
+        graph = subset.iloc[0]['graph']
+        concept_order = list(graph.keys()) if isinstance(graph, dict) else []
+        
+        if not concept_order:
+            plt.close(fig)
+            continue
+
+        x = np.arange(len(concept_order))
+
+        for model_name in models:
+            model_subset = subset[subset['model'] == model_name]
+            
+            if model_subset.empty:
+                continue
+
+            # Average over seeds
+            interventions_list = model_subset['single_c_interventions_on_y'].tolist()
+            
+            # Compute cumulative values for each seed
+            cumulative_values_per_seed = []
+            for interventions_dict in interventions_list:
+                cumulative = 0
+                cumulative_values = []
+                missing_mask = []
+                for concept in concept_order:
+                    if concept in interventions_dict:
+                        cumulative += interventions_dict[concept]
+                        cumulative_values.append(cumulative)
+                        missing_mask.append(False)
+                    else:
+                        cumulative_values.append(cumulative)
+                        missing_mask.append(True)
+                cumulative_values_per_seed.append((cumulative_values, missing_mask))
+            
+            # Average over seeds
+            mean_cumulative = np.mean([cv for cv, _ in cumulative_values_per_seed], axis=0)
+            std_cumulative = np.std([cv for cv, _ in cumulative_values_per_seed], axis=0)
+            stderr_cumulative = 1.96 * std_cumulative / np.sqrt(len(cumulative_values_per_seed))
+            
+            # Aggregate missing mask
+            missing_mask = np.any([mm for _, mm in cumulative_values_per_seed], axis=0)
+
+            # Get color from model_styles
+            color = next((model['color'] for model in model_styles.values() if model['name'] == model_name), '#333333')
+
+            # Plot line with segments
+            for k in range(len(x) - 1):
+                if missing_mask[k] or missing_mask[k+1]:
+                    linestyle = '--'
+                else:
+                    linestyle = '-'
+                
+                ax.plot(
+                    x[k:k+2],
+                    mean_cumulative[k:k+2],
+                    color=color,
+                    linestyle=linestyle,
+                    linewidth=2,
+                    marker='o',
+                    markersize=6
+                )
+
+            # Plot error band with different alpha based on missing data
+            for k in range(len(x) - 1):
+                alpha_value = 0.2 if (missing_mask[k] or missing_mask[k+1]) else 0.4
+                ax.fill_between(
+                    x[k:k+2],
+                    (mean_cumulative - stderr_cumulative)[k:k+2],
+                    (mean_cumulative + stderr_cumulative)[k:k+2],
+                    color=color,
+                    alpha=alpha_value
+                )
+
+            # Create dummy line for legend
+            line, = ax.plot([], [], color=color, linestyle='-', linewidth=2, marker='o', label=model_name)
+            handles_labels.append((line, model_name))
+
+        ax.set_xticks(x)
+        ax.set_xticklabels(concept_order, rotation=45, ha='right', fontsize=tick_size)
+        ax.tick_params(axis='y', labelsize=tick_size)
+        ax.minorticks_off()
+        ax.grid(True, alpha=0.3)
+        ax.set_xlabel("Concept Names", fontsize=label_size, labelpad=axis_label_pad)
+        ax.set_ylabel("Cumulative $\\Delta$ on $y$", fontsize=label_size, labelpad=axis_label_pad)
+        
+        # Create title with learning method name
+        learning_display = rename_learning_methods([learning_method if localized_client_id is None else 'localized'])[0]
+        if drift_filter is not None:
+            drift_suffix = " (with drift)" if drift_filter == 'drift' else " (no drift)"
+            learning_display += drift_suffix
+        ax.set_title(f"{dataset} - {learning_display}", fontsize=title_size, pad=title_pad)
+
+        if handles_labels:
+            handles, labels = zip(*handles_labels)
+            legend = ax.legend(
+                handles,
+                labels,
+                loc='best',
+                fontsize=legend_size,
+                frameon=True
+            )
+            legend.get_frame().set_facecolor(legend_bgcolor)
+            legend.get_frame().set_edgecolor(legend_edgecolor)
+            legend.get_frame().set_alpha(legend_alpha)
+
+        plt.tight_layout()
+
+        if folder:
+            method_str = learning_method if localized_client_id is None else f"localized_client_{localized_client_id}"
+            if drift_filter is not None:
+                method_str += f"_{drift_filter}"
+            plt.savefig(f"{folder}/cumulative_multi_arch_{method_str}_{dataset}.pdf", bbox_inches='tight')
+        else:
+            raise ValueError("Folder path is required to save the figure.")
+        
+        plt.close(fig)
+
+
 def delta_single_c_interventions_on_y_id_ood(d, base):
     baseline = base['_baseline']
     delta_dict = {}
@@ -1179,7 +1895,16 @@ def load_exps(exps_path, n_clients=5, args=None):
                 conf = yaml.safe_load(file)
                 dataset = conf['dataset']['name']
                 seed = conf['seed']
-                key = dataset + '_' + str(seed)
+                model = conf['model']['name']
+                training_modality = conf['learning']['mode']
+                rnd_drift = conf['learning'].get('subgraphs', {}).get('rnd_drift', 0)
+                n_rounds = conf['trainer'].get('max_epochs', float('inf'))
+                training_modality_full = training_modality
+                if 'localized' in training_modality:
+                    training_modality_full = training_modality + '_' + str(conf['client_id'])
+                elif "federated" in training_modality or "local_federated" in training_modality:
+                    training_modality_full = training_modality + f'_rnddrift{rnd_drift}_nrounds{n_rounds}'
+                key = dataset + '_' + str(seed) + '_' + training_modality_full
                 if key not in valid_concepts.keys():
                     valid_concepts[key]= []
                 if conf['model']['name'] == 'c2bm':
@@ -1204,12 +1929,38 @@ def load_exps(exps_path, n_clients=5, args=None):
                 d['seed'] = conf['seed']
                 d['dataset'] = conf['dataset']['name']
                 d['model'] = conf['model']['name']
-                key = d['dataset'] + '_' + str(d['seed'])
 
                 if 'localized' in conf['learning']['mode']:
                     d['learning'] = conf['learning']['mode'] + '_' + str(conf['client_id'])
                 else:
                     d['learning'] = conf['learning']['mode']
+
+                # Extract rnd_drift information
+                try:
+                    if 'subgraphs' in conf['learning'] and 'rnd_drift' in conf['learning']['subgraphs']:
+                        d['rnd_drift'] = conf['learning']['subgraphs']['rnd_drift']
+                    else:
+                        d['rnd_drift'] = 0
+                except (KeyError, TypeError):
+                    d['rnd_drift'] = 0
+
+                # Extract n_rounds information (corresponds to max_epochs)
+                try:
+                    if 'max_epochs' in conf['trainer']:
+                        d['n_rounds'] = int(conf['trainer']['max_epochs'])
+                    else:
+                        d['n_rounds'] = float('inf')  # Default to infinity if not found
+                except (KeyError, TypeError):
+                    d['n_rounds'] = float('inf')
+
+                # Build the key to match valid_concepts (same logic as above)
+                training_modality = conf['learning']['mode']
+                training_modality_full = training_modality
+                if 'localized' in training_modality:
+                    training_modality_full = training_modality + '_' + str(conf['client_id'])
+                elif "federated" in training_modality or "local_federated" in training_modality:
+                    training_modality_full = training_modality + f'_rnddrift{d["rnd_drift"]}_nrounds{d["n_rounds"]}'
+                key = d['dataset'] + '_' + str(d['seed']) + '_' + training_modality_full
 
                 # Concept results
                 concept_file = os.path.join(result_file, 'c_accuracy.pkl')
@@ -1235,8 +1986,11 @@ def load_exps(exps_path, n_clients=5, args=None):
                     with open(graph_file, 'rb') as file:
                         graph_results = pickle.load(file)
                     d['graph'] = graph_results['concepts']
+                    # Extract true_graph_columns from graph.pkl if available
+                    d['true_graph'] = graph_results.get('true_graph_columns', None)
                 except FileNotFoundError:
                     d['graph'] = None
+                    d['true_graph'] = None
 
                 ###### Collect the results for the interventions
                 single_id_on_y_file =  os.path.join(exp, 'results', 'single_IDc_interventions_on_y.pkl')

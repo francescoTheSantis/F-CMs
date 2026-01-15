@@ -31,7 +31,8 @@ class Predictor(pl.LightningModule):
                 c_names_all: Optional[list] = None,
                 annotation_assumption: Optional[str] = None,
                 learning_modality: Optional[str] = 'localized',
-                cid: Optional[int] = 1
+                cid: Optional[int] = 1,
+                true_graph_columns: Optional[list] = None
                 ):
         super(Predictor, self).__init__()         
         self.model = model
@@ -68,6 +69,7 @@ class Predictor(pl.LightningModule):
         self._set_metrics(metrics)
 
         self.cid = cid
+        self.true_graph_columns = true_graph_columns
         self.level_intervention_id_annotations = {}
         self.level_intervention_ood_annotations = {}
 
@@ -312,6 +314,7 @@ class Predictor(pl.LightningModule):
                 y_output, c_output = self.forward(**inputs)
                 y_hat, c_hat = self.model.filter_output_for_metric(y_output, c_output)
                 self.test_intervention_single_y[c_name_i].update(y_hat, y)
+                #self.test_intervention_single_y[c_name_i].to(c.device)
                 # update metric after intervention:
                 # after interveening on concept c_name_i, how well can we predict y
                 #self.test_intervention_single_y[c_name_i].reset()
@@ -658,8 +661,22 @@ class Predictor(pl.LightningModule):
 
             # save graph and concepts
             # DA RIVEDERE
-            pickle.dump({'concepts':self.c_names_all,
-                         'policy':self.test_interv_policy}, open("graph.pkl", 'wb'))
+            # Load existing graph.pkl if it exists, otherwise create new dict
+            try:
+                with open("graph.pkl", 'rb') as f:
+                    graph_data = pickle.load(f)
+            except FileNotFoundError:
+                graph_data = {}
+            
+            # Update only these keys without overwriting other data
+            graph_data.update({
+                'concepts': self.c_names_all,
+                'policy': self.test_interv_policy,
+                'true_graph_columns': self.true_graph_columns
+            })
+            
+            # Save updated data
+            pickle.dump(graph_data, open("graph.pkl", 'wb'))
 
     def configure_optimizers(self):
         """"""
