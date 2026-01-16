@@ -1,9 +1,11 @@
+import itertools
 import numpy as np
 import torch
 import os
 import warnings
 import hydra # type: ignore
 import pickle
+import networkx as nx
 from torch.utils.data import DataLoader
 from src.causal_discovery.causal_discovery_block import causal_discovery
 from src.completion.completion_block import complete_graph_with_llm
@@ -195,6 +197,7 @@ def main(cfg: DictConfig) -> None:
     # interv graph must be always the true graph if available
     if true_graph is not None:
        interv_graph = true_graph.copy()
+       centralized_c_dict = {name: idx for idx, name in enumerate(datasets[0].c_info['names'])}
     else:
        interv_graph = graph.copy()
             
@@ -317,9 +320,16 @@ def main(cfg: DictConfig) -> None:
     #    test_dataloader = pickle.load(f)
 
     # Add true_graph_columns to engine config if available
-    if true_graph is not None:
-        with open_dict(cfg):
-            cfg.engine.true_graph_columns = list(true_graph.columns) if hasattr(true_graph, 'columns') else None
+    #if true_graph is not None:
+    with open_dict(cfg):
+        # order true_graph columns following the topological order of the graph
+        G = nx.from_pandas_adjacency(true_graph, create_using=nx.DiGraph)
+        ordered_nodes = list(nx.topological_sort(G))
+        # eliminate task from the ordered columns
+        ordered_nodes = [node for node in ordered_nodes if node != datasets[0].y_info['names'][0]]
+        cfg.engine.centralized_topological_order = ordered_nodes
+        cfg.engine.centralized_c_dict = centralized_c_dict 
+
 
     # If the training is centralized
     if cfg.learning.mode in ['centralized', 'localized']:

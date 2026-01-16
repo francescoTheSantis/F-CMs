@@ -602,7 +602,7 @@ def plot_cumulative_single_c_on_y(
         plt.close(fig)
 
 
-def plot_cumulative_single_architecture_multi_modality(
+def plot_single_architecture_multi_modality(
     input,
     custom_order,
     architecture_name,
@@ -741,7 +741,7 @@ def plot_cumulative_single_architecture_multi_modality(
             concept_order = list(all_graphs[0].keys()) if isinstance(all_graphs[0], dict) else all_graphs[0]
         
         # eliminate from concept_order the last concept of true_graph, i.e., the true task
-        concept_order = concept_order[:-1]
+        #concept_order = concept_order[:-1]
 
         if not concept_order:
             plt.close(fig)
@@ -881,11 +881,11 @@ def plot_cumulative_single_architecture_multi_modality(
         plt.close(fig)
 
 
-def plot_cumulative_multi_architecture_single_modality(
+def OLD(
     input,
     custom_order,
-    model_styles,
-    learning_method,
+    architecture_name,
+    rnd_drift_values=None,
     folder=None,
     figsize=(20, 15),
     title_size=16,
@@ -895,64 +895,112 @@ def plot_cumulative_multi_architecture_single_modality(
     legend_bgcolor='lightgray',
     legend_edgecolor='black',
     legend_alpha=0.3,
-    localized_client_id=None,
-    drift_filter=None
+    localized_client_id=None
 ):
     """
-    Plot cumulative delta for multiple architectures with a single learning modality.
+    Plot cumulative interventions on task for a single architecture with multiple learning modalities.
+    This function takes directly the cumulative task interventions instead of computing them 
+    from single concept interventions.
     
     Args:
-        learning_method: Learning method to filter (e.g., 'centralized', 'local_federated')
-        localized_client_id: ID of the specific localized client (if learning_method contains 'localized')
-        drift_filter: For 'local_federated', specify 'drift', 'no_drift', or None (both)
+        input: DataFrame containing the results with a column for cumulative task interventions
+        architecture_name: Name of the architecture to plot (e.g., 'c2bm', 'cbm')
+        rnd_drift_values: Dictionary mapping indices to rnd_drift values, e.g., {0: 0, 1: 10}
+                          or a single value to use for all rows. If None, checks input data.
+        localized_client_id: ID of the specific localized client to consider
+        
+    Expected columns in input:
+        - model: architecture name
+        - learning: learning modality (centralized, local_federated, localized_X)
+        - dataset: dataset name
+        - seed: random seed
+        - cumulative_task_interventions: list or array of cumulative intervention values
+        - concept_names: list of concept names corresponding to the cumulative values
+        - rnd_drift (optional): drift round value
+        - n_rounds (optional): total number of rounds
     """
     
-    # Handle localized client selection
-    if localized_client_id is not None and 'localized' in learning_method.lower():
-        localized_name = f'localized_{localized_client_id}'
-        input_filtered = input[input['learning'] == localized_name].copy()
-    else:
-        input_filtered = input[input['learning'] == learning_method].copy()
-    
-    # Handle drift filtering for local_federated
-    if learning_method == 'local_federated' and drift_filter is not None:
-        # Ensure n_rounds column exists
-        if 'n_rounds' not in input_filtered.columns:
-            input_filtered['n_rounds'] = float('inf')
-        if 'rnd_drift' not in input_filtered.columns:
-            input_filtered['rnd_drift'] = 0
-            
-        if drift_filter == 'drift':
-            # Keep only rows where drift occurs (0 < rnd_drift <= n_rounds)
-            input_filtered = input_filtered[
-                (input_filtered['rnd_drift'] > 0) & 
-                (input_filtered['rnd_drift'] <= input_filtered['n_rounds'])
-            ]
-        elif drift_filter == 'no_drift':
-            # Keep only rows where no drift (rnd_drift == 0 or rnd_drift > n_rounds)
-            input_filtered = input_filtered[
-                (input_filtered['rnd_drift'] == 0) | 
-                (input_filtered['rnd_drift'] > input_filtered['n_rounds'])
-            ]
+    # Filter data for the specified architecture
+    input_filtered = input[input['model'] == architecture_name].copy()
     
     if input_filtered.empty:
-        print(f"Warning: No data available for learning method {learning_method}. Skipping plot.")
+        print(f"Warning: No data available for architecture {architecture_name}. Skipping plot.")
         return
     
-    input_filtered = input_filtered[['seed', 'dataset', 'model', 'learning', 'single_c_interventions_on_y', 'graph']].dropna()
-    input_filtered['single_c_interventions_on_y'] = input_filtered['single_c_interventions_on_y'].apply(delta_single_c_interventions_on_y)
+    # Filter based on localized_client_id
+    if localized_client_id is not None:
+        localized_name = f'localized_{localized_client_id}'
+        input_filtered = input_filtered[
+            (input_filtered['learning'] == 'centralized') |
+            (input_filtered['learning'] == 'local_federated') |
+            (input_filtered['learning'] == localized_name)
+        ]
+        input_filtered['learning'] = input_filtered['learning'].apply(
+            lambda x: 'localized' if x == localized_name else x
+        )
+    
+    # Handle rnd_drift information
+    if 'rnd_drift' not in input_filtered.columns:
+        if rnd_drift_values is not None:
+            if isinstance(rnd_drift_values, dict):
+                input_filtered['rnd_drift'] = input_filtered.index.map(lambda x: rnd_drift_values.get(x, 0))
+            else:
+                input_filtered['rnd_drift'] = rnd_drift_values
+        else:
+            print(f"Warning: 'rnd_drift' column not found in input data and no rnd_drift_values provided. All local_federated will be treated as no drift.")
+            input_filtered['rnd_drift'] = 0
+    
+    # Get n_rounds information if available
+    if 'n_rounds' not in input_filtered.columns:
+        print(f"Warning: 'n_rounds' column not found in input data. Will assume rnd_drift comparison without n_rounds.")
+        input_filtered['n_rounds'] = float('inf')
+    
+    # Create a new column that distinguishes local_federated by rnd_drift
+    def create_learning_label(row):
+        if row['learning'] == 'local_federated':
+            rnd_drift = float(row['rnd_drift']) if row['rnd_drift'] is not None else 0
+            n_rounds = float(row['n_rounds']) if row['n_rounds'] is not None else float('inf')
+            
+            if rnd_drift == 0 or rnd_drift > n_rounds:
+                return 'local_federated_no_drift'
+            else:
+                return 'local_federated_drift'
+        return row['learning']
+    
+    input_filtered['learning_label'] = input_filtered.apply(create_learning_label, axis=1)
+    
+    # Keep relevant columns
+    required_columns = ['seed', 'dataset', 'model', 'learning', 'learning_label', 
+                       'cumulative_task_interventions', 'concept_names', 'graph']
+    optional_columns = ['rnd_drift', 'n_rounds']
+    columns_to_keep = [col for col in required_columns + optional_columns if col in input_filtered.columns]
+    
+    input_filtered = input_filtered[columns_to_keep]
+    input_filtered = input_filtered.dropna(subset=['cumulative_task_interventions'])
 
     datasets = input_filtered['dataset'].unique()
     datasets = sorted(datasets, key=lambda x: custom_order.index(x) if x in custom_order else len(custom_order))
-    
-    # Change models' names according to model_styles
-    input_filtered['model'] = input_filtered['model'].apply(lambda x: model_styles[x]['name'] if x in model_styles else x)
-    
-    models = input_filtered['model'].unique()
+    learning_methods = input_filtered['learning_label'].unique()
 
-    if len(models) == 0 or len(datasets) == 0:
+    if len(learning_methods) == 0 or len(datasets) == 0:
         print(f"Warning: No data available to plot. Skipping.")
         return
+
+    # Define colors for different learning methods
+    learning_colors = {
+        'centralized': '#2ca02c',
+        'localized': '#d62728',
+        'local_federated_no_drift': '#ff7f0e',
+        'local_federated_drift': '#1f77b4'
+    }
+    
+    # Define display names for learning methods
+    learning_display_names = {
+        'centralized': 'Centralized',
+        'localized': 'Localized',
+        'local_federated_no_drift': 'Federated (no drift)',
+        'local_federated_drift': 'Federated (with drift)'
+    }
 
     axis_label_pad = 3
     title_pad = 15
@@ -969,55 +1017,88 @@ def plot_cumulative_multi_architecture_single_modality(
             plt.close(fig)
             continue
 
-        # Get concept order from graph
-        graph = subset.iloc[0]['graph']
-        concept_order = list(graph.keys()) if isinstance(graph, dict) else []
-        
+        # Get concept order from cumulative_task_interventions keys
+        first_row_interventions = subset['cumulative_task_interventions'].iloc[0]
+        if isinstance(first_row_interventions, dict):
+            concept_order = list(first_row_interventions.keys())
+        else:
+            print(f"Warning: cumulative_task_interventions is not a dict for dataset {dataset}. Skipping.")
+            plt.close(fig)
+            continue
+
         if not concept_order:
             plt.close(fig)
             continue
 
         x = np.arange(len(concept_order))
 
-        for model_name in models:
-            model_subset = subset[subset['model'] == model_name]
+        for learning_method in learning_methods:
+            method_subset = subset[subset['learning_label'] == learning_method]
             
-            if model_subset.empty:
+            if method_subset.empty:
                 continue
 
-            # Average over seeds
-            interventions_list = model_subset['single_c_interventions_on_y'].tolist()
+            # Get cumulative interventions and graphs for each seed
+            cumulative_per_seed = []
+            graphs_list = method_subset['graph'].tolist() if 'graph' in method_subset.columns else []
             
-            # Compute cumulative values for each seed
-            cumulative_values_per_seed = []
-            for interventions_dict in interventions_list:
-                cumulative = 0
-                cumulative_values = []
-                missing_mask = []
-                for concept in concept_order:
-                    if concept in interventions_dict:
-                        cumulative += interventions_dict[concept]
-                        cumulative_values.append(cumulative)
-                        missing_mask.append(False)
+            for idx, row in method_subset.iterrows():
+                cumulative_dict = row['cumulative_task_interventions']
+                if isinstance(cumulative_dict, dict):
+                    # Convert dict to list following concept_order
+                    cumulative_values = [cumulative_dict.get(c, 0) for c in concept_order]
+                elif isinstance(cumulative_dict, np.ndarray):
+                    cumulative_values = cumulative_dict.tolist()
+                elif isinstance(cumulative_dict, list):
+                    cumulative_values = cumulative_dict
+                else:
+                    continue
+                cumulative_per_seed.append(cumulative_values)
+            
+            if not cumulative_per_seed:
+                continue
+            
+            # Calculate mean and standard error across seeds
+            cumulative_array = np.array(cumulative_per_seed)
+            mean_cumulative = np.mean(cumulative_array, axis=0)
+            std_cumulative = np.std(cumulative_array, axis=0)
+            stderr_cumulative = 1.96 * std_cumulative / np.sqrt(len(cumulative_per_seed))
+
+            # Determine which concepts are missing in the graph for this learning method
+            missing_mask = np.zeros(len(concept_order), dtype=bool)
+            if graphs_list:
+                method_graph = graphs_list[0]
+                
+                # Convert method_graph to a list if it's a dict, listconfig, or other iterable
+                if isinstance(method_graph, dict):
+                    method_concepts = list(method_graph.keys())
+                else:
+                    # Handle listconfig, list, or other iterables
+                    method_concepts = list(method_graph)
+                
+                # Convert to set for fast lookup (method_concepts already has clean names like 'asia', 'tub', etc.)
+                method_concepts_set = set(str(c) for c in method_concepts)
+                
+                # Mark concepts that are NOT in this method's graph as missing
+                for i, concept in enumerate(concept_order):
+                    # Extract clean concept name from concept_order (remove numeric prefix like "1_asia" -> "asia")
+                    concept_str = str(concept)
+                    if '_' in concept_str and concept_str.split('_')[0].isdigit():
+                        clean_concept = '_'.join(concept_str.split('_')[1:])
                     else:
-                        cumulative_values.append(cumulative)
-                        missing_mask.append(True)
-                cumulative_values_per_seed.append((cumulative_values, missing_mask))
-            
-            # Average over seeds
-            mean_cumulative = np.mean([cv for cv, _ in cumulative_values_per_seed], axis=0)
-            std_cumulative = np.std([cv for cv, _ in cumulative_values_per_seed], axis=0)
-            stderr_cumulative = 1.96 * std_cumulative / np.sqrt(len(cumulative_values_per_seed))
-            
-            # Aggregate missing mask
-            missing_mask = np.any([mm for _, mm in cumulative_values_per_seed], axis=0)
+                        clean_concept = concept_str
+                    
+                    # Concept is missing if clean name is NOT in method_concepts
+                    if clean_concept not in method_concepts_set:
+                        missing_mask[i] = True
 
-            # Get color from model_styles
-            color = next((model['color'] for model in model_styles.values() if model['name'] == model_name), '#333333')
+            color = learning_colors.get(learning_method, '#333333')
+            learning_method_name = learning_display_names.get(learning_method, learning_method)
 
-            # Plot line with segments
+            # Plot line with segments (dashed when concept is missing)
             for k in range(len(x) - 1):
-                if missing_mask[k] or missing_mask[k+1]:
+                # Use dashed line if next concept is missing
+                if missing_mask[k+1]:
                     linestyle = '--'
                 else:
                     linestyle = '-'
@@ -1034,7 +1115,7 @@ def plot_cumulative_multi_architecture_single_modality(
 
             # Plot error band with different alpha based on missing data
             for k in range(len(x) - 1):
-                alpha_value = 0.2 if (missing_mask[k] or missing_mask[k+1]) else 0.4
+                alpha_value = 0.2 if missing_mask[k+1] else 0.4
                 ax.fill_between(
                     x[k:k+2],
                     (mean_cumulative - stderr_cumulative)[k:k+2],
@@ -1044,23 +1125,26 @@ def plot_cumulative_multi_architecture_single_modality(
                 )
 
             # Create dummy line for legend
-            line, = ax.plot([], [], color=color, linestyle='-', linewidth=2, marker='o', label=model_name)
-            handles_labels.append((line, model_name))
+            line, = ax.plot([], [], color=color, linestyle='-', linewidth=2, marker='o', label=learning_method_name)
+            handles_labels.append((line, learning_method_name))
+
+        # Extract clean concept names (remove numeric prefix like "6_either" -> "either")
+        concept_labels = []
+        for concept in concept_order:
+            if '_' in concept and concept.split('_')[0].isdigit():
+                # Remove numeric prefix
+                concept_labels.append('_'.join(concept.split('_')[1:]))
+            else:
+                concept_labels.append(concept)
 
         ax.set_xticks(x)
-        ax.set_xticklabels(concept_order, rotation=45, ha='right', fontsize=tick_size)
+        ax.set_xticklabels(concept_labels, rotation=45, ha='right', fontsize=tick_size)
         ax.tick_params(axis='y', labelsize=tick_size)
         ax.minorticks_off()
         ax.grid(True, alpha=0.3)
         ax.set_xlabel("Concept Names", fontsize=label_size, labelpad=axis_label_pad)
-        ax.set_ylabel("Cumulative $\\Delta$ on $y$", fontsize=label_size, labelpad=axis_label_pad)
-        
-        # Create title with learning method name
-        learning_display = rename_learning_methods([learning_method if localized_client_id is None else 'localized'])[0]
-        if drift_filter is not None:
-            drift_suffix = " (with drift)" if drift_filter == 'drift' else " (no drift)"
-            learning_display += drift_suffix
-        ax.set_title(f"{dataset} - {learning_display}", fontsize=title_size, pad=title_pad)
+        ax.set_ylabel("Cumulative Interventions on Task", fontsize=label_size, labelpad=axis_label_pad)
+        ax.set_title(f"{dataset} - {architecture_name}", fontsize=title_size, pad=title_pad)
 
         if handles_labels:
             handles, labels = zip(*handles_labels)
@@ -1078,14 +1162,679 @@ def plot_cumulative_multi_architecture_single_modality(
         plt.tight_layout()
 
         if folder:
-            method_str = learning_method if localized_client_id is None else f"localized_client_{localized_client_id}"
-            if drift_filter is not None:
-                method_str += f"_{drift_filter}"
-            plt.savefig(f"{folder}/cumulative_multi_arch_{method_str}_{dataset}.pdf", bbox_inches='tight')
+            if localized_client_id is not None:
+                plt.savefig(f"{folder}/cumulative_task_{architecture_name}_multi_modality_{dataset}_client_{localized_client_id}.pdf", bbox_inches='tight')
+            else:
+                plt.savefig(f"{folder}/cumulative_task_{architecture_name}_multi_modality_{dataset}.pdf", bbox_inches='tight')
         else:
             raise ValueError("Folder path is required to save the figure.")
         
         plt.close(fig)
+
+
+def plot_cumulative_accuracy_multi_modality(
+    input,
+    custom_order,
+    architecture_name,
+    c_info,
+    rnd_drift_values=None,
+    variable = 'labels',
+    folder=None,
+    figsize=(20, 15),
+    title_size=16,
+    label_size=14,
+    tick_size=14,
+    legend_size=14,
+    legend_bgcolor='lightgray',
+    legend_edgecolor='black',
+    legend_alpha=0.3,
+    localized_client_id=None
+):
+    """
+    Plot average cumulative concept accuracies and task interventions for a single architecture 
+    with multiple learning modalities. For each intervention level (e.g., '1_asia'), plot:
+    - Average of all concept accuracies at that level (e.g., mean of '1_asia/bronc', '1_asia/asia', ...)
+    - Task intervention value at that level (e.g., '1_asia' from cumulative_task_interventions)
+    
+    NaN values in concept accuracies are replaced with worst classifier (1/cardinality).
+    
+    Args:
+        input: DataFrame containing the results
+        architecture_name: Name of the architecture to plot
+        c_info: Dictionary with concept cardinality information per dataset
+        rnd_drift_values: Dictionary mapping indices to rnd_drift values
+        localized_client_id: ID of the specific localized client to consider
+    """
+    
+    # Filter data for the specified architecture
+    input_filtered = input[input['model'] == architecture_name].copy()
+    
+    if input_filtered.empty:
+        print(f"Warning: No data available for architecture {architecture_name}. Skipping plot.")
+        return
+    
+    # Filter based on localized_client_id
+    if localized_client_id is not None:
+        localized_name = f'localized_{localized_client_id}'
+        input_filtered = input_filtered[
+            (input_filtered['learning'] == 'centralized') |
+            (input_filtered['learning'] == 'local_federated') |
+            (input_filtered['learning'] == localized_name)
+        ]
+        input_filtered['learning'] = input_filtered['learning'].apply(
+            lambda x: 'localized' if x == localized_name else x
+        )
+    
+    # Handle rnd_drift information
+    if 'rnd_drift' not in input_filtered.columns:
+        if rnd_drift_values is not None:
+            if isinstance(rnd_drift_values, dict):
+                input_filtered['rnd_drift'] = input_filtered.index.map(lambda x: rnd_drift_values.get(x, 0))
+            else:
+                input_filtered['rnd_drift'] = rnd_drift_values
+        else:
+            input_filtered['rnd_drift'] = 0
+    
+    if 'n_rounds' not in input_filtered.columns:
+        input_filtered['n_rounds'] = float('inf')
+    
+    # Create learning label
+    def create_learning_label(row):
+        # Distinguish local_federated by rnd_drift
+        if row['learning'] == 'local_federated':
+            rnd_drift = float(row['rnd_drift']) if row['rnd_drift'] is not None else 0
+            n_rounds = float(row['n_rounds']) if row['n_rounds'] is not None else float('inf')
+            
+            if rnd_drift == 0 or rnd_drift > n_rounds:
+                return 'local_federated_no_drift'
+            else:
+                return 'local_federated_drift'
+
+        # Check for multiple localized clients
+        localized_clients = [col for col in input_filtered['learning'].unique() if col.startswith('localized_')]
+        if len(localized_clients) > 1:
+            print(f"Warning: Multiple localized clients found: {localized_clients}. This may affect the plot.")
+        # Return 'localized' for all of them
+        if row['learning'].startswith('localized_'):
+            return 'localized'
+        
+        return row['learning']
+    
+    input_filtered['learning_label'] = input_filtered.apply(create_learning_label, axis=1)
+    
+    # Keep relevant columns
+    required_columns = ['seed', 'dataset', 'model', 'learning', 'learning_label', 
+                       'cumulative_task_interventions', 'cumulative_concept_interventions', 'graph']
+    optional_columns = ['rnd_drift', 'n_rounds']
+    columns_to_keep = [col for col in required_columns + optional_columns if col in input_filtered.columns]
+    
+    input_filtered = input_filtered[columns_to_keep]
+    input_filtered = input_filtered.dropna(subset=['cumulative_task_interventions', 'cumulative_concept_interventions'])
+
+    datasets = input_filtered['dataset'].unique()
+    datasets = sorted(datasets, key=lambda x: custom_order.index(x) if x in custom_order else len(custom_order))
+    learning_methods = input_filtered['learning_label'].unique()
+
+    if len(learning_methods) == 0 or len(datasets) == 0:
+        print(f"Warning: No data available to plot. Skipping.")
+        return
+
+    # Define colors for different learning methods
+    learning_colors = {
+        'centralized': '#2ca02c',
+        'localized': '#d62728',
+        'local_federated_no_drift': '#ff7f0e',
+        'local_federated_drift': '#1f77b4'
+    }
+    
+    # Define display names for learning methods
+    learning_display_names = {
+        'centralized': 'Centralized',
+        'localized': 'Localized',
+        'local_federated_no_drift': 'Federated (no drift)',
+        'local_federated_drift': 'Federated (with drift)'
+    }
+
+    axis_label_pad = 3
+    title_pad = 15
+
+    # Create a separate plot for each dataset
+    for dataset in datasets:
+        figsize = (10, 6)
+        fig, ax = plt.subplots(figsize=figsize)
+        handles_labels = []
+
+        subset = input_filtered[input_filtered['dataset'] == dataset]
+        
+        if subset.empty:
+            plt.close(fig)
+            continue
+
+        # Get intervention levels from cumulative_task_interventions
+        first_row_interventions = subset['cumulative_task_interventions'].iloc[0]
+        if isinstance(first_row_interventions, dict):
+            intervention_c_order = list(first_row_interventions.keys())
+        else:
+            print(f"Warning: cumulative_task_interventions is not a dict for dataset {dataset}. Skipping.")
+            plt.close(fig)
+            continue
+
+        if not intervention_c_order:
+            plt.close(fig)
+            continue
+
+        x = np.arange(len(intervention_c_order))
+        for learning_method in learning_methods:
+            method_subset = subset[subset['learning_label'] == learning_method]
+            
+            if method_subset.empty:
+                continue
+
+            # Process data for each seed
+            label_avg_per_seed = []
+            missing_masks_per_seed = []
+            
+            for idx, row in method_subset.iterrows():
+                cumulative_concept_dict = row['cumulative_concept_interventions']
+                cumulative_task_dict = row['cumulative_task_interventions']
+                method_graph = row['graph'] if 'graph' in row else None
+                
+                if not isinstance(cumulative_concept_dict, dict) or not isinstance(cumulative_task_dict, dict):
+                    continue
+                
+                # Build missing mask for this seed
+                missing_mask_seed = np.zeros(len(intervention_c_order), dtype=bool)
+                if method_graph is not None:
+                    # Convert method_graph to a list if it's a dict, listconfig, or other iterable
+                    if isinstance(method_graph, dict):
+                        method_concepts = list(method_graph.keys())
+                    else:
+                        # Handle listconfig, list, or other iterables
+                        method_concepts = list(method_graph)
+                    
+                    # Convert to set for fast lookup
+                    method_concepts_set = set(str(c) for c in method_concepts)
+                    
+                    # Mark intervention levels that are NOT in this seed's graph as missing
+                    for i, level in enumerate(intervention_c_order):
+                        # Extract clean concept name from intervention level (remove numeric prefix like "1_asia" -> "asia")
+                        level_str = str(level)
+                        if '_' in level_str and level_str.split('_')[0].isdigit():
+                            clean_level = '_'.join(level_str.split('_')[1:])
+                        else:
+                            clean_level = level_str
+                        
+                        # Level is missing if clean name is NOT in method_concepts
+                        if clean_level not in method_concepts_set:
+                            missing_mask_seed[i] = True
+                
+                missing_masks_per_seed.append(missing_mask_seed)
+                
+                # For each intervention level, compute average concept accuracy
+                concept_avg_for_level = []
+                task_values_for_level = []
+                
+                for level in intervention_c_order:
+                    # Get all concept accuracies for this level (e.g., all '1_asia/*')
+                    concept_values = []
+                    for key, value in cumulative_concept_dict.items():
+                        if key.startswith(f"{level}/"):
+                            # Extract concept name
+                            concept_name = key.split('/')[-1]
+                            
+                            # Replace NaN with worst classifier
+                            if np.isnan(value):
+                                if dataset in c_info and c_info[dataset] is not None:
+                                    try:
+                                        concept_idx = c_info[dataset]['names'].index(concept_name)
+                                        concept_cardinality = c_info[dataset]['cardinality'][concept_idx]
+                                        value = 1.0 / concept_cardinality
+                                    except (ValueError, KeyError, IndexError):
+                                        value = 0.5  # Default fallback
+                                else:
+                                    value = 0.5  # Default fallback
+                            
+                            concept_values.append(value)
+                    
+                    # Compute average for this level
+                    if concept_values:
+                        concept_avg_for_level.append(np.mean(concept_values))
+                    else:
+                        concept_avg_for_level.append(0.0)
+                    
+                    # Get task intervention value
+                    task_value = cumulative_task_dict.get(level)
+                    task_values_for_level.append(task_value)
+                
+                # Calculate label values as mean of concept avg and task value for each level
+                if variable == 'labels':
+                    label_values_for_level = [(c + t) / 2 for c, t in zip(concept_avg_for_level, task_values_for_level)]
+                else:
+                    label_values_for_level = task_values_for_level
+                label_avg_per_seed.append(label_values_for_level)
+            
+            if not label_avg_per_seed:
+                continue
+            
+            # Calculate mean and standard error across seeds
+            label_array = np.array(label_avg_per_seed)
+            mean_label = np.mean(label_array, axis=0)
+            std_label = np.std(label_array, axis=0)
+            stderr_label = 1.96 * std_label / np.sqrt(len(label_avg_per_seed))
+
+            # Aggregate missing mask: a concept is missing if it's missing in ALL seeds
+            if missing_masks_per_seed:
+                missing_mask = np.all(missing_masks_per_seed, axis=0)
+            else:
+                missing_mask = np.zeros(len(intervention_c_order), dtype=bool)
+
+            color = learning_colors.get(learning_method, '#333333')
+            learning_method_name = learning_display_names.get(learning_method, learning_method)
+
+            # Plot label average line with segments (dashed when concept is missing)
+            for k in range(len(x) - 1):
+                # Use dashed line if next level is missing
+                if missing_mask[k+1]:
+                    linestyle = '--'
+                else:
+                    linestyle = '-'
+                
+                ax.plot(
+                    x[k:k+2],
+                    mean_label[k:k+2],
+                    color=color,
+                    linestyle=linestyle,
+                    linewidth=2,
+                    marker='o',
+                    markersize=6
+                )
+
+            # Plot error band with different alpha based on missing data
+            for k in range(len(x) - 1):
+                alpha_value = 0.2 if missing_mask[k+1] else 0.4
+                ax.fill_between(
+                    x[k:k+2],
+                    (mean_label - stderr_label)[k:k+2],
+                    (mean_label + stderr_label)[k:k+2],
+                    color=color,
+                    alpha=alpha_value
+                )
+
+            # Create dummy line for legend
+            line, = ax.plot([], [], color=color, linestyle='-', linewidth=2, marker='o', label=learning_method_name)
+            handles_labels.append((line, learning_method_name))
+
+        # Extract clean intervention level names
+        level_labels = []
+        for level in intervention_c_order:
+            if '_' in level and level.split('_')[0].isdigit():
+                level_labels.append('_'.join(level.split('_')[1:]))
+            else:
+                level_labels.append(level)
+
+        ax.set_xticks(x)
+        ax.set_xticklabels(level_labels, rotation=45, ha='right', fontsize=tick_size)
+        ax.tick_params(axis='y', labelsize=tick_size)
+        ax.minorticks_off()
+        ax.grid(True, alpha=0.3)
+        ax.set_xlabel("Intervention Level", fontsize=label_size, labelpad=axis_label_pad)
+        ax.set_ylabel(f"{variable.capitalize()} Accuracy (%)", fontsize=label_size, labelpad=axis_label_pad)
+        ax.set_title(f"{dataset} - {architecture_name} ({variable.capitalize()} Accuracy)", fontsize=title_size, pad=title_pad)
+
+        if handles_labels:
+            handles, labels = zip(*handles_labels)
+            legend = ax.legend(
+                handles,
+                labels,
+                loc='best',
+                fontsize=legend_size,
+                frameon=True,
+                ncol=1
+            )
+            legend.get_frame().set_facecolor(legend_bgcolor)
+            legend.get_frame().set_edgecolor(legend_edgecolor)
+            legend.get_frame().set_alpha(legend_alpha)
+
+        plt.tight_layout()
+
+        if folder:
+            if localized_client_id is not None:
+                plt.savefig(f"{folder}/cumulative_{variable}_acc_{architecture_name}_multi_modality_{dataset}_client_{localized_client_id}.pdf", bbox_inches='tight')
+            else:
+                plt.savefig(f"{folder}/cumulative_{variable}_acc_{architecture_name}_multi_modality_{dataset}.pdf", bbox_inches='tight')
+        else:
+            raise ValueError("Folder path is required to save the figure.")
+        
+        plt.close(fig)
+
+def plot_cumulative_accuracy_multi_model(
+    input,
+    custom_order,
+    learning_modality,
+    c_info,
+    rnd_drift_values=None,
+    variable = 'labels',
+    folder=None,
+    figsize=(20, 15),
+    title_size=16,
+    label_size=14,
+    tick_size=14,
+    legend_size=14,
+    legend_bgcolor='lightgray',
+    legend_edgecolor='black',
+    legend_alpha=0.3,
+    localized_client_id=None
+):
+    """
+    Plot average cumulative concept accuracies and task interventions for a single architecture 
+    with multiple learning modalities. For each intervention level (e.g., '1_asia'), plot:
+    - Average of all concept accuracies at that level (e.g., mean of '1_asia/bronc', '1_asia/asia', ...)
+    - Task intervention value at that level (e.g., '1_asia' from cumulative_task_interventions)
+    
+    NaN values in concept accuracies are replaced with worst classifier (1/cardinality).
+    
+    Args:
+        input: DataFrame containing the results
+        architecture_name: Name of the architecture to plot
+        c_info: Dictionary with concept cardinality information per dataset
+        rnd_drift_values: Dictionary mapping indices to rnd_drift values
+        localized_client_id: ID of the specific localized client to consider
+    """
+    
+    # Filter data for the specified architecture
+    input_filtered = input.copy()
+    
+    if input_filtered.empty:
+        print(f"Warning: No data available.")
+        return
+    
+    
+    # Handle rnd_drift information
+    if 'rnd_drift' not in input_filtered.columns:
+        if rnd_drift_values is not None:
+            if isinstance(rnd_drift_values, dict):
+                input_filtered['rnd_drift'] = input_filtered.index.map(lambda x: rnd_drift_values.get(x, 0))
+            else:
+                input_filtered['rnd_drift'] = rnd_drift_values
+        else:
+            input_filtered['rnd_drift'] = 0
+    
+    if 'n_rounds' not in input_filtered.columns:
+        input_filtered['n_rounds'] = float('inf')
+    
+    # Create learning label
+    def create_learning_label(row):
+        # Distinguish local_federated by rnd_drift
+        if row['learning'] == 'local_federated':
+            rnd_drift = float(row['rnd_drift']) if row['rnd_drift'] is not None else 0
+            n_rounds = float(row['n_rounds']) if row['n_rounds'] is not None else float('inf')
+            
+            if rnd_drift == 0 or rnd_drift > n_rounds:
+                return 'local_federated_no_drift'
+            else:
+                return 'local_federated_drift'
+
+        # Check for multiple localized clients
+        localized_clients = [col for col in input_filtered['learning'].unique() if col.startswith('localized_')]
+        if len(localized_clients) > 1:
+            print(f"Warning: Multiple localized clients found: {localized_clients}. This may affect the plot.")
+        # Return 'localized' for all of them
+        if row['learning'].startswith('localized_'):
+            return 'localized'
+        
+        return row['learning']
+    
+    input_filtered['learning_label'] = input_filtered.apply(create_learning_label, axis=1)
+    input_filtered = input_filtered[input_filtered['learning_label'] == learning_modality]
+
+    # Keep relevant columns
+    required_columns = ['seed', 'dataset', 'model', 'learning', 'learning_label', 
+                       'cumulative_task_interventions', 'cumulative_concept_interventions', 'graph']
+    optional_columns = ['rnd_drift', 'n_rounds']
+    columns_to_keep = [col for col in required_columns + optional_columns if col in input_filtered.columns]
+    
+    input_filtered = input_filtered[columns_to_keep]
+    input_filtered = input_filtered.dropna(subset=['cumulative_task_interventions', 'cumulative_concept_interventions'])
+
+    datasets = input_filtered['dataset'].unique()
+    datasets = sorted(datasets, key=lambda x: custom_order.index(x) if x in custom_order else len(custom_order))
+    architectures = input_filtered['model'].unique()
+
+    if len(architectures) == 0 or len(datasets) == 0:
+        print(f"Warning: No data available to plot. Skipping.")
+        return
+
+    # Define colors for different learning methods
+    learning_colors = {
+        'c2bm': '#2ca02c',
+        'cbm_mlp': '#d62728',
+        'cbm_linear': '#ff7f0e',
+        'cem': '#1f77b4',
+        'blackbox': '#9467bd'
+    }
+    
+    # Define display names for learning methods
+    learning_display_names = {
+        'c2bm': 'C2BM',
+        'cbm_mlp': 'CBM+MLP',
+        'cbm_linear': 'CBM+Linear',
+        'cem': 'CEM',
+        'blackbox': 'BlackBox'
+    }
+
+    axis_label_pad = 3
+    title_pad = 15
+
+    # Create a separate plot for each dataset
+    for dataset in datasets:
+        figsize = (10, 6)
+        fig, ax = plt.subplots(figsize=figsize)
+        handles_labels = []
+
+        subset = input_filtered[input_filtered['dataset'] == dataset]
+        
+        if subset.empty:
+            plt.close(fig)
+            continue
+
+        # Get intervention levels from cumulative_task_interventions
+        first_row_interventions = subset['cumulative_task_interventions'].iloc[0]
+        if isinstance(first_row_interventions, dict):
+            intervention_c_order = list(first_row_interventions.keys())
+        else:
+            print(f"Warning: cumulative_task_interventions is not a dict for dataset {dataset}. Skipping.")
+            plt.close(fig)
+            continue
+
+        if not intervention_c_order:
+            plt.close(fig)
+            continue
+
+        x = np.arange(len(intervention_c_order))
+        for architecture in architectures:
+            method_subset = subset[subset['model'] == architecture]
+            
+            if method_subset.empty:
+                continue
+
+            # Process data for each seed
+            label_avg_per_seed = []
+            missing_masks_per_seed = []
+            
+            for idx, row in method_subset.iterrows():
+                cumulative_concept_dict = row['cumulative_concept_interventions']
+                cumulative_task_dict = row['cumulative_task_interventions']
+                method_graph = row['graph'] if 'graph' in row else None
+                
+                if not isinstance(cumulative_concept_dict, dict) or not isinstance(cumulative_task_dict, dict):
+                    continue
+                
+                # Build missing mask for this seed
+                missing_mask_seed = np.zeros(len(intervention_c_order), dtype=bool)
+                if method_graph is not None:
+                    # Convert method_graph to a list if it's a dict, listconfig, or other iterable
+                    if isinstance(method_graph, dict):
+                        method_concepts = list(method_graph.keys())
+                    else:
+                        # Handle listconfig, list, or other iterables
+                        method_concepts = list(method_graph)
+                    
+                    # Convert to set for fast lookup
+                    method_concepts_set = set(str(c) for c in method_concepts)
+                    
+                    # Mark intervention levels that are NOT in this seed's graph as missing
+                    for i, level in enumerate(intervention_c_order):
+                        # Extract clean concept name from intervention level (remove numeric prefix like "1_asia" -> "asia")
+                        level_str = str(level)
+                        if '_' in level_str and level_str.split('_')[0].isdigit():
+                            clean_level = '_'.join(level_str.split('_')[1:])
+                        else:
+                            clean_level = level_str
+                        
+                        # Level is missing if clean name is NOT in method_concepts
+                        if clean_level not in method_concepts_set:
+                            missing_mask_seed[i] = True
+                
+                missing_masks_per_seed.append(missing_mask_seed)
+                
+                # For each intervention level, compute average concept accuracy
+                concept_avg_for_level = []
+                task_values_for_level = []
+                
+                for level in intervention_c_order:
+                    # Get all concept accuracies for this level (e.g., all '1_asia/*')
+                    concept_values = []
+                    for key, value in cumulative_concept_dict.items():
+                        if key.startswith(f"{level}/"):
+                            # Extract concept name
+                            concept_name = key.split('/')[-1]
+                            
+                            # Replace NaN with worst classifier
+                            if np.isnan(value):
+                                if dataset in c_info and c_info[dataset] is not None:
+                                    try:
+                                        concept_idx = c_info[dataset]['names'].index(concept_name)
+                                        concept_cardinality = c_info[dataset]['cardinality'][concept_idx]
+                                        value = 1.0 / concept_cardinality
+                                    except (ValueError, KeyError, IndexError):
+                                        value = 0.5  # Default fallback
+                                else:
+                                    value = 0.5  # Default fallback
+                            
+                            concept_values.append(value)
+                    
+                    # Compute average for this level
+                    if concept_values:
+                        concept_avg_for_level.append(np.mean(concept_values))
+                    else:
+                        concept_avg_for_level.append(0.0)
+                    
+                    # Get task intervention value
+                    task_value = cumulative_task_dict.get(level)
+                    task_values_for_level.append(task_value)
+                
+                # Calculate label values as mean of concept avg and task value for each level
+                if variable == 'labels':
+                    label_values_for_level = [(c + t) / 2 for c, t in zip(concept_avg_for_level, task_values_for_level)]
+                else:
+                    label_values_for_level = task_values_for_level
+                label_avg_per_seed.append(label_values_for_level)
+            
+            if not label_avg_per_seed:
+                continue
+            
+            # Calculate mean and standard error across seeds
+            label_array = np.array(label_avg_per_seed)
+            mean_label = np.mean(label_array, axis=0)
+            std_label = np.std(label_array, axis=0)
+            stderr_label = 1.96 * std_label / np.sqrt(len(label_avg_per_seed))
+
+            # Aggregate missing mask: a concept is missing if it's missing in ALL seeds
+            if missing_masks_per_seed:
+                missing_mask = np.all(missing_masks_per_seed, axis=0)
+            else:
+                missing_mask = np.zeros(len(intervention_c_order), dtype=bool)
+
+            color = learning_colors.get(architecture, '#333333')
+            learning_method_name = learning_display_names.get(architecture, architecture)
+
+            # Plot label average line with segments (dashed when concept is missing)
+            for k in range(len(x) - 1):
+                # Use dashed line if current level is missing
+                if missing_mask[k]:
+                    linestyle = '--'
+                else:
+                    linestyle = '-'
+                
+                ax.plot(
+                    x[k:k+2],
+                    mean_label[k:k+2],
+                    color=color,
+                    linestyle=linestyle,
+                    linewidth=2,
+                    marker='o',
+                    markersize=6
+                )
+
+            # Plot error band with different alpha based on missing data
+            for k in range(len(x) - 1):
+                alpha_value = 0.2 if missing_mask[k+1] else 0.4
+                ax.fill_between(
+                    x[k:k+2],
+                    (mean_label - stderr_label)[k:k+2],
+                    (mean_label + stderr_label)[k:k+2],
+                    color=color,
+                    alpha=alpha_value
+                )
+
+            # Create dummy line for legend
+            line, = ax.plot([], [], color=color, linestyle='-', linewidth=2, marker='o', label=learning_method_name)
+            handles_labels.append((line, learning_method_name))
+
+        # Extract clean intervention level names
+        level_labels = []
+        for level in intervention_c_order:
+            if '_' in level and level.split('_')[0].isdigit():
+                level_labels.append('_'.join(level.split('_')[1:]))
+            else:
+                level_labels.append(level)
+
+        ax.set_xticks(x)
+        ax.set_xticklabels(level_labels, rotation=45, ha='right', fontsize=tick_size)
+        ax.tick_params(axis='y', labelsize=tick_size)
+        ax.minorticks_off()
+        ax.grid(True, alpha=0.3)
+        ax.set_xlabel("Intervention Level", fontsize=label_size, labelpad=axis_label_pad)
+        ax.set_ylabel(f"{variable.capitalize()} Accuracy (%)", fontsize=label_size, labelpad=axis_label_pad)
+        ax.set_title(f"{dataset} - {learning_modality} ({variable.capitalize()} Accuracy)", fontsize=title_size, pad=title_pad)
+
+        if handles_labels:
+            handles, labels = zip(*handles_labels)
+            legend = ax.legend(
+                handles,
+                labels,
+                loc='best',
+                fontsize=legend_size,
+                frameon=True,
+                ncol=1
+            )
+            legend.get_frame().set_facecolor(legend_bgcolor)
+            legend.get_frame().set_edgecolor(legend_edgecolor)
+            legend.get_frame().set_alpha(legend_alpha)
+
+        plt.tight_layout()
+
+        if folder:
+            if localized_client_id is not None:
+                plt.savefig(f"{folder}/cumulative_{variable}_acc_{architecture}_multi_modality_{dataset}_client_{localized_client_id}.pdf", bbox_inches='tight')
+            else:
+                plt.savefig(f"{folder}/cumulative_{variable}_acc_{architecture}_multi_modality_{dataset}.pdf", bbox_inches='tight')
+        else:
+            raise ValueError("Folder path is required to save the figure.")
+        
+        plt.close(fig)
+
+
 
 
 def delta_single_c_interventions_on_y_id_ood(d, base):
@@ -2055,6 +2804,27 @@ def load_exps(exps_path, n_clients=5, args=None):
                     d['single_c_interventions_on_y'] = single_c_interventions_on_y
                 else:
                     d['single_c_interventions_on_y'] = None
+
+                # Load cumulative task interventions
+                cumulative_task_interventions_file = os.path.join(exp, 'results', 'cumulative_interventions_on_y.pkl')
+                if os.path.exists(cumulative_task_interventions_file):
+                    with open(cumulative_task_interventions_file, 'rb') as f:
+                        cumulative_interventions_on_y = pickle.load(f)
+                    # cumulative_data should contain 'values' and 'concept_names'
+                    d['cumulative_task_interventions'] = cumulative_interventions_on_y
+                    d['concept_names'] = cumulative_interventions_on_y.get('concept_names', None)
+                else:
+                    d['cumulative_task_interventions'] = None
+                    d['concept_names'] = None
+
+                # Load cumulative concept interventions
+                cumulative_concept_interventions_file = os.path.join(exp, 'results', 'cumulative_interventions_on_c.pkl')
+                if os.path.exists(cumulative_concept_interventions_file):
+                    with open(cumulative_concept_interventions_file, 'rb') as f:
+                        cumulative_interventions_on_c = pickle.load(f)
+                    d['cumulative_concept_interventions'] = cumulative_interventions_on_c
+                else:
+                    d['cumulative_concept_interventions'] = None
 
 
                 ######################################################################

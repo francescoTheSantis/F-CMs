@@ -28,8 +28,11 @@ paths = [
     # "/home/admin/Federated-C2BM/outputs/multirun/2025-11-12/09-30-44",
     # "/home/admin/Federated-C2BM/outputs/multirun/2025-11-12/13-18-41",
     # "/home/admin/Federated-C2BM/outputs/multirun/2025-11-12/16-46-58",
-    "/home/admin/Federated-C2BM/outputs/multirun/2026-01-15/13-48-41",
-    "/home/admin/Federated-C2BM/outputs/multirun/2026-01-15/14-00-20",
+    #"/home/admin/Federated-C2BM/outputs/multirun/2026-01-15/13-48-41",
+    #"/home/admin/Federated-C2BM/outputs/multirun/2026-01-15/14-00-20",
+    "/home/admin/Federated-C2BM/outputs/multirun/2026-01-16/01-10-19",
+    "/home/admin/Federated-C2BM/outputs/multirun/2026-01-16/01-19-44",
+    "/home/admin/Federated-C2BM/outputs/multirun/2026-01-16/01-23-16",
     # "/home/admin/Federated-C2BM/outputs/multirun/2026-01-08/12-33-28",
     # "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2026-01-08/12-46-39"
     # "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2026-01-13/17-00-51"
@@ -147,12 +150,39 @@ print(f"[DEBUG show_results] Has single_c_interventions_on_y: {performance['sing
 print(f"[DEBUG show_results] Has graph: {performance['graph'].notna().sum()} / {len(performance)}")
 
 # Plot for all learning modalities (centralized, federated with/without drift)
-plot_cumulative_single_architecture_multi_modality(
+plot_cumulative_accuracy_multi_modality(
     performance,
     custom_order,
     architecture_name='c2bm',
+    c_info=c_info,
+    variable = 'task',
     folder=visualization_folder,
 )
+
+plot_cumulative_accuracy_multi_modality(
+    performance,
+    custom_order,
+    architecture_name='c2bm',
+    variable = 'labels',
+    c_info=c_info,
+    folder=visualization_folder,
+)
+
+plot_cumulative_accuracy_multi_model(
+    performance,
+    custom_order,
+    learning_modality='local_federated_drift',
+    variable = 'labels',
+    c_info=c_info,
+    folder=visualization_folder,
+)
+
+# checks:
+# - add baseline at the beginning of the graph
+# - check graph for c2bm 
+# - check graph localized
+# - c_info is not passed well
+# - check title graphs
 
 # Optional: Plot for specific localized client
 # Uncomment to generate plots for a specific client
