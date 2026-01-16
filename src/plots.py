@@ -23,7 +23,7 @@ conda_bin = "/home/admin/miniconda3/envs/federated_c2bm/bin"
 if conda_bin not in os.environ.get("PATH", ""):
     os.environ["PATH"] = conda_bin + os.pathsep + os.environ["PATH"]
 
-print("dot trovato in:", shutil.which("dot"))
+# print("dot trovato in:", shutil.which("dot"))
 
 # colors in rgb format
 # 'cem' is red, 'blackbox' is grey, 'crm' is green, 'cbm_linear' is light_blue, 'cbm_mlp' is darker_blue

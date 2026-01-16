@@ -5,6 +5,9 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 import random
 import numpy as np
+# Compat for NumPy 2.0 removal; flwr still expects np.float_.
+if not hasattr(np, "float_"):
+    np.float_ = np.float64  # type: ignore[attr-defined]
 import pandas as pd
 from omegaconf import DictConfig, open_dict, OmegaConf  # type: ignore
 from src.my_hydra import parse_hyperparams, target_classname

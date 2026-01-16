@@ -12,6 +12,10 @@ have this code running.
 
 
 import torch
+import numpy as np
+# Compat for NumPy 2.0 removal; flwr still expects np.float_.
+if not hasattr(np, "float_"):
+    np.float_ = np.float64  # type: ignore[attr-defined]
 import flwr as fl
 import time
 import shutil
@@ -128,7 +132,13 @@ def main():
     torch.set_num_threads(num_threads)
     seed_everything(cfg.seed)
     os.makedirs('results', exist_ok=True)
-    with open_dict(cfg): cfg.update(device="cuda" if torch.cuda.is_available() else "cpu")
+    if torch.cuda.is_available():
+        device = f"cuda:{cfg.trainer.devices[0]}" 
+    elif torch.backends.mps.is_available():
+        device = "mps"
+    else:
+        device = "cpu"
+    with open_dict(cfg): cfg.update(device=device)
     print(f"Client {client_id} uses {cfg.device} device")
     
     # Load client data

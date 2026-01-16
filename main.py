@@ -103,7 +103,13 @@ def main(cfg: DictConfig) -> None:
     torch.set_num_threads(cfg.get("num_threads", 1))
     seed_everything(cfg.get("seed"))
     os.mkdir('results')
-    with open_dict(cfg): cfg.update(device="cuda" if torch.cuda.is_available() else "cpu")
+    if torch.cuda.is_available():
+        device = f"cuda:{cfg.trainer.devices[0]}" 
+    elif torch.backends.mps.is_available():
+        device = "mps"
+    else:
+        device = "cpu"
+    with open_dict(cfg): cfg.update(device=device)
     print(f"Using {cfg.device} device")
 
     # adjust config
@@ -160,7 +166,6 @@ def main(cfg: DictConfig) -> None:
             if true_graph is None or cfg.dataset.load_true_graph == False:
                 with open(os.path.join(dataset_directory, "learned_graph.pkl"), 'rb') as f:
                     graph = pickle.load(f)
-
             else:
                 graph = true_graph
         except FileNotFoundError:
@@ -179,6 +184,8 @@ def main(cfg: DictConfig) -> None:
 
                 # complete the causal graph with LLM and RAG
                 graph = complete_graph_with_llm(cfg, graph, cfg.dataset.name)
+                
+
                 #if true_graph is not None:
                 #    hamming = hamming_distance(true_graph, completed_graph)
                 #     print('(after LLM + RAG) structural hamming distance: ', hamming)
@@ -264,13 +271,17 @@ def main(cfg: DictConfig) -> None:
     else:
         # seed_everything(cfg.get("seed"))
         # subgraphs, subgraphs_concept_names, subgraphs_with_add_nodes, add_nodes_values, add_nodes_names = generate_split(cfg, datasets, graph, y_index)
+        # if cfg.get("seed_plot_interventions") is not None:
+            # seed_everything(cfg.get("seed_plot_interventions"))
         subgraphs, subgraphs_concept_names, subgraphs_with_add_nodes, add_nodes_values, add_nodes_names = \
             generate_split_with_fallback(
                 cfg, datasets, graph, y_index,
                 seed_everything_fn=seed_everything,  # <-- pass your seeding function
                 step=100,
                 max_tries=20,
-            )        
+            )  
+        # if cfg.get("seed_plot_interventions") is not None:
+        #     seed_everything(cfg.get("seed"))      
         
         
         ## Save subgraphs_concept_names, add_nodes_values, and subgraphs_with_add_nodes

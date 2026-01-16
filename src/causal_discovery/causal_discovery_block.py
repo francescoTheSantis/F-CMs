@@ -53,7 +53,7 @@ def apply_causal_discovery(data,
             g = algo_function(data.numpy(), 0.05, model_info["method"])
             model_info["pvalue"] = 0.05
         elif causal_discovery_type == "score-based":
-            g = algo_function(data.numpy(), model_info["method"])
+            g = algo_function(data.cpu().numpy(), model_info["method"])
             model_info["score"] = g.score if hasattr(g, 'score') else ""
         print(model_info)
         return g, model_info
