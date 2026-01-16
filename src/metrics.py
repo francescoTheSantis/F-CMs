@@ -1,7 +1,7 @@
 import torch
 from torchmetrics import Metric
 from torchmetrics.utilities.checks import _check_same_shape
-
+import numpy as np
 class ClassificationAccuracy(Metric):
     """
     Classification Accuracy is a standard metric that measures the proportion of correct predictions
@@ -128,3 +128,30 @@ def hamming_distance(first, second):
     
     # cost = cost / (N*(N-1))/2
     return cost, count
+
+def _evaluate_graph_against_truth(pred_graph, true_graph, tag, key=None):
+    """Align predicted and ground-truth graphs and compute the structural hamming distance."""
+    if pred_graph is None:
+        print(f"\033[91m[Graph Eval] {tag}: no graph provided; skipping.\033[0m")
+        return None
+    if true_graph is None:
+        print(f"\033[91m[Graph Eval] {tag}: ground-truth graph unavailable; skipping.\033[0m")
+        return None
+
+    aligned_pred = pred_graph.reindex(index=true_graph.index, columns=true_graph.columns, fill_value=0)
+    aligned_true = true_graph.copy()
+    np.fill_diagonal(aligned_pred.values, 0)
+    np.fill_diagonal(aligned_true.values, 0)
+
+    cost, count = hamming_distance(aligned_pred, aligned_true)
+    avg_cost = cost / count if count else 0.0
+    print(
+        f"\033[94m[Graph Eval] {tag}: hamming_cost={cost:.4f}, avg_cost={avg_cost:.4f}, differing_pairs={count}\033[0m"
+    )
+    metrics = {
+        "hamming_cost": float(cost),
+        "avg_cost": float(avg_cost),
+        "differing_pairs": int(count),
+    }
+    key = key or tag.lower().replace(" ", "_").replace("-", "_")
+    return key, metrics

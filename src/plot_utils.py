@@ -2380,11 +2380,83 @@ def tabular_task_and_concept_accuracy(
             if not os.path.exists(os.path.dirname(result_file)):
                 os.makedirs(os.path.dirname(result_file))
             final_table.to_csv(result_file, index=True)
+    
 
+def tabular_graph_metrics(
+        performance,
+        custom_order,
+        model_styles,
+        visualization_folder,
+    ):
+    stage_specs = {
+        "graph_predrift": "Aggregated pre-drift graph",
+        "graph_postdrift": "Aggregated post-drift graph",
+    }
+    metric_specs = [
+        ("hamming_cost", "Hamming cost", "{:.3f}", "{:.3f}"),
+        ("avg_cost", "Avg cost", "{:.3f}", "{:.3f}"),
+        ("differing_pairs", "Differing pairs", "{:.1f}", "{:.1f}"),
+    ]
+    preferred_model_order = [model_styles[k]['name'] for k in model_styles]
 
+    for learning in performance['learning'].unique():
+        perf_learn = performance[performance['learning'] == learning]
 
+        for stage_key, stage_label in stage_specs.items():
+            metric_columns = [f"{stage_key}_{m[0]}" for m in metric_specs]
+            available_cols = [c for c in metric_columns if c in perf_learn.columns]
+            if not available_cols:
+                continue
 
+            subset = perf_learn[['model', 'dataset'] + available_cols]
+            subset = subset.dropna(subset=available_cols, how='all')
+            if subset.empty:
+                continue
 
+            agg = subset.groupby(['model', 'dataset'])[available_cols].agg(['mean', 'std'])
+
+            models = list(agg.index.get_level_values('model').unique())
+            datasets_present = list(agg.index.get_level_values('dataset').unique())
+            columns = list(custom_order)
+            for ds in datasets_present:
+                if ds not in columns:
+                    columns.append(ds)
+
+            final_table = pd.DataFrame(index=models, columns=columns)
+            for model in final_table.index:
+                for dataset in final_table.columns:
+                    cell = "N/A"
+                    if (model, dataset) in agg.index:
+                        row = agg.loc[(model, dataset)]
+                        parts = []
+                        for metric_name, metric_label, mean_fmt, std_fmt in metric_specs:
+                            col = f"{stage_key}_{metric_name}"
+                            if (col, 'mean') not in agg.columns:
+                                continue
+                            mean_val = row.get((col, 'mean'), np.nan)
+                            std_val = row.get((col, 'std'), np.nan)
+                            if np.isnan(mean_val):
+                                continue
+                            std_val = 0.0 if np.isnan(std_val) else std_val
+                            parts.append(f"{metric_label}: {mean_fmt.format(mean_val)} ± {std_fmt.format(std_val)}")
+                        if parts:
+                            cell = " | ".join(parts)
+                    final_table.loc[model, dataset] = cell
+
+            existing_models = [m for m in preferred_model_order if m in final_table.index]
+            remaining_models = [m for m in final_table.index if m not in existing_models]
+            final_table = final_table.loc[existing_models + remaining_models]
+
+            print(f"\n\nGraph Metrics Table — Learning: {learning} — {stage_label}")
+            print('------------------------------------------------------------')
+            print(final_table)
+
+            result_file = f"{visualization_folder}/{learning}/graph_metrics_{stage_key}.csv"
+            if not os.path.exists(os.path.dirname(result_file)):
+                os.makedirs(os.path.dirname(result_file))
+            final_table.to_csv(result_file, index=True)
+
+    
 #############################################
 ############ PRIVACY ATTACKS ################
 #############################################
@@ -2711,6 +2783,14 @@ def load_exps(exps_path, n_clients=5, args=None):
                     training_modality_full = training_modality + f'_rnddrift{d["rnd_drift"]}_nrounds{d["n_rounds"]}'
                 key = d['dataset'] + '_' + str(d['seed']) + '_' + training_modality_full
 
+                # Initialize graph similarity metrics
+                d['graph_predrift_hamming_cost'] = np.nan
+                d['graph_predrift_avg_cost'] = np.nan
+                d['graph_predrift_differing_pairs'] = np.nan
+                d['graph_postdrift_hamming_cost'] = np.nan
+                d['graph_postdrift_avg_cost'] = np.nan
+                d['graph_postdrift_differing_pairs'] = np.nan
+
                 # Concept results
                 concept_file = os.path.join(result_file, 'c_accuracy.pkl')
                 with open(concept_file, 'rb') as file:
@@ -2740,6 +2820,38 @@ def load_exps(exps_path, n_clients=5, args=None):
                 except FileNotFoundError:
                     d['graph'] = None
                     d['true_graph'] = None
+
+                # Graph similarity metrics (predrift/postdrift)
+                graph_metrics_path = os.path.join(result_file, "graph_metrics.json")
+                if os.path.exists(graph_metrics_path):
+                    try:
+                        with open(graph_metrics_path, "r") as f:
+                            graph_metrics = json.load(f)
+
+                        stage_map = {
+                            "graph_predrift": "graph_predrift",
+                            "aggregated_pre_drift_graph": "graph_predrift",
+                            "pre_drift": "graph_predrift",
+                            "predrift": "graph_predrift",
+                            "graph_postdrift": "graph_postdrift",
+                            "aggregated_post_drift_graph": "graph_postdrift",
+                            "post_drift": "graph_postdrift",
+                            "postdrift": "graph_postdrift",
+                        }
+
+                        def _assign_metrics(prefix, metrics_dict):
+                            if not isinstance(metrics_dict, dict):
+                                return
+                            d[f"{prefix}_hamming_cost"] = float(metrics_dict.get("hamming_cost", np.nan))
+                            d[f"{prefix}_avg_cost"] = float(metrics_dict.get("avg_cost", np.nan))
+                            d[f"{prefix}_differing_pairs"] = float(metrics_dict.get("differing_pairs", np.nan))
+
+                        for raw_key, metrics_dict in graph_metrics.items():
+                            stage_key = stage_map.get(str(raw_key).lower())
+                            if stage_key:
+                                _assign_metrics(stage_key, metrics_dict)
+                    except Exception:
+                        pass
 
                 ###### Collect the results for the interventions
                 single_id_on_y_file =  os.path.join(exp, 'results', 'single_IDc_interventions_on_y.pkl')
@@ -3401,4 +3513,3 @@ def plot_training_metrics_across_seeds(
         plt.close("all")
         plt.rcParams.update(rc_backup)
         print(f"Training plots saved to {save_dir}/")
-

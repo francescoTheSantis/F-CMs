@@ -1,4 +1,5 @@
 import itertools
+import sys
 import numpy as np
 import torch
 import os
@@ -42,13 +43,15 @@ from src.utils import (
     compute_validation_loss,
     filter_dataloaders_by_concepts,
     build_local_graphs,
-    maybe_update_config_with_graph_subgroup_clients
+    maybe_update_config_with_graph_subgroup_clients,
+    _print_concept_availability,
 )
 
 from src.dra import (
     run_dra_attack,
     summarize_dra_results,
 )
+from src.metrics import _evaluate_graph_against_truth
 
 # data loading
 from src.data.dataset_block import get_dataset
@@ -72,39 +75,13 @@ from env import CACHE
 warnings.filterwarnings("ignore", message="When grouping with a length-1 list-like")
 
 
-def _print_concept_availability(tag, loader, cfg, cid):
-    dataset = getattr(loader, "dataset", None)
-    if dataset is None or not hasattr(dataset, "c") or dataset.c is None:
-        print(f"\033[95m[{tag}] client {cid}: no concept labels in dataset.\033[0m")
-        return
-    c = dataset.c
-    if c.numel() == 0:
-        print(f"\033[95m[{tag}] client {cid}: empty concept tensor.\033[0m")
-        return
-    # A concept is unavailable if its column is all -1
-    unavailable = (c == -1).all(dim=0)
-    n_total = int(unavailable.numel())
-    n_unavail = int(unavailable.sum().item())
-    n_avail = n_total - n_unavail
-    if hasattr(cfg, "engine") and hasattr(cfg.engine, "model") and hasattr(cfg.engine.model, "c_info"):
-        names = cfg.engine.model.c_info.get("names", [])
-    else:
-        names = []
-    unavailable_names = [names[i] for i in range(min(len(names), n_total)) if unavailable[i]]
-    print(
-        f"\033[95m[{tag}] client {cid}: concepts available {n_avail}/{n_total}, "
-        f"unavailable {n_unavail}/{n_total}.\033[0m"
-    )
-    if unavailable_names:
-        print(f"\033[95m[{tag}] client {cid} unavailable concepts: {unavailable_names}\033[0m")
-   
 
 @hydra.main(config_path="conf", config_name="test", version_base="1.3")
 def main(cfg: DictConfig) -> None:
     # various preliminaries, it set the seed for reproducibility
     torch.set_num_threads(cfg.get("num_threads", 1))
     seed_everything(cfg.get("seed"))
-    os.mkdir('results')
+    os.makedirs('results', exist_ok=True)
     if torch.cuda.is_available():
         device = f"cuda:{cfg.trainer.devices[0]}" 
     elif torch.backends.mps.is_available():
@@ -471,6 +448,7 @@ def main(cfg: DictConfig) -> None:
 
         # determine whether to use graph aggregation, see if there is the dictionary "aggregate_graph" with local_graphs not none
         use_graph_agg = False
+        graph_eval_metrics: Dict[str, Dict[str, float]] = {}
         if hasattr(cfg.learning.subgraphs, "aggregate_graph") and model_is_causal(cfg.model):
             agg_graph_cfg = cfg.learning.subgraphs.aggregate_graph
             if agg_graph_cfg is not None and hasattr(agg_graph_cfg, "local_graphs"):
@@ -502,6 +480,12 @@ def main(cfg: DictConfig) -> None:
             )
 
             maybe_plot_graph(graph_predrift, 'graph_predrift')
+            eval_res = _evaluate_graph_against_truth(
+                graph_predrift, true_graph, "aggregated pre-drift graph", key="graph_predrift"
+            )
+            if eval_res is not None:
+                k, metrics = eval_res
+                graph_eval_metrics[k] = metrics
 
             # postdrift
             graph_postdrift, _ = aggregate_graph_proposals(
@@ -513,6 +497,16 @@ def main(cfg: DictConfig) -> None:
             )
 
             maybe_plot_graph(graph_postdrift, 'graph_postdrift')
+            eval_res = _evaluate_graph_against_truth(
+                graph_postdrift, true_graph, "aggregated post-drift graph", key="graph_postdrift"
+            )
+            if eval_res is not None:
+                k, metrics = eval_res
+                graph_eval_metrics[k] = metrics
+
+            if graph_eval_metrics:
+                with open(os.path.join("results", "graph_metrics.json"), "w") as fp:
+                    json.dump(graph_eval_metrics, fp, indent=2)
 
             # update intervention policy for pre-drift clients
             interv_policy_predrift, ip_names_predrift = get_intervention_policy(graph_predrift, 
@@ -534,6 +528,8 @@ def main(cfg: DictConfig) -> None:
         # update config predrift with the graph and intervention policy updated based on predrift clients
         cfg_predrift = maybe_update_config_with_graph_subgroup_clients(cfg_predrift, predrift_clients, graph_predrift,interv_policy_predrift,  interv_policy_predrift_constructed, datasets)
         
+        # stop code now
+        sys.exit(0)
 
         # Filter dataloaders for predrift clients
         train_dataloaders = filter_dataloaders_by_concepts(

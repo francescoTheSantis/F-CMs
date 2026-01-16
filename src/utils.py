@@ -2382,3 +2382,31 @@ def build_local_graphs(client_ids, cfg, train_dataloaders, y_name, graph = None)
 
         local_weights.append(len(loader.dataset))
     return local_graphs, local_weights
+
+def _print_concept_availability(tag, loader, cfg, cid):
+    dataset = getattr(loader, "dataset", None)
+    if dataset is None or not hasattr(dataset, "c") or dataset.c is None:
+        print(f"\033[95m[{tag}] client {cid}: no concept labels in dataset.\033[0m")
+        return
+    c = dataset.c
+    if c.numel() == 0:
+        print(f"\033[95m[{tag}] client {cid}: empty concept tensor.\033[0m")
+        return
+    # A concept is unavailable if its column is all -1
+    unavailable = (c == -1).all(dim=0)
+    n_total = int(unavailable.numel())
+    n_unavail = int(unavailable.sum().item())
+    n_avail = n_total - n_unavail
+    if hasattr(cfg, "engine") and hasattr(cfg.engine, "model") and hasattr(cfg.engine.model, "c_info"):
+        names = cfg.engine.model.c_info.get("names", [])
+    else:
+        names = []
+    unavailable_names = [names[i] for i in range(min(len(names), n_total)) if unavailable[i]]
+    print(
+        f"\033[95m[{tag}] client {cid}: concepts available {n_avail}/{n_total}, "
+        f"unavailable {n_unavail}/{n_total}.\033[0m"
+    )
+    if unavailable_names:
+        print(f"\033[95m[{tag}] client {cid} unavailable concepts: {unavailable_names}\033[0m")
+
+
