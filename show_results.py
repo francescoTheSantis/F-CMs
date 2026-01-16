@@ -28,7 +28,12 @@ paths = [
     # "/home/admin/Federated-C2BM/outputs/multirun/2025-11-12/09-30-44",
     # "/home/admin/Federated-C2BM/outputs/multirun/2025-11-12/13-18-41",
     # "/home/admin/Federated-C2BM/outputs/multirun/2025-11-12/16-46-58",
-    "/home/admin/Federated-C2BM/outputs/multirun/2026-01-14/13-39-01"
+    #"/home/admin/Federated-C2BM/outputs/multirun/2026-01-15/13-48-41",
+    #"/home/admin/Federated-C2BM/outputs/multirun/2026-01-15/14-00-20",
+    "/home/admin/Federated-C2BM/outputs/multirun/2026-01-16/01-10-19",
+    "/home/admin/Federated-C2BM/outputs/multirun/2026-01-16/01-19-44",
+    "/home/admin/Federated-C2BM/outputs/multirun/2026-01-16/01-23-16",
+    # "/home/admin/Federated-C2BM/outputs/multirun/2026-01-08/12-33-28",
     # "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2026-01-08/12-46-39"
     # "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2026-01-13/17-00-51"
     #"/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2026-01-13/17-07-41"
@@ -46,6 +51,15 @@ exps_path = setup_results(paths, visualization_folder)
 
 # load the experiment results
 performance, c_info = load_exps(exps_path, n_clients=n_clients, args=args)
+
+# Debug: Check drift configuration
+print("\n[DEBUG] Loaded experiments configuration:")
+if 'rnd_drift' in performance.columns and 'n_rounds' in performance.columns:
+    drift_summary = performance[['dataset', 'learning', 'rnd_drift', 'n_rounds']].drop_duplicates()
+    print(drift_summary)
+    print(f"\nUnique rnd_drift values: {performance['rnd_drift'].unique()}")
+    print(f"Unique n_rounds values: {performance['n_rounds'].unique()}")
+print()
 
 ######### Dataset and model styles #########
 
@@ -69,7 +83,8 @@ dataset_styles = {
     'hailfinder': {'name': 'Hailfinder'},
     'insurance': {'name': 'Insurance'},
     'nih_chest_images': {'name': 'NIH Chest X-Ray'},
-    'cub_causal_struct': {'name': 'CUB_CAUSAL'}
+    'cub_causal_struct': {'name': 'CUB_CAUSAL'},
+    'siim_pneumothorax': {'name': 'SIIM-ACR Pneumothorax'},
 }
 
 # Define the custom order
@@ -81,7 +96,8 @@ custom_order = [
     'Insurance',
     'Hailfinder',
     'NIH Chest X-Ray',
-    'CUB_CAUSAL'
+    'CUB_CAUSAL',
+    'SIIM-ACR Pneumothorax'
 ]
 
 apply_styles(performance, dataset_styles, model_styles, custom_order)
@@ -118,10 +134,65 @@ model_styles = {k: v for k, v in model_styles.items() if k not in ['blackbox', '
 performance = performance[performance['model'].isin(['blackbox', 'blackbox_multi']) == False]
 
 ### Intervention plot for single c interventions on y ###
-plot_single_c_on_y(performance, custom_order, model_styles, visualization_folder)
+#plot_single_c_on_y(performance, custom_order, model_styles, visualization_folder)
 
 ### Intervention plot for level interventions ###
-plot_level_interventions(performance, custom_order, model_styles, visualization_folder, c_info)
+#plot_level_interventions(performance, custom_order, model_styles, visualization_folder, c_info)
+
+### Cumulative intervention plots ###
+
+print(f"\n[DEBUG show_results] Before calling plot function:")
+print(f"[DEBUG show_results] Performance shape: {performance.shape}")
+print(f"[DEBUG show_results] Unique models: {performance['model'].unique()}")
+print(f"[DEBUG show_results] Unique learning: {performance['learning'].unique()}")
+print(f"[DEBUG show_results] Unique datasets: {performance['dataset'].unique()}")
+print(f"[DEBUG show_results] Has single_c_interventions_on_y: {performance['single_c_interventions_on_y'].notna().sum()} / {len(performance)}")
+print(f"[DEBUG show_results] Has graph: {performance['graph'].notna().sum()} / {len(performance)}")
+
+# Plot for all learning modalities (centralized, federated with/without drift)
+plot_cumulative_accuracy_multi_modality(
+    performance,
+    custom_order,
+    architecture_name='c2bm',
+    c_info=c_info,
+    variable = 'task',
+    folder=visualization_folder,
+)
+
+plot_cumulative_accuracy_multi_modality(
+    performance,
+    custom_order,
+    architecture_name='c2bm',
+    variable = 'labels',
+    c_info=c_info,
+    folder=visualization_folder,
+)
+
+plot_cumulative_accuracy_multi_model(
+    performance,
+    custom_order,
+    learning_modality='local_federated_drift',
+    variable = 'labels',
+    c_info=c_info,
+    folder=visualization_folder,
+)
+
+# checks:
+# - add baseline at the beginning of the graph
+# - check graph for c2bm 
+# - check graph localized
+# - c_info is not passed well
+# - check title graphs
+
+# Optional: Plot for specific localized client
+# Uncomment to generate plots for a specific client
+# plot_cumulative_single_architecture_multi_modality(
+#     performance,
+#     custom_order,
+#     architecture_name='c2bm',
+#     folder=visualization_folder,
+#     localized_client_id=1,  # Change to desired client ID
+# )
 
 
 

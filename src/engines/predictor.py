@@ -31,7 +31,9 @@ class Predictor(pl.LightningModule):
                 c_names_all: Optional[list] = None,
                 annotation_assumption: Optional[str] = None,
                 learning_modality: Optional[str] = 'localized',
-                cid: Optional[int] = 1
+                cid: Optional[int] = 1,
+                centralized_topological_order: Optional[list] = None,
+                centralized_c_dict: Optional[dict] = None,
                 ):
         super(Predictor, self).__init__()         
         self.model = model
@@ -63,8 +65,11 @@ class Predictor(pl.LightningModule):
         self.clients = range(1, len(self.c_names_ood)+2)  # +1 for the case where there are no OOD concepts
 
         self.learning_modality = learning_modality
+        self.centralized_topological_order = centralized_topological_order
+        self.centralized_c_dict = centralized_c_dict
         if metrics is None:
             metrics = dict()
+
         self._set_metrics(metrics)
 
         self.cid = cid
@@ -142,7 +147,6 @@ class Predictor(pl.LightningModule):
             self.test_intervention_single_y = MetricCollection(
                 metrics={k: self._check_metric(m) for k, m in c_acc_metrics.items()},
                 prefix="test_intervention/single/y/")
-          
             # task accuracy after intervention of each graph level
             self.test_intervention_level_y = MetricCollection(
                 metrics={k: self._check_metric(m) for k, m in c_acc_levels_metrics.items()},
@@ -216,6 +220,33 @@ class Predictor(pl.LightningModule):
                     self.test_intervention_ood_level_c_id[f'client {client_id}'] = MetricCollection(
                         metrics={k: self._check_metric(m) for k, m in childs_per_level_id[client_id].items()},
                         prefix=f"test_intervention/ood_level/c_id/client_{client_id}/")
+
+            
+            # cumulative interventions: task accuracy
+            cumulative_y_metrics = {}
+            cumulative_count = 0
+            for c_name in self.centralized_topological_order:
+                if c_name in self.model.virtual_roots: continue
+                cumulative_count += 1
+                cumulative_y_metrics[f'{cumulative_count}_{c_name}'] = metrics.get('classification_acc')
+            
+            self.test_intervention_cumulative_y = MetricCollection(
+                metrics={k: self._check_metric(m) for k, m in cumulative_y_metrics.items()},
+                prefix="test_intervention/cumulative/y/")
+            
+            # cumulative interventions: concept accuracy
+            cumulative_c_metrics = {}
+            cumulative_count = 0
+            for c_name_i in self.centralized_topological_order:
+                if c_name_i in self.model.virtual_roots: continue
+                cumulative_count += 1
+                for c_name_j in self.centralized_topological_order:
+                    if c_name_j in self.model.virtual_roots: continue
+                    cumulative_c_metrics[f'{cumulative_count}_{c_name_i}/{c_name_j}'] = metrics.get('classification_acc')
+            
+            self.test_intervention_cumulative_c = MetricCollection(
+                metrics={k: self._check_metric(m) for k, m in cumulative_c_metrics.items()},
+                prefix="test_intervention/cumulative/c/")
 
             # --- fairness metrics ---
             self.cace = MetricCollection(
@@ -292,7 +323,7 @@ class Predictor(pl.LightningModule):
             y_hat, c_hat = self.model.filter_output_for_metric(y_output, c_output)
             # update metric after intervention:
             # after interveening on concept c_name_i, how well can we predict y
-            self.test_intervention_single_y['_baseline'].update(y_hat, y)            
+            self.test_intervention_single_y['_baseline'].update(y_hat, y)           
 
             # interventions on individual concepts
             for i, c_name_i in [(i, name) for name, i in self.c_name_index.items() if name in self.c_names_all]:
@@ -312,6 +343,8 @@ class Predictor(pl.LightningModule):
                 y_output, c_output = self.forward(**inputs)
                 y_hat, c_hat = self.model.filter_output_for_metric(y_output, c_output)
                 self.test_intervention_single_y[c_name_i].update(y_hat, y)
+                
+                #self.test_intervention_single_y[c_name_i].to(c.device)
                 # update metric after intervention:
                 # after interveening on concept c_name_i, how well can we predict y
                 #self.test_intervention_single_y[c_name_i].reset()
@@ -321,7 +354,33 @@ class Predictor(pl.LightningModule):
                 #print(id(self.test_intervention_single_y[c_name_i]))
                 
 
-
+            # single interventions cumulative
+            cumulative_indices = []
+            number_of_interventions = 0
+            for c_name in self.centralized_topological_order:
+                number_of_interventions += 1
+                if c_name in self.model.virtual_roots: continue
+                # intervene on concept c_name_i in a cumulative way
+                #if c.shape[1]< len(self.centralized_topological_order):
+                if c_name in self.c_name_index:
+                    cumulative_indices.append(self.c_name_index[c_name])
+                intervention_index = torch.zeros(c.shape, dtype=c.dtype, device=c.device)
+                for idx in cumulative_indices:
+                    intervention_index += get_test_intervention_index(c.shape, idx)
+                inputs = {'x':x, 'c':c, 'intervention_index':intervention_index}
+                # forward pass with intervention at test time
+                y_output, c_output = self.forward(**inputs)
+                y_hat, c_hat = self.model.filter_output_for_metric(y_output, c_output)
+                self.test_intervention_cumulative_y[str(number_of_interventions) + "_" + c_name].update(y_hat, y)
+                for c_name_j in self.centralized_topological_order:
+                    if c_name_j in self.c_name_index:
+                        index_in_c = self.c_name_index[c_name_j]
+                    else:
+                        continue
+                    if c_name_j in self.model.virtual_roots: continue
+                    if c_name_j not in c_hat.keys():
+                        continue
+                    self.test_intervention_cumulative_c[str(number_of_interventions) + "_" + c_name +"/" + c_name_j].update(c_hat[c_name_j], c[:,index_in_c])
                 
             # level intervention
             # NOTICE: if self.learning_modality== "localized", self.interv_policy has been updated to the subgraph
@@ -656,10 +715,41 @@ class Predictor(pl.LightningModule):
                         print(f"Concept accuracy for client {client_id} after intervention on ood {level_child}{' (empty)' if int(level) in self.level_intervention_ood_annotations[client_id].keys() else ''}: {c_int_ood_level_c_id[client_id][f'ood_{level_child}']}")
                 pickle.dump(c_int_ood_level_c_id, open(f'results/level_OOD_interventions_on_c_ID.pkl', 'wb'))
 
+            # cumulative interventions on task accuracy
+            y_int_cumulative = {}
+            for k, metric in self.test_intervention_cumulative_y.items():
+                key = _remove_prefix(k, self.test_intervention_cumulative_y.prefix)
+                y_int_cumulative[key] = metric.compute().item()
+                print(f"Task accuracy after cumulative intervention {key}: {y_int_cumulative[key]}")
+            pickle.dump(y_int_cumulative, open(f'results/cumulative_interventions_on_y.pkl', 'wb'))
+
+            # cumulative interventions on concept accuracy
+            c_int_cumulative = {}
+            for k, metric in self.test_intervention_cumulative_c.items():
+                key = _remove_prefix(k, self.test_intervention_cumulative_c.prefix)
+                c_int_cumulative[key] = metric.compute().item()
+                print(f"Concept accuracy after cumulative intervention {key}: {c_int_cumulative[key]}")
+            pickle.dump(c_int_cumulative, open(f'results/cumulative_interventions_on_c.pkl', 'wb'))
+
             # save graph and concepts
             # DA RIVEDERE
-            pickle.dump({'concepts':self.c_names_all,
-                         'policy':self.test_interv_policy}, open("graph.pkl", 'wb'))
+            # Load existing graph.pkl if it exists, otherwise create new dict
+            try:
+                with open("graph.pkl", 'rb') as f:
+                    graph_data = pickle.load(f)
+            except FileNotFoundError:
+                graph_data = {}
+            
+            # Update only these keys without overwriting other data
+            graph_data.update({
+                'concepts': self.c_names_all,
+                'policy': self.test_interv_policy,
+                'centralized_topological_order': self.centralized_topological_order,
+                'learning_modality': self.learning_modality
+            })
+            
+            # Save updated data
+            pickle.dump(graph_data, open("graph.pkl", 'wb'))
 
     def configure_optimizers(self):
         """"""
