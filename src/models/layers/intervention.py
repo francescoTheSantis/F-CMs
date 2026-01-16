@@ -1,7 +1,7 @@
 import torch
 from torch.nn.functional import one_hot
 
-def get_test_intervention_index(c_shape, c_index, values=None):   
+def get_test_intervention_index(c_shape, c_index, values=None, device=None):   
     """
     Get intervention index for test time intervention.
     Args:
@@ -12,8 +12,15 @@ def get_test_intervention_index(c_shape, c_index, values=None):
                                                                           if Tensor, set intervened concepts to this tensor
                                                                           if 'random', set intervened concepts to random values
     """       
-    intervention_index = torch.zeros(c_shape)
-    c_values = torch.full(c_shape, float('nan'))
+    if device is None:
+        if torch.cuda.is_available():
+            device = torch.device("cuda", torch.cuda.current_device())
+        elif torch.backends.mps.is_available():
+            device = torch.device("mps")
+        else:
+            device = torch.device("cpu")
+    intervention_index = torch.zeros(c_shape, device=device)
+    c_values = torch.full(c_shape, float('nan'), device=device)
     if isinstance(c_index, int):
         c_index = [c_index]
     if values is not None and not isinstance(values, list):
@@ -28,16 +35,16 @@ def get_test_intervention_index(c_shape, c_index, values=None):
             if values is not None:
                 values_i = values[i]
                 if isinstance(values_i, int):
-                    c_values[:, index_i] = torch.ones(c_shape[0]) * values_i
+                    c_values[:, index_i] = torch.ones(c_shape[0], device=device) * values_i
                 elif isinstance(values, torch.Tensor):
                     c_values[:, index_i] = values_i
                 elif values == 'random':
                     raise NotImplementedError
                 
     if values is not None:
-        return intervention_index.to("cuda" if torch.cuda.is_available() else "cpu"), c_values.to("cuda" if torch.cuda.is_available() else "cpu")
+        return intervention_index, c_values
     else:
-        return intervention_index.to("cuda" if torch.cuda.is_available() else "cpu")
+        return intervention_index
 
 def maybe_intervene(c_pred_probs, c, intervention_index):
     # check if intervention index is not all zeros (non interventions) and ground truth is not all nans (virutal roots)
@@ -54,4 +61,3 @@ def maybe_intervene(c_pred_probs, c, intervention_index):
         c_one_hot = one_hot(c.long(), concept_cardinality)   
         c_pred_probs = torch.where(index, c_one_hot, c_pred_probs)
     return c_pred_probs
-

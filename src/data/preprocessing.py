@@ -269,7 +269,7 @@ def preprocess_dataset(dataset_cfg, _dataset, device, backbone ='resnet18') -> d
                                           backbone=backbone) 
         
     elif dataset_name == 'siim_pneumothorax':
-        clip_model, clip_tokenizer, ckpt_config = load_pretrained_clip_model("r50_mcc")
+        clip_model, clip_tokenizer, ckpt_config = load_pretrained_clip_model("r50_mcc", device=device)
         dataset.split(ckpt_config)
         	   
         # if we already generated the concepts we simply read them form the respective json file,
@@ -290,7 +290,7 @@ def preprocess_dataset(dataset_cfg, _dataset, device, backbone ='resnet18') -> d
         else:
             with open(os.path.join(concepts_path, 'generated_concepts.json')) as f:
                 concepts = json.load(f)['concepts']          
-        dataset = generate_img_embeddings_and_assign_concepts(dataset_name = cfg.dataset.get('name'),
+        dataset = generate_img_embeddings_and_assign_concepts(dataset_name = dataset_name,
                                                                 dataset = dataset,
                                                                 concepts = concepts,
                                                                 clip_model = clip_model,
@@ -300,10 +300,16 @@ def preprocess_dataset(dataset_cfg, _dataset, device, backbone ='resnet18') -> d
                                                                 device=device)
         # avoid empty spaces in the concepts names
         dataset.c_info['names'] = [concept.replace(' ', '_') for concept in dataset.c_info['names']]
-
+        
+        # switch the task to "there_is_lung_diseases" and put "Pneumothorax" as concept in the same place as "there_is_lung_diseases"
+        if "there_is_lung_diseases" in dataset.c_info['names']:
+            print("\033[93mChanging task to 'there_is_lung_diseases'\033[0m")
+            change_task(dataset, task="there_is_lung_diseases")
+            # change_task(dataset, task="there_is_medical_emergencies")
 
         #dataset = maybe_reduce(cfg.dataset.get('reduce_fraction', None), dataset)
         #dataset = generate_img_embeddings(dataset, batch_size=cfg.dataset.get('batch_size'), device=device)
+        
     elif dataset_name in ['asia', 'alarm', 'sachs', 'hailfinder', 'insurance']:
         dataset = maybe_reduce(dataset_cfg.get('reduce_fraction', None), dataset)
         

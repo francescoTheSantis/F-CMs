@@ -11,9 +11,10 @@ loader:
 is_image_dataset: true
 reduce_fraction: Null
 onehot_to_concepts: True
+hidden_size: 64
 
 generate_concepts: True
 load_embeddings: True
-load_graph: False
+load_graph: True
 
 label_descriptions: Null
