@@ -2,6 +2,7 @@ from env import CACHE
 import os
 import torch
 import json
+import warnings
 import pandas as pd
 from random import sample
 import seaborn as sns
@@ -10,6 +11,8 @@ import matplotlib.pyplot as plt
 from transformers import AutoTokenizer
 from torch.utils.data import DataLoader
 import torch.nn as nn
+import torchvision.models as tv_models
+from torchvision.models.resnet import ResNet18_Weights
 from tqdm import tqdm
 import numpy as np
 from sklearn import metrics
@@ -20,7 +23,8 @@ from scipy.stats import pearsonr
 # Add 'src' directory to sys.path
 from src.models.clip import CXRClip
 
-def load_pretrained_clip_model(model_name = "r50_mcc"):
+def load_pretrained_clip_model(model_name: str = "r50_mcc",
+                               device: Union[str, torch.device, None] = None):
     # load pretrained clip model and configurations
     ckpt = torch.load(f"{CACHE}/siim_pneumothorax/pretrained_models/{model_name}.tar", map_location="cpu")
     ckpt_config = ckpt["config"]
@@ -45,7 +49,15 @@ def load_pretrained_clip_model(model_name = "r50_mcc"):
 
 
     # load pretrained weights into the model
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if device is None:
+        raise ValueError("Device must be specified. Uncomment the following lines")
+        # if torch.cuda.is_available():
+        #     device = "cuda:0"
+        # elif torch.backends.mps.is_available():
+        #     device = "mps"
+        # else:
+        #     device = "cpu"
+    device = torch.device(device)
     clip_model = clip_model.to(device)
     clip_model.load_state_dict(ckpt["model"], strict=False)
     clip_model.eval()
@@ -100,6 +112,32 @@ def transform_concepts_to_binary(c_embeddings):
     c = torch.tensor(cluster_assignments)
 
     return c
+ 
+def _load_resnet18_encoder(device: str) -> nn.Module:
+    weights = None
+    try:
+        candidate = ResNet18_Weights.DEFAULT
+        weights_file = os.path.basename(candidate.url)
+        weights_path = os.path.join(torch.hub.get_dir(), "checkpoints", weights_file)
+        if os.path.exists(weights_path):
+            weights = candidate
+        else:
+            warnings.warn(
+                f"ResNet18 weights not found at {weights_path}; using random init.",
+                RuntimeWarning,
+            )
+    except Exception as exc:
+        warnings.warn(
+            f"ResNet18 weights lookup failed; using random init. ({exc})",
+            RuntimeWarning,
+        )
+
+    input_encoder = tv_models.resnet18(weights=weights)
+    modules = list(input_encoder.children())[:-1]
+    input_encoder = nn.Sequential(*modules)
+    input_encoder.to(device)
+    input_encoder.eval()
+    return input_encoder
  
 def _generate_img_embeddings_and_assign_concepts(dataset, 
                                                  concepts, 
@@ -238,14 +276,16 @@ def generate_img_embeddings_and_assign_concepts(dataset_name: str,
                                                 batch_size: int = 128,
                                                 device: str = 'cpu') -> None:
     
-    # input encoder model to preprocess images for the pipeline
-    input_encoder = torch.hub.load('pytorch/vision:v0.10.0', 'resnet18', pretrained=True)
-    modules = list(input_encoder.children())[:-1]
-    input_encoder = nn.Sequential(*modules)
-    input_encoder.to(device)
-    input_encoder.eval()
+    processed_dir = os.path.join(CACHE, "siim_pneumothorax", "processed_datasets")
+    processed_path = os.path.join(processed_dir, f"{dataset_name}_with_concepts.pt")
+    if os.path.exists(processed_path):
+        return torch.load(processed_path, map_location=device)
+
+    os.makedirs(processed_dir, exist_ok=True)
+    input_encoder = _load_resnet18_encoder(device)
 
     for split, data in dataset.data.items():
+        print(f"Processing split: {split}")
         data = _generate_img_embeddings_and_assign_concepts(data, 
                                                             concepts, 
                                                             clip_model, 
@@ -259,4 +299,5 @@ def generate_img_embeddings_and_assign_concepts(dataset_name: str,
     # update c_info
     dataset.c_info = {'names': concepts, 
                       'cardinality': [2]* len(concepts)}
+    torch.save(dataset, processed_path)
     return dataset

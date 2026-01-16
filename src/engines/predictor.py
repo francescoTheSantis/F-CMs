@@ -298,7 +298,15 @@ class Predictor(pl.LightningModule):
             intervention_index = torch.bernoulli(torch.ones(c_shape) * self.intervention_prob)
         else:
             intervention_index = torch.zeros(c_shape)
-        return intervention_index.to("cuda" if torch.cuda.is_available() else "cpu")
+        device = getattr(self, "device", None)
+        if device is None:
+            if torch.cuda.is_available():
+                device = torch.device("cuda", torch.cuda.current_device())
+            elif torch.backends.mps.is_available():
+                device = torch.device("mps")
+            else:
+                device = torch.device("cpu")
+        return intervention_index.to(device)
     
     #def _remove_node_id_ood(self, nodes):
     #    for node in nodes:
@@ -316,7 +324,7 @@ class Predictor(pl.LightningModule):
 
             # baseline task accuracy
             # do not intervene
-            intervention_index = get_test_intervention_index(c.shape, [])
+            intervention_index = get_test_intervention_index(c.shape, [], device=c.device)
             inputs = {'x':x, 'c':c, 'intervention_index':intervention_index}
             # forward pass with intervention at test time
             y_output, c_output = self.forward(**inputs)
@@ -337,7 +345,7 @@ class Predictor(pl.LightningModule):
                     intervention_index = torch.zeros(c.shape, dtype=c.dtype, device=c.device)
                 else:
                     # intervene on concept c_name_i
-                    intervention_index = get_test_intervention_index(c.shape, i)
+                    intervention_index = get_test_intervention_index(c.shape, i, device=c.device)
                 inputs = {'x':x, 'c':c, 'intervention_index':intervention_index}
                 # forward pass with intervention at test time
                 y_output, c_output = self.forward(**inputs)
@@ -366,7 +374,7 @@ class Predictor(pl.LightningModule):
                     cumulative_indices.append(self.c_name_index[c_name])
                 intervention_index = torch.zeros(c.shape, dtype=c.dtype, device=c.device)
                 for idx in cumulative_indices:
-                    intervention_index += get_test_intervention_index(c.shape, idx)
+                    intervention_index += get_test_intervention_index(c.shape, idx, device=c.device)
                 inputs = {'x':x, 'c':c, 'intervention_index':intervention_index}
                 # forward pass with intervention at test time
                 y_output, c_output = self.forward(**inputs)
@@ -424,7 +432,7 @@ class Predictor(pl.LightningModule):
                     nodes = list(itertools.chain(*self.test_interv_policy[:l]))
                     if client_id == len(self.c_names_ood)+1 or self.learning_modality in ["centralized", "localized"]:
                         # intervene on all the concepts of the level
-                        intervention_index = get_test_intervention_index(c.shape, nodes)
+                        intervention_index = get_test_intervention_index(c.shape, nodes, device=c.device)
                         inputs = {'x':x, 'c':c, 'intervention_index':intervention_index}
                         y_output, c_output = self.forward(**inputs)
                         y_hat, c_hat = self.model.filter_output_for_metric(y_output, c_output)
@@ -441,8 +449,8 @@ class Predictor(pl.LightningModule):
                                 self.level_intervention_id_annotations[client_id][l] ="empty"
                             if len(nodes_ood)==0:
                                 self.level_intervention_ood_annotations[client_id][l] ="empty"
-                            intervention_index_id = get_test_intervention_index(c.shape, nodes_id)
-                            intervention_index_ood = get_test_intervention_index(c.shape, nodes_ood)
+                            intervention_index_id = get_test_intervention_index(c.shape, nodes_id, device=c.device)
+                            intervention_index_ood = get_test_intervention_index(c.shape, nodes_ood, device=c.device)
                             inputs_id = {'x':x, 'c':c, 'intervention_index':intervention_index_id}
                             inputs_ood = {'x':x, 'c':c, 'intervention_index':intervention_index_ood}
                             y_output_id, c_output_id = self.forward(**inputs_id)
@@ -490,10 +498,10 @@ class Predictor(pl.LightningModule):
 
             # compute the cace before the do-intervention on concept j
             # different do-interventions on concept i, effect on the task
-            interv_index, interv_values = get_test_intervention_index(c.shape, i, values=1)
+            interv_index, interv_values = get_test_intervention_index(c.shape, i, values=1, device=c.device)
             y_output, c_output = self.forward(**{'x':x, 'c':interv_values, 'intervention_index':interv_index})
             y_hat_before_do_1, _ = self.model.filter_output_for_metric(y_output, c_output)
-            interv_index, interv_values = get_test_intervention_index(c.shape, i, values=0)
+            interv_index, interv_values = get_test_intervention_index(c.shape, i, values=0, device=c.device)
             y_output, c_output = self.forward(**{'x':x, 'c':interv_values, 'intervention_index':interv_index})
             y_hat_before_do_0, _ = self.model.filter_output_for_metric(y_output, c_output)
             self.cace['before'].update(y_hat_before_do_1, y_hat_before_do_0)
@@ -506,10 +514,10 @@ class Predictor(pl.LightningModule):
 
             # compute the cace after the do-intervention on concept j
             # different do-interventions on concept i, effect on the task
-            interv_index, interv_values = get_test_intervention_index(c.shape, [j,i], values=[1,1])
+            interv_index, interv_values = get_test_intervention_index(c.shape, [j,i], values=[1,1], device=c.device)
             y_output, c_output = self.forward(**{'x':x, 'c':interv_values, 'intervention_index':interv_index})
             y_hat_after_do_1, _ = self.model.filter_output_for_metric(y_output, c_output)
-            interv_index, interv_values = get_test_intervention_index(c.shape, [j,i], values=[1,0])
+            interv_index, interv_values = get_test_intervention_index(c.shape, [j,i], values=[1,0], device=c.device)
             y_output, c_output = self.forward(**{'x':x, 'c':interv_values, 'intervention_index':interv_index})
             y_hat_after_do_0, _ = self.model.filter_output_for_metric(y_output, c_output)
             self.cace['after'].update(y_hat_after_do_1, y_hat_after_do_0)
@@ -790,5 +798,3 @@ class Predictor(pl.LightningModule):
 #
 #       # Update the ID & OOD interventions
 #        self.set_id_ood_interventions()
-
-

@@ -223,8 +223,16 @@ def change_task(dataset, task):
         raise ValueError(f"Task {task} not found in dataset.")
     
     for split in dataset.data:
-        old_y_values = temp_dataset.data[split].y.squeeze()
+        old_y_values = temp_dataset.data[split].y
         new_y_values = temp_dataset.data[split].c[:, y_index]
+        if torch.is_tensor(old_y_values):
+            old_y_values = old_y_values.view(-1)
+        else:
+            old_y_values = np.asarray(old_y_values).reshape(-1)
+        if torch.is_tensor(new_y_values):
+            new_y_values = new_y_values.view(-1, 1)
+        else:
+            new_y_values = np.asarray(new_y_values).reshape(-1, 1)
         dataset.data[split].y = new_y_values
         dataset.data[split].c[:, y_index] = old_y_values
 
