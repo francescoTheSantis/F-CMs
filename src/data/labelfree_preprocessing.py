@@ -26,7 +26,7 @@ from src.models.clip import CXRClip
 def load_pretrained_clip_model(model_name: str = "r50_mcc",
                                device: Union[str, torch.device, None] = None):
     # load pretrained clip model and configurations
-    ckpt = torch.load(f"{CACHE}/siim_pneumothorax/pretrained_models/{model_name}.tar", map_location="cpu")
+    ckpt = torch.load(f"{CACHE}/siim_pneumothorax/pretrained_models/{model_name}.tar", map_location="cpu", weights_only=False)
     ckpt_config = ckpt["config"]
     ckpt_config_tokenizer = ckpt_config["tokenizer"]
     pretrained_model_name_or_path = ckpt_config_tokenizer["pretrained_model_name_or_path"]
@@ -279,7 +279,7 @@ def generate_img_embeddings_and_assign_concepts(dataset_name: str,
     processed_dir = os.path.join(CACHE, "siim_pneumothorax", "processed_datasets")
     processed_path = os.path.join(processed_dir, f"{dataset_name}_with_concepts.pt")
     if os.path.exists(processed_path):
-        return torch.load(processed_path, map_location=device)
+        return torch.load(processed_path, map_location=device, weights_only=False)
 
     os.makedirs(processed_dir, exist_ok=True)
     input_encoder = _load_resnet18_encoder(device)

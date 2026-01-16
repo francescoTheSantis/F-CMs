@@ -1,4 +1,5 @@
 from env import CACHE
+import logging
 import os
 from typing import Dict
 import torch
@@ -6,6 +7,8 @@ from torch import nn
 from torch import nn
 from torchvision.models.resnet import resnet50
 from transformers import AutoConfig, AutoModel, SwinModel, ViTModel, BertModel # type: ignore
+
+log = logging.getLogger(__name__)
 
 class MLPProjectionHead(nn.Module):
     def __init__(self, embedding_dim, projection_dim, dropout):
@@ -153,31 +156,43 @@ class HuggingfaceTextEncoder(nn.Module):
         use_safetensors: bool = True,
     ):
         super().__init__()
-        if pretrained:
-            self.text_encoder = AutoModel.from_pretrained(
-                name,
-                # vocab_size=vocab_size,
-                ignore_mismatched_sizes=True,
-                cache_dir=cache_dir,
-                local_files_only=local_files_only,
-                trust_remote_code=trust_remote_code,
-                use_safetensors=use_safetensors,
-            )
-        else:
-            # initializing with a config file does not load the weights associated with the model
+        def _load_from_config(local_only: bool = True):
             model_config = AutoConfig.from_pretrained(
                 name,
                 # vocab_size=vocab_size,
                 ignore_mismatched_sizes=True,
                 cache_dir=cache_dir,
-                local_files_only=local_files_only,
+                local_files_only=local_only,
                 trust_remote_code=trust_remote_code,
             )
             if type(model_config).__name__ == "BertConfig":
-                self.text_encoder = BertModel(model_config)
+                return BertModel(model_config)
             else:
                 # TODO: add text models if needed
                 raise NotImplementedError(f"Not support training from scratch : {type(model_config).__name__}")
+
+        if pretrained:
+            try:
+                self.text_encoder = AutoModel.from_pretrained(
+                    name,
+                    # vocab_size=vocab_size,
+                    ignore_mismatched_sizes=True,
+                    cache_dir=cache_dir,
+                    local_files_only=local_files_only,
+                    trust_remote_code=trust_remote_code,
+                    use_safetensors=use_safetensors,
+                )
+            except Exception as exc:
+                log.warning(
+                    "[HuggingfaceTextEncoder] failed to load pretrained weights for %s (%s); retrying with local config only.",
+                    name,
+                    exc,
+                )
+                # Avoid any remote lookups when the network is unavailable/timeouts occur.
+                self.text_encoder = _load_from_config(local_only=True)
+        else:
+            # initializing with a config file does not load the weights associated with the model
+            self.text_encoder = _load_from_config(local_only=local_files_only)
 
         if gradient_checkpointing and self.text_encoder.supports_gradient_checkpointing:
             self.text_encoder.gradient_checkpointing_enable()

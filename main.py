@@ -146,6 +146,7 @@ def main(cfg: DictConfig) -> None:
             if true_graph is None or cfg.dataset.load_true_graph == False:
                 with open(os.path.join(dataset_directory, "learned_graph.pkl"), 'rb') as f:
                     graph = pickle.load(f)
+                    
             else:
                 graph = true_graph
         except FileNotFoundError:
@@ -349,10 +350,7 @@ def main(cfg: DictConfig) -> None:
             val_dataloader = DataLoader(datasets[0].data['val'], batch_size=cfg.dataset.batch_size, collate_fn=static_graph_collate)
             test_dataloader = DataLoader(datasets[0].data['test'], batch_size=cfg.dataset.batch_size, collate_fn=static_graph_collate)
 
-
-        
         engine = instantiate(cfg.engine)
-        
         
         try:
             trainer = Trainer(cfg)
@@ -474,6 +472,9 @@ def main(cfg: DictConfig) -> None:
 
             # aggregate graphs for pre-drift and post-drift clients
             # predrift
+            # if dataset is siim_pneumothorax, true graph is the learned one
+            if cfg.dataset.name == "siim_pneumothorax":
+                true_graph = graph
             graph_predrift, _ = aggregate_graph_proposals(
                 client_selection = predrift_clients,
                 local_graphs=local_graphs,
@@ -532,7 +533,7 @@ def main(cfg: DictConfig) -> None:
         cfg_predrift = maybe_update_config_with_graph_subgroup_clients(cfg_predrift, predrift_clients, graph_predrift,interv_policy_predrift,  interv_policy_predrift_constructed, datasets)
         
         # stop code now
-        sys.exit(0)
+        # sys.exit(0)
 
         # Filter dataloaders for predrift clients
         train_dataloaders = filter_dataloaders_by_concepts(
