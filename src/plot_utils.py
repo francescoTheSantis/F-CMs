@@ -2382,6 +2382,109 @@ def tabular_task_and_concept_accuracy(
             final_table.to_csv(result_file, index=True)
     
 
+def compute_drift_statistics(performance):
+    coverage_stats = pd.DataFrame()
+    param_change_stats = pd.DataFrame()
+
+    if 'concept_coverage' in performance.columns:
+        coverage_df = performance[['model', 'dataset', 'learning', 'concept_coverage']].dropna(subset=['concept_coverage'])
+        if not coverage_df.empty:
+            coverage_stats = coverage_df.groupby(['model', 'dataset', 'learning']).agg(
+                avg_coverage=('concept_coverage', 'mean'),
+                std_coverage=('concept_coverage', 'std'),
+                total_occurrences=('concept_coverage', 'count')
+            ).reset_index().fillna(0)
+            coverage_stats['ci_coverage'] = 1.96 * coverage_stats['std_coverage'] / np.sqrt(coverage_stats['total_occurrences'])
+
+    if 'percent_params_changed' in performance.columns:
+        params_df = performance[['model', 'dataset', 'learning', 'percent_params_changed']].dropna(subset=['percent_params_changed'])
+        if not params_df.empty:
+            param_change_stats = params_df.groupby(['model', 'dataset', 'learning']).agg(
+                avg_param_change=('percent_params_changed', 'mean'),
+                std_param_change=('percent_params_changed', 'std'),
+                total_occurrences=('percent_params_changed', 'count')
+            ).reset_index().fillna(0)
+            param_change_stats['ci_param_change'] = 1.96 * param_change_stats['std_param_change'] / np.sqrt(param_change_stats['total_occurrences'])
+
+    return coverage_stats, param_change_stats
+
+
+def tabular_drift_metrics(
+        coverage_stats,
+        param_change_stats,
+        custom_order,
+        model_styles,
+        visualization_folder,
+    ):
+
+    learnings = set()
+    if not coverage_stats.empty:
+        learnings.update(coverage_stats['learning'].unique())
+    if not param_change_stats.empty:
+        learnings.update(param_change_stats['learning'].unique())
+
+    for learning in learnings:
+        if not coverage_stats.empty:
+            cov_subset = coverage_stats[coverage_stats['learning'] == learning]
+            if not cov_subset.empty:
+                cov_avg = cov_subset[['model', 'dataset', 'avg_coverage']]
+                cov_ci = cov_subset[['model', 'dataset', 'ci_coverage']]
+
+                pivot_avg = cov_avg.pivot(index='model', columns='dataset', values='avg_coverage')
+                pivot_ci = cov_ci.pivot(index='model', columns='dataset', values='ci_coverage')
+
+                final_table = pd.DataFrame()
+                for idx, row in pivot_avg.iterrows():
+                    row_dict = {}
+                    for dataset in pivot_ci.columns:
+                        acc = row.get(dataset, np.nan) * 100
+                        ci = pivot_ci.loc[idx, dataset] * 100 if dataset in pivot_ci.columns else np.nan
+                        row_dict[dataset] = f"{acc:.2f} ± {ci:.2f}" if not np.isnan(acc) else "N/A"
+                    final_table = pd.concat([final_table, pd.DataFrame(row_dict, index=[idx])], axis=0)
+
+                final_table = final_table.reindex(columns=custom_order)
+                final_table.index = final_table.index.map(lambda x: model_styles[x]['name'] if x in model_styles else x)
+
+                print('\n\nConcept Coverage Table:')
+                print('----------------------')
+                print(final_table)
+
+                result_file = f'{visualization_folder}/{learning}/concept_coverage.csv'
+                if not os.path.exists(os.path.dirname(result_file)):
+                    os.makedirs(os.path.dirname(result_file))
+                final_table.to_csv(result_file, index=True)
+
+        if not param_change_stats.empty:
+            param_subset = param_change_stats[param_change_stats['learning'] == learning]
+            if not param_subset.empty:
+                param_avg = param_subset[['model', 'dataset', 'avg_param_change']]
+                param_ci = param_subset[['model', 'dataset', 'ci_param_change']]
+
+                pivot_avg = param_avg.pivot(index='model', columns='dataset', values='avg_param_change')
+                pivot_ci = param_ci.pivot(index='model', columns='dataset', values='ci_param_change')
+
+                final_table = pd.DataFrame()
+                for idx, row in pivot_avg.iterrows():
+                    row_dict = {}
+                    for dataset in pivot_ci.columns:
+                        acc = row.get(dataset, np.nan) * 100
+                        ci = pivot_ci.loc[idx, dataset] * 100 if dataset in pivot_ci.columns else np.nan
+                        row_dict[dataset] = f"{acc:.2f} ± {ci:.2f}" if not np.isnan(acc) else "N/A"
+                    final_table = pd.concat([final_table, pd.DataFrame(row_dict, index=[idx])], axis=0)
+
+                final_table = final_table.reindex(columns=custom_order)
+                final_table.index = final_table.index.map(lambda x: model_styles[x]['name'] if x in model_styles else x)
+
+                print('\n\n% Parameters Changed Table:')
+                print('--------------------------')
+                print(final_table)
+
+                result_file = f'{visualization_folder}/{learning}/percent_params_changed.csv'
+                if not os.path.exists(os.path.dirname(result_file)):
+                    os.makedirs(os.path.dirname(result_file))
+                final_table.to_csv(result_file, index=True)
+
+
 def tabular_graph_metrics(
         performance,
         custom_order,
@@ -2808,6 +2911,19 @@ def load_exps(exps_path, n_clients=5, args=None):
                     task_results = pickle.load(file)
 
                 d['task_acc'] = task_results['_baseline']
+
+                # Additional drift metrics (optional)
+                d['concept_coverage'] = np.nan
+                d['percent_params_changed'] = np.nan
+                additional_metrics_path = os.path.join(result_file, "additional_metrics.json")
+                if os.path.exists(additional_metrics_path):
+                    try:
+                        with open(additional_metrics_path, "r") as f:
+                            additional_metrics = json.load(f)
+                        d['concept_coverage'] = float(additional_metrics.get("concept_coverage", np.nan))
+                        d['percent_params_changed'] = float(additional_metrics.get("percent_params_changed", np.nan))
+                    except Exception:
+                        pass
 
                 try:
                     # Collect graph

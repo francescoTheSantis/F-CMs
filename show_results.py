@@ -21,23 +21,12 @@ args = parser.parse_args()
 
 # List the paths containing the sweeps' results
 paths = [
-    #"/home/admin/Federated-C2BM/outputs/multirun/2025-11-10/18-57-50",
-    #"/home/admin/Federated-C2BM/outputs/multirun/2025-11-11/18-33-54",
-    # "/home/admin/Federated-C2BM/outputs/multirun/2025-11-12/07-57-37",
-    # "/home/admin/Federated-C2BM/outputs/multirun/2025-11-12/08-22-54",
-    # "/home/admin/Federated-C2BM/outputs/multirun/2025-11-12/09-30-44",
-    # "/home/admin/Federated-C2BM/outputs/multirun/2025-11-12/13-18-41",
-    # "/home/admin/Federated-C2BM/outputs/multirun/2025-11-12/16-46-58",
-    #"/home/admin/Federated-C2BM/outputs/multirun/2026-01-15/13-48-41",
-    #"/home/admin/Federated-C2BM/outputs/multirun/2026-01-15/14-00-20",
-    "/home/admin/Federated-C2BM/outputs/multirun/2026-01-16/01-10-19",
-    "/home/admin/Federated-C2BM/outputs/multirun/2026-01-16/01-19-44",
-    "/home/admin/Federated-C2BM/outputs/multirun/2026-01-16/01-23-16",
-    # "/home/admin/Federated-C2BM/outputs/multirun/2026-01-08/12-33-28",
-    # "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2026-01-08/12-46-39"
-    # "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2026-01-13/17-00-51"
-    #"/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2026-01-13/17-07-41"
-    # "/Users/dariofenoglio/Library/CloudStorage/OneDrive-USI/PC/Desktop/USI_Locale/Federated-C2BM/outputs/multirun/2026-01-13/16-14-19_test_2"
+    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-16/16-25-47_test_s1"
+    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-16/16-26-40_test_s2"
+    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-16/16-29-10_test_s3"
+    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-16/16-30-10_test_s4"
+    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-17/09-33-05"
+    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-17/09-37-30"
 ]
 
 # folder to save processed results
@@ -125,6 +114,16 @@ tabular_task_and_concept_accuracy(**kwargs_tables)
 # labels
 kwargs_tables['label'] = 'labels'
 tabular_task_and_concept_accuracy(**kwargs_tables)
+
+# Concept coverage and parameter change tables
+coverage_stats, param_change_stats = compute_drift_statistics(performance)
+tabular_drift_metrics(
+    coverage_stats,
+    param_change_stats,
+    custom_order,
+    model_styles,
+    visualization_folder,
+)
 
 ########## Intervention plots ##########
 # Eliminate blackbox and blackbox_multi from the model style

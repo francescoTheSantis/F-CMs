@@ -569,6 +569,11 @@ def main(cfg: DictConfig) -> None:
         # start federated learning rounds
         init_cfg = cfg_predrift if cfg_predrift is not None else cfg_postdrift
         init_engine = instantiate(init_cfg.engine)
+        param_count_predrift = sum(p.numel() for p in init_engine.model.parameters())
+        try:
+            param_count_postdrift = sum(p.numel() for p in instantiate(cfg.engine).model.parameters())
+        except Exception:
+            param_count_postdrift = param_count_predrift
         global_params = get_parameters(init_engine)
         global_param_keys = list(init_engine.model.state_dict().keys())
         drift_debug_printed = False
@@ -818,6 +823,7 @@ def main(cfg: DictConfig) -> None:
         # ------------------------------------------------------------
         # Trim logged metrics up to the best round (drop overfitting tail)
         # ------------------------------------------------------------
+        last_round_executed = history["round"][-1] if len(history["round"]) > 0 else 0
         try:
             # Find index of best_round within history["round"], fallback to argmin
             if len(history["round"]) == 0:
@@ -879,6 +885,57 @@ def main(cfg: DictConfig) -> None:
             test_dataloader = test_dataloaders[testid]   
             trainer.test(local_engine, test_dataloader)        
         print(f"\033[90mFinished! Training time: {round((time.time() - t0)/60, 2)} minutes\033[0m")
+
+        # Save additional drift-related metrics
+        try:
+            last_round = last_round_executed
+            drift_happened = cfg.learning.subgraphs.rnd_drift <= last_round
+
+            c_names_id_cfg = getattr(cfg.engine, "c_names_id", {}) or {}
+            try:
+                c_names_id_map = OmegaConf.to_container(c_names_id_cfg, resolve=True)
+            except Exception:
+                c_names_id_map = dict(c_names_id_cfg) if isinstance(c_names_id_cfg, dict) else {}
+
+            def _collect_concepts(client_ids):
+                concepts = set()
+                for cid in client_ids:
+                    names = c_names_id_map.get(cid)
+                    if names is None:
+                        names = c_names_id_map.get(str(cid))
+                    if names is None:
+                        continue
+                    concepts.update(names)
+                return concepts
+
+            if cfg.learning.subgraphs.rnd_drift > 1:
+                training_clients_no_drift = predrift_clients
+                dynamic_clients = list(set((predrift_clients or []) + (postdrift_clients or [])))
+            else:
+                training_clients_no_drift = postdrift_clients
+                dynamic_clients = postdrift_clients
+
+            seen_clients = dynamic_clients if drift_happened else training_clients_no_drift
+            seen_concepts = _collect_concepts(seen_clients)
+            possible_concepts = _collect_concepts(dynamic_clients)
+            concept_coverage = float(len(seen_concepts) / len(possible_concepts)) if len(possible_concepts) > 0 else float('nan')
+
+            params_change_ratio = 0.0
+            if drift_happened and param_count_predrift > 0:
+                delta_params = max(0, param_count_postdrift - param_count_predrift)
+                params_change_ratio = float(delta_params / param_count_predrift)
+
+            additional_metrics = {
+                "concept_coverage": concept_coverage,
+                "percent_params_changed": params_change_ratio,
+                "drift_happened": drift_happened,
+                "last_round": last_round,
+            }
+            os.makedirs("results", exist_ok=True)
+            with open("results/additional_metrics.json", "w") as fp:
+                json.dump(additional_metrics, fp, indent=2)
+        except Exception as e:
+            print(f"\033[91m[WARN] Failed to save additional metrics: {e}\033[0m")
     
         # Evaluate the model on the client datasets
         #test_losses, sizes = [], []
