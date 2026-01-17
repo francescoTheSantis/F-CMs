@@ -739,6 +739,11 @@ class Predictor(pl.LightningModule):
                 print(f"Concept accuracy after cumulative intervention {key}: {c_int_cumulative[key]}")
             pickle.dump(c_int_cumulative, open(f'results/cumulative_interventions_on_c.pkl', 'wb'))
 
+            if self.model.name =="c2bm" or self.model.name=="cgm":
+                predicted_concepts = self.model.predicted_concepts
+            else:
+                predicted_concepts = self.c_names_all
+
             # save graph and concepts
             # DA RIVEDERE
             # Load existing graph.pkl if it exists, otherwise create new dict
@@ -747,10 +752,12 @@ class Predictor(pl.LightningModule):
                     graph_data = pickle.load(f)
             except FileNotFoundError:
                 graph_data = {}
+
             
             # Update only these keys without overwriting other data
             graph_data.update({
                 'concepts': self.c_names_all,
+                'predicted_concepts': predicted_concepts,
                 'policy': self.test_interv_policy,
                 'centralized_topological_order': self.centralized_topological_order,
                 'learning_modality': self.learning_modality

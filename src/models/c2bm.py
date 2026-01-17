@@ -103,6 +103,17 @@ class C2BM(BaseModel):
         # get levels
         task_index = self.combo_info['names'].index(self.y_names[0])
         graph_levels = get_graph_levels(self.graph, task_index)
+        # flat graph_levels
+        flat_levels = [node for level in graph_levels for node in level]
+        # find self.predicted_concepts from self.c_name_index
+        # invert the dictionary self.c_name_index
+        #index_c_name = {v:k for k,v in self.c_names.items()}
+        self.predicted_concepts = [self.graph_labels[i] for i in flat_levels ]
+        # eliminate task from predicted concepts
+        self.predicted_concepts = [c for c in self.predicted_concepts if c != self.y_names[0]]
+
+        # attach task to predicted concepts
+        #self.predicted_concepts.append(self.y_names[0])
         self.roots = graph_levels[0]
         self.roots_info = {'names': [name for i, name in enumerate(self.combo_info['names']) 
                                      if i in self.roots], 
