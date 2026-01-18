@@ -1092,10 +1092,10 @@ def plot_cumulative_accuracy_multi_modality(
                             # For baseline, consider all concepts
                             concept_name = key.split('/')[-1]
                             if concept_name in baseline_concept_acc.keys():
-                                value = np.NaN
+                                value = np.nan
                                 value = baseline_concept_acc.get(concept_name) if baseline_concept_acc is not None else None
                             else:
-                                value = np.NaN
+                                value = np.nan
                             
                         elif key.startswith(f"{level}/"):
                             # Extract concept name
@@ -1191,7 +1191,10 @@ def plot_cumulative_accuracy_multi_modality(
 
         # Use only indices for x-axis labels
         level_labels = list(range(len(intervention_c_order_with_baseline)))
-
+        
+        # replace _ with space
+        architecture_name = architecture_name.replace("_", " ")
+        
         ax.set_xticks(x)
         ax.set_xticklabels(level_labels, rotation=0, ha='center', fontsize=tick_size)
         ax.tick_params(axis='y', labelsize=tick_size)
@@ -1446,10 +1449,10 @@ def plot_cumulative_accuracy_multi_model(
                             # For baseline, consider all concepts
                             concept_name = key.split('/')[-1]
                             if concept_name in baseline_concept_acc.keys():
-                                value = np.NaN
+                                value = np.nan
                                 value = baseline_concept_acc.get(concept_name) if baseline_concept_acc is not None else None
                             else:
-                                value = np.NaN
+                                value = np.nan
                             
                         elif key.startswith(f"{level}/"):
                             # Extract concept name
@@ -1508,6 +1511,7 @@ def plot_cumulative_accuracy_multi_model(
 
             color = model_colors.get(model, '#333333')
             model_name = model_display_names.get(model, model)
+            model_name = model_name.replace("_", " ")
 
             # Plot label average line with segments (dashed when concept is missing)
             for k in range(len(x)-1):
@@ -1545,6 +1549,8 @@ def plot_cumulative_accuracy_multi_model(
 
         # Use only indices for x-axis labels
         level_labels = list(range(len(intervention_c_order_with_baseline)))
+        
+        learning_modality = learning_modality.replace("_", " ")
 
         ax.set_xticks(x)
         ax.set_xticklabels(level_labels, rotation=0, ha='center', fontsize=tick_size)
