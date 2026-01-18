@@ -311,17 +311,19 @@ def main(cfg: DictConfig) -> None:
     # Add graph columns to engine config if available
     with open_dict(cfg):
         # order true_graph columns following the topological order of the graph
-        graph_for_order = true_graph if true_graph is not None else graph
-        if graph_for_order is not None:
-            G = nx.from_pandas_adjacency(graph_for_order, create_using=nx.DiGraph)
-            ordered_nodes = list(nx.topological_sort(G))
-            # eliminate task from the ordered columns
-            ordered_nodes = [node for node in ordered_nodes if node != datasets[0].y_info['names'][0]]
-            cfg.engine.centralized_topological_order = ordered_nodes
+        #G = nx.from_pandas_adjacency(true_graph, create_using=nx.DiGraph)
+        #ordered_nodes = list(nx.topological_sort(G))
+        # eliminate task from the ordered columns
+        #ordered_nodes = [node for node in ordered_nodes if node != datasets[0].y_info['names'][0]]
+        # flatten get_intervention_policy output
+        ordered_nodes = list(itertools.chain.from_iterable(get_intervention_policy(true_graph, y_index)[0]))
+        # take the names
+        ordered_nodes = [true_graph.columns[idx] for idx in ordered_nodes]
+        cfg.engine.centralized_topological_order = ordered_nodes
         cfg.engine.centralized_c_dict = centralized_c_dict 
     
 
-
+    ############ training block ########################################################################################
 
     # If the training is centralized
     if cfg.learning.mode in ['centralized', 'localized']:

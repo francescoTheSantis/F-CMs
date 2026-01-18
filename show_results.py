@@ -27,6 +27,10 @@ paths = [
     # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-16/16-30-10_test_s4"
     # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-17/09-33-05"
     # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-17/09-37-30"
+    "/home/admin/Federated-C2BM/outputs/multirun/2026-01-17/10-54-47",
+    "/home/admin/Federated-C2BM/outputs/multirun/2026-01-17/11-03-22",
+    "/home/admin/Federated-C2BM/outputs/multirun/2026-01-17/11-07-34",
+    "/home/admin/Federated-C2BM/outputs/multirun/2026-01-17/12-35-12",
 ]
 
 # folder to save processed results
@@ -127,10 +131,10 @@ tabular_drift_metrics(
 
 ########## Intervention plots ##########
 # Eliminate blackbox and blackbox_multi from the model style
-model_styles = {k: v for k, v in model_styles.items() if k not in ['blackbox', 'blackbox_multi']}
+#model_styles = {k: v for k, v in model_styles.items() if k not in ['blackbox', 'blackbox_multi']}
 
 # Eliminate blackbox and blackbox_multi from the performance dataframe
-performance = performance[performance['model'].isin(['blackbox', 'blackbox_multi']) == False]
+#performance = performance[performance['model'].isin(['blackbox', 'blackbox_multi']) == False]
 
 ### Intervention plot for single c interventions on y ###
 #plot_single_c_on_y(performance, custom_order, model_styles, visualization_folder)
@@ -140,33 +144,27 @@ performance = performance[performance['model'].isin(['blackbox', 'blackbox_multi
 
 ### Cumulative intervention plots ###
 
-print(f"\n[DEBUG show_results] Before calling plot function:")
-print(f"[DEBUG show_results] Performance shape: {performance.shape}")
-print(f"[DEBUG show_results] Unique models: {performance['model'].unique()}")
-print(f"[DEBUG show_results] Unique learning: {performance['learning'].unique()}")
-print(f"[DEBUG show_results] Unique datasets: {performance['dataset'].unique()}")
-print(f"[DEBUG show_results] Has single_c_interventions_on_y: {performance['single_c_interventions_on_y'].notna().sum()} / {len(performance)}")
-print(f"[DEBUG show_results] Has graph: {performance['graph'].notna().sum()} / {len(performance)}")
+# plot cumulative interventions for each architecture, multi learning modalities
+for architecture in performance['model'].unique():
+    #plot_cumulative_accuracy_multi_modality(
+    #    performance,
+    #    custom_order,
+    #    architecture_name=architecture,
+    #    c_info=c_info,
+    #    variable = 'task',
+    #    folder=visualization_folder,
+    #)
 
-# Plot for all learning modalities (centralized, federated with/without drift)
-plot_cumulative_accuracy_multi_modality(
-    performance,
-    custom_order,
-    architecture_name='c2bm',
-    c_info=c_info,
-    variable = 'task',
-    folder=visualization_folder,
-)
+    plot_cumulative_accuracy_multi_modality(
+        performance,
+        custom_order,
+        architecture_name=architecture,
+        variable = 'labels',
+        c_info=c_info,
+        folder=visualization_folder,
+    )
 
-plot_cumulative_accuracy_multi_modality(
-    performance,
-    custom_order,
-    architecture_name='c2bm',
-    variable = 'labels',
-    c_info=c_info,
-    folder=visualization_folder,
-)
-
+# plot cumulative interventions for all architectures together, single learning modality
 plot_cumulative_accuracy_multi_model(
     performance,
     custom_order,
@@ -175,13 +173,6 @@ plot_cumulative_accuracy_multi_model(
     c_info=c_info,
     folder=visualization_folder,
 )
-
-# checks:
-# - add baseline at the beginning of the graph
-# - check graph for c2bm 
-# - check graph localized
-# - c_info is not passed well
-# - check title graphs
 
 # Optional: Plot for specific localized client
 # Uncomment to generate plots for a specific client
