@@ -2680,7 +2680,7 @@ def load_exps(exps_path, n_clients=5, args=None):
                     d['graph'] = graph_results['concepts']
                     d['predicted_concepts'] = graph_results.get('predicted_concepts', None)
                     # Extract true_graph_columns from graph.pkl if available
-                    d['true_graph'] = graph_results.get('true_graph_columns', None)
+                    d['true_graph'] = graph_results.get('centralized_topological_order', None)
                 except FileNotFoundError:
                     d['graph'] = None
                     d['true_graph'] = None
@@ -2945,9 +2945,9 @@ def load_exps(exps_path, n_clients=5, args=None):
     # In the aggregation, we compute the expected value over the concepts. 
     # For missing concepts (NaN values), we predict them using a random classifier 
     # (uniform distribution based on concept cardinality: 1/cardinality).
-    performance['concept_left_out'] = performance.apply(lambda x: _format_results(x['concept_acc'], x['graph'], x['dataset'], x['model'], count_nan=True), axis=1)
-    performance['agg_concept'] = performance.apply(lambda x: _format_results(x['concept_acc'], x['graph'], x['dataset'], x['model'], count_nan=False, worst_classifier=True), axis=1)
-    performance['agg_label'] = performance.apply(lambda x: _format_results(x['concept_acc'], x['graph'], x['dataset'], x['model'], count_nan=False, task=x['task_acc'], worst_classifier=True), axis=1)
+    performance['concept_left_out'] = performance.apply(lambda x: _format_results(x['concept_acc'], x['true_graph'], x['dataset'], x['model'], count_nan=True), axis=1)
+    performance['agg_concept'] = performance.apply(lambda x: _format_results(x['concept_acc'], x['true_graph'], x['dataset'], x['model'], count_nan=False, worst_classifier=True), axis=1)
+    performance['agg_label'] = performance.apply(lambda x: _format_results(x['concept_acc'], x['true_graph'], x['dataset'], x['model'], count_nan=False, task=x['task_acc'], worst_classifier=True), axis=1)
 
     return performance, c_info
 
