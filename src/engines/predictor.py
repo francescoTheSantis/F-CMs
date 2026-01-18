@@ -691,7 +691,7 @@ class Predictor(pl.LightningModule):
             for k, metric in self.test_intervention_level_c.items():
                 level_child = _remove_prefix(k, self.test_intervention_level_c.prefix)
                 c_int[level_child] = metric.compute().item()
-                print(f"Concept accuracy after intervention on {level_child}: {c_int[level_child]}")
+                # print(f"Concept accuracy after intervention on {level_child}: {c_int[level_child]}")
             pickle.dump(c_int, open(f'results/level_interventions_on_c.pkl', 'wb'))
 
             if self.learning_modality not in ["centralized", "localized"]:
@@ -728,7 +728,7 @@ class Predictor(pl.LightningModule):
             for k, metric in self.test_intervention_cumulative_y.items():
                 key = _remove_prefix(k, self.test_intervention_cumulative_y.prefix)
                 y_int_cumulative[key] = metric.compute().item()
-                print(f"Task accuracy after cumulative intervention {key}: {y_int_cumulative[key]}")
+                # print(f"Task accuracy after cumulative intervention {key}: {y_int_cumulative[key]}")
             pickle.dump(y_int_cumulative, open(f'results/cumulative_interventions_on_y.pkl', 'wb'))
 
             # cumulative interventions on concept accuracy
@@ -736,7 +736,7 @@ class Predictor(pl.LightningModule):
             for k, metric in self.test_intervention_cumulative_c.items():
                 key = _remove_prefix(k, self.test_intervention_cumulative_c.prefix)
                 c_int_cumulative[key] = metric.compute().item()
-                print(f"Concept accuracy after cumulative intervention {key}: {c_int_cumulative[key]}")
+                # print(f"Concept accuracy after cumulative intervention {key}: {c_int_cumulative[key]}")
             pickle.dump(c_int_cumulative, open(f'results/cumulative_interventions_on_c.pkl', 'wb'))
 
             # save graph and concepts
