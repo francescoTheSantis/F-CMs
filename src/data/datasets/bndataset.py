@@ -3,6 +3,9 @@ import os
 import numpy as np
 import torch
 from torch_geometric.utils import to_dense_adj
+# bnlearn/pgmpy call np.product, which is missing in numpy>=2; map to np.prod for compatibility
+if not hasattr(np, "product"):
+    np.product = np.prod
 import bnlearn as bn
 from pgmpy.factors.discrete import TabularCPD
 from pgmpy.sampling import BayesianModelSampling

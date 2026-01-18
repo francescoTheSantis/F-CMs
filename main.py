@@ -316,11 +316,15 @@ def main(cfg: DictConfig) -> None:
         # eliminate task from the ordered columns
         #ordered_nodes = [node for node in ordered_nodes if node != datasets[0].y_info['names'][0]]
         # flatten get_intervention_policy output
+        if cfg.dataset.name == "siim_pneumothorax":
+            true_graph = graph
         ordered_nodes = list(itertools.chain.from_iterable(get_intervention_policy(true_graph, y_index)[0]))
         # take the names
         ordered_nodes = [true_graph.columns[idx] for idx in ordered_nodes]
         cfg.engine.centralized_topological_order = ordered_nodes
         cfg.engine.centralized_c_dict = centralized_c_dict 
+        # if cfg.dataset.name == "siim_pneumothorax":
+        #     true_graph = true_graph.loc[ordered_nodes, ordered_nodes] # c2bm graph
     
 
     ############ training block ########################################################################################
@@ -474,9 +478,6 @@ def main(cfg: DictConfig) -> None:
 
             # aggregate graphs for pre-drift and post-drift clients
             # predrift
-            # if dataset is siim_pneumothorax, true graph is the learned one
-            if cfg.dataset.name == "siim_pneumothorax":
-                true_graph = graph
             graph_predrift, _ = aggregate_graph_proposals(
                 client_selection = predrift_clients,
                 local_graphs=local_graphs,
@@ -893,34 +894,30 @@ def main(cfg: DictConfig) -> None:
             last_round = last_round_executed
             drift_happened = cfg.learning.subgraphs.rnd_drift <= last_round
 
-            c_names_id_cfg = getattr(cfg.engine, "c_names_id", {}) or {}
             try:
-                c_names_id_map = OmegaConf.to_container(c_names_id_cfg, resolve=True)
-            except Exception:
-                c_names_id_map = dict(c_names_id_cfg) if isinstance(c_names_id_cfg, dict) else {}
+                essential_concepts = ordered_nodes
+            except NameError:
+                essential_concepts = None
+            if not essential_concepts:
+                essential_concepts = OmegaConf.select(cfg, "engine.centralized_topological_order", default=[]) or []
+            essential_set = set(essential_concepts)
 
-            def _collect_concepts(client_ids):
-                concepts = set()
-                for cid in client_ids:
-                    names = c_names_id_map.get(cid)
-                    if names is None:
-                        names = c_names_id_map.get(str(cid))
-                    if names is None:
-                        continue
-                    concepts.update(names)
-                return concepts
+            model_concepts = set()
+            predicted_concepts = getattr(local_engine.model, "predicted_concepts", None)
+            if predicted_concepts:
+                model_concepts.update(predicted_concepts)
+            if not model_concepts:
+                cfg_for_coverage = cfg_eval if cfg_eval is not None else cfg
+                engine_c_names = getattr(local_engine, "c_names_all", None)
+                if engine_c_names is None:
+                    engine_c_names = OmegaConf.select(cfg_for_coverage, "engine.c_names_all", default=None)
+                if engine_c_names is None:
+                    engine_c_names = OmegaConf.select(cfg, "engine.c_names_all", default=None)
+                if engine_c_names:
+                    model_concepts.update(engine_c_names)
 
-            if cfg.learning.subgraphs.rnd_drift > 1:
-                training_clients_no_drift = predrift_clients
-                dynamic_clients = list(set((predrift_clients or []) + (postdrift_clients or [])))
-            else:
-                training_clients_no_drift = postdrift_clients
-                dynamic_clients = postdrift_clients
-
-            seen_clients = dynamic_clients if drift_happened else training_clients_no_drift
-            seen_concepts = _collect_concepts(seen_clients)
-            possible_concepts = _collect_concepts(dynamic_clients)
-            concept_coverage = float(len(seen_concepts) / len(possible_concepts)) if len(possible_concepts) > 0 else float('nan')
+            covered_concepts = model_concepts & essential_set
+            concept_coverage = float(len(covered_concepts) / len(essential_set)) if len(essential_set) > 0 else float('nan')
 
             params_change_ratio = 0.0
             if drift_happened and param_count_predrift > 0:

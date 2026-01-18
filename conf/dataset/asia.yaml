@@ -7,7 +7,7 @@ loader:
     _target_: src.data.datasets.bndataset.BNDataset
     dag_name: asia
     task_name: dysp
-    dataset_n_samples: 10000
+    dataset_n_samples: 15000
     val_size: 0.1 # 10% of total dataset
     test_size: 0.2
     ftune_size: 0.      # 0.3

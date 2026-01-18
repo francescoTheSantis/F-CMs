@@ -25,12 +25,20 @@ paths = [
     # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-16/16-26-40_test_s2"
     # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-16/16-29-10_test_s3"
     # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-16/16-30-10_test_s4"
+    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-17/09-07-46_test_s6"
     # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-17/09-33-05"
     # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-17/09-37-30"
-    "/home/admin/Federated-C2BM/outputs/multirun/2026-01-17/10-54-47",
-    "/home/admin/Federated-C2BM/outputs/multirun/2026-01-17/11-03-22",
-    "/home/admin/Federated-C2BM/outputs/multirun/2026-01-17/11-07-34",
-    "/home/admin/Federated-C2BM/outputs/multirun/2026-01-17/12-35-12",
+    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-17/09-07-50_test_s5"
+    #
+    "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-17/10-06-32_test_final_i_d",
+    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-17/10-07-34_test_final_i_s"
+    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-17/09-58-10_final_h_s"
+    "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-17/21-33-49_test_s_d",
+    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-17/21-34-52_final_s_s"
+    "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-17/12-09-54_test_final_al_d",
+    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-17/12-08-45_test_final_al_s"
+    "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-18/10-44-03_test_final_as_d"
+    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-18/10-44-45_test_final_as_s"
 ]
 
 # folder to save processed results
