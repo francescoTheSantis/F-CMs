@@ -2562,6 +2562,7 @@ def load_exps(exps_path, n_clients=5, args=None):
 
     # search if there is 'c2bm' in the config files of the run, if it is save the name of the concepts
     valid_concepts = {}
+    missing_concept_exps = set()
 
     for exp in exps_path:
         conf_file = os.path.join(exp, '.hydra/config.yaml')      
@@ -2586,6 +2587,10 @@ def load_exps(exps_path, n_clients=5, args=None):
                 if conf['model']['name'] == 'c2bm' or conf['model']['name'] == 'cgm':
                     result_file = os.path.join(exp, 'results') 
                     concept_file = os.path.join(result_file, 'c_accuracy.pkl')
+                    if not os.path.exists(concept_file):
+                        print(f"[load_exps] Missing concept accuracy file: {concept_file}. Skipping this experiment.")
+                        missing_concept_exps.add(exp)
+                        continue
                     with open(concept_file, 'rb') as file:
                         # save in valid concepts the name of the concepts in concept file
                         concept_results = pickle.load(file)
@@ -2595,6 +2600,8 @@ def load_exps(exps_path, n_clients=5, args=None):
                     
 
     for exp in exps_path:
+        if exp in missing_concept_exps:
+            continue
         d = {}
         conf_file = os.path.join(exp, '.hydra/config.yaml')
         result_file = os.path.join(exp, 'results')  
@@ -2649,11 +2656,15 @@ def load_exps(exps_path, n_clients=5, args=None):
 
                 # Concept results
                 concept_file = os.path.join(result_file, 'c_accuracy.pkl')
+                if not os.path.exists(concept_file):
+                    print(f"[load_exps] Missing concept accuracy file: {concept_file}. Skipping this experiment.")
+                    missing_concept_exps.add(exp)
+                    continue
                 with open(concept_file, 'rb') as file:
                     concept_results = pickle.load(file)
 
                 # Select the last row of the dataframe where we test the model
-                if len(valid_concepts[key]) > 0:
+                if len(valid_concepts.get(key, [])) > 0:
                     # filter only the valid concepts
                     concept_results = {k:v for k,v in concept_results.items() if k in valid_concepts[key]}
                 d['concept_acc'] = concept_results

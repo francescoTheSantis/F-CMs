@@ -21,24 +21,23 @@ args = parser.parse_args()
 
 # List the paths containing the sweeps' results
 paths = [
-    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-16/16-25-47_test_s1"
-    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-16/16-26-40_test_s2"
-    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-16/16-29-10_test_s3"
-    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-16/16-30-10_test_s4"
-    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-17/09-07-46_test_s6"
-    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-17/09-33-05"
-    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-17/09-37-30"
-    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-17/09-07-50_test_s5"
-    #
-    "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-17/10-06-32_test_final_i_d",
-    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-17/10-07-34_test_final_i_s"
-    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-17/09-58-10_final_h_s"
-    "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-17/21-33-49_test_s_d",
-    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-17/21-34-52_final_s_s"
-    "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-17/12-09-54_test_final_al_d",
-    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-17/12-08-45_test_final_al_s"
-    "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-18/10-44-03_test_final_as_d"
-    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-18/10-44-45_test_final_as_s"
+    # FL (static and dynamic)
+    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-18/23-45-49_fff_as_d",
+    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-18/23-45-50_fff_as_s",
+    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-18/23-39-36_fff_sac_d",
+    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-18/23-39-41_fff_sac_s",
+    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-18/18-48-19_fff_al_d",
+    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-18/18-48-20_fff_al_s",
+    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-19/10-35-05_fff_ins_d", 
+    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-19/10-35-12_fff_ins_s", 
+    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-18/18-47-00_fff_hail_d", 
+    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-18/18-47-13_fff_hail_s",  
+    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-19/15-42-27_fff_siim_d", 
+    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-19/15-48-10_fff_siim_s"  
+    # CL and Loc
+    "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-20/11-15-52_cl_as_hail", # correct
+    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-20/11-22-47_cl_others", # errors in localized alarm and insurance
+    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-20/11-26-27_cl_siim" # errore in localized
 ]
 
 # folder to save processed results
@@ -83,8 +82,8 @@ dataset_styles = {
     'alarm': {'name': 'Alarm'},
     'hailfinder': {'name': 'Hailfinder'},
     'insurance': {'name': 'Insurance'},
-    'nih_chest_images': {'name': 'NIH Chest X-Ray'},
-    'cub_causal_struct': {'name': 'CUB_CAUSAL'},
+    # 'nih_chest_images': {'name': 'NIH Chest X-Ray'},
+    # 'cub_causal_struct': {'name': 'CUB_CAUSAL'},
     'siim_pneumothorax': {'name': 'SIIM-ACR Pneumothorax'},
 }
 
@@ -96,8 +95,8 @@ custom_order = [
     'Alarm',
     'Insurance',
     'Hailfinder',
-    'NIH Chest X-Ray',
-    'CUB_CAUSAL',
+    # 'NIH Chest X-Ray',
+    # 'CUB_CAUSAL',
     'SIIM-ACR Pneumothorax'
 ]
 

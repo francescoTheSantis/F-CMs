@@ -656,12 +656,12 @@ def get_subgraphs(graph, y_index, min_number_subgraphs = 3, max_number_subgraphs
 
         # First, try to merge within groups
         # Merge subgraphs WITH additional nodes
-        while len(subgraphs_with_add) > n_subgraphs_add_nodes_to_generate and len(subgraphs_with_add) > 1:
-            subgraphs_with_add = sorted(subgraphs_with_add, key=lambda x: len(x[1]))
-            first = subgraphs_with_add.pop(0)
-            second = subgraphs_with_add.pop(0)
-            merged = (first[0], list(set(first[1] + second[1])))
-            subgraphs_with_add.append(merged)
+        # while len(subgraphs_with_add) > n_subgraphs_add_nodes_to_generate and len(subgraphs_with_add) > 1:
+        #     subgraphs_with_add = sorted(subgraphs_with_add, key=lambda x: len(x[1]))
+        #     first = subgraphs_with_add.pop(0)
+        #     second = subgraphs_with_add.pop(0)
+        #     merged = (first[0], list(set(first[1] + second[1])))
+        #     subgraphs_with_add.append(merged)
 
         # Merge subgraphs WITHOUT additional nodes
         while len(subgraphs_with_add) + len(subgraphs_without_add) > max_number_subgraphs and len(subgraphs_without_add) > 1:
