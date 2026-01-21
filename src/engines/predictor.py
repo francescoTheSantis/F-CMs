@@ -769,18 +769,23 @@ class Predictor(pl.LightningModule):
             # Save updated data
             pickle.dump(graph_data, open("graph.pkl", 'wb'))
 
-    def configure_optimizers(self):
-        """"""
-        cfg = dict()
-        optimizer = self.optim_class(self.parameters(), **self.optim_kwargs)
-        cfg["optimizer"] = optimizer
+    def _build_optimizer_config(self, optimizer):
+        cfg = {"optimizer": optimizer}
         if self.scheduler_class is not None:
-            metric = self.scheduler_kwargs.pop("monitor", None)
-            scheduler = self.scheduler_class(optimizer, **self.scheduler_kwargs)
+            scheduler_kwargs = dict(self.scheduler_kwargs)
+            metric = scheduler_kwargs.pop("monitor", None)
+            scheduler = self.scheduler_class(optimizer, **scheduler_kwargs)
             cfg["lr_scheduler"] = scheduler
             if metric is not None:
                 cfg["monitor"] = metric
         return cfg
+
+    def configure_optimizers(self):
+        """"""
+        if hasattr(self, "_optimizer_override_cfg"):
+            return self._optimizer_override_cfg
+        optimizer = self.optim_class(self.parameters(), **self.optim_kwargs)
+        return self._build_optimizer_config(optimizer)
 
 
 #    def prepare_for_test(self, cfg):

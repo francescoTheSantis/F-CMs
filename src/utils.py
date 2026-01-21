@@ -1138,6 +1138,135 @@ def create_folders():
     os.makedirs('histories', exist_ok=True)
 
 
+def maybe_make_private(engine, train_dataloader, cfg, epochs: Optional[int] = None):
+    """
+    Optionally wrap a LightningModule with Opacus for DP-SGD.
+    Returns the (possibly updated) train dataloader and privacy engine.
+    """
+    dp_cfg = OmegaConf.select(cfg, "learning.dp", default=None)
+    if dp_cfg is None or not getattr(dp_cfg, "enable", False):
+        return train_dataloader, None
+
+    try:
+        from opacus import PrivacyEngine
+    except ImportError as exc:  # pragma: no cover - import guard
+        raise ImportError("Opacus is required for differential privacy, please install it.") from exc
+
+    target_epsilon = dp_cfg.get("target_epsilon", None)
+    target_delta = dp_cfg.get("target_delta", None)
+    max_grad_norm = dp_cfg.get("max_grad_norm", 1.0)
+    accountant = dp_cfg.get("accountant", "rdp")
+    secure_mode = dp_cfg.get("secure_mode", False)
+    strict = dp_cfg.get("strict", False)  # allow params without gradients in a step
+    total_epochs = epochs or OmegaConf.select(cfg, "trainer.max_epochs", default=1)
+
+    privacy_engine = PrivacyEngine(accountant=accountant, secure_mode=secure_mode)
+    trainable_params = [p for p in engine.parameters() if p.requires_grad]
+    if len(trainable_params) == 0:
+        warnings.warn("DP requested but no trainable parameters remain after freezing.")
+        return train_dataloader, None
+    base_optimizer = engine.optim_class(trainable_params, **engine.optim_kwargs)
+
+    _module, dp_optimizer, private_loader = privacy_engine.make_private_with_epsilon(
+        module=engine,
+        optimizer=base_optimizer,
+        data_loader=train_dataloader,
+        target_epsilon=target_epsilon,
+        target_delta=target_delta,
+        epochs=total_epochs,
+        max_grad_norm=max_grad_norm,
+        strict=strict,
+    )
+
+    # Gracefully handle params that do not receive per-sample grads (e.g., unused/frozen paths)
+    name_lookup = {id(p): n for n, p in engine.named_parameters() if p.requires_grad}
+    dp_optimizer._orig_get_flat_grad_sample = dp_optimizer._get_flat_grad_sample  # type: ignore[attr-defined]
+
+    def _target_batch_size() -> int:
+        """
+        Determine a consistent batch dimension for grad_sample tensors.
+        Falls back to the expected batch size, otherwise uses the largest
+        observed grad_sample length in this step.
+        """
+        target = dp_optimizer.expected_batch_size or 0
+        max_gs = 0
+        for p in dp_optimizer.params:
+            gs = getattr(p, "grad_sample", None)
+            if gs is None:
+                continue
+            if isinstance(gs, list):
+                if len(gs) == 0:
+                    continue
+                gs_tensor = torch.stack(gs)
+            else:
+                gs_tensor = gs
+            if gs_tensor.numel() == 0:
+                continue
+            max_gs = max(max_gs, gs_tensor.shape[0])
+        target = int(max(target, max_gs, 1))
+        return target
+
+    def _safe_get_flat_grad_sample(p):
+        try:
+            return dp_optimizer._orig_get_flat_grad_sample(p)  # type: ignore[attr-defined]
+        except ValueError:
+            if not hasattr(dp_optimizer, "_warned_missing_grad"):
+                pname = name_lookup.get(id(p), "<unknown>")
+                print(
+                    f"\033[93m[DP] Missing per-sample grad for {pname}; filling zeros to continue.\033[0m"
+                )
+                dp_optimizer._warned_missing_grad = True
+            bsz = _target_batch_size()
+            return torch.zeros((bsz,) + tuple(p.shape), device=p.device, dtype=p.dtype)
+
+    dp_optimizer._get_flat_grad_sample = _safe_get_flat_grad_sample  # type: ignore[assignment]
+
+    # Ensure grad_sample tensors exist before Opacus counts accumulated iterations
+    dp_optimizer._orig_pre_step = dp_optimizer.pre_step  # type: ignore[attr-defined]
+
+    def _safe_pre_step(*args, **kwargs):
+        # Pad/truncate per-sample grads so Opacus sees consistent batch dims
+        bsz = _target_batch_size()
+        for p in dp_optimizer.params:
+            gs = getattr(p, "grad_sample", None)
+            if gs is None:
+                p.grad_sample = torch.zeros((bsz,) + tuple(p.shape), device=p.device, dtype=p.dtype)
+                continue
+
+            gs_tensor = torch.stack(gs) if isinstance(gs, list) else gs
+            curr_bsz = gs_tensor.shape[0]
+            if curr_bsz == bsz:
+                p.grad_sample = gs_tensor
+                continue
+
+            if curr_bsz > bsz:
+                p.grad_sample = gs_tensor[:bsz]
+            else:
+                pad_shape = (bsz - curr_bsz,) + tuple(gs_tensor.shape[1:])
+                pad = torch.zeros(pad_shape, device=gs_tensor.device, dtype=gs_tensor.dtype)
+                p.grad_sample = torch.cat([gs_tensor, pad], dim=0)
+        return dp_optimizer._orig_pre_step(*args, **kwargs)  # type: ignore[attr-defined]
+
+    dp_optimizer.pre_step = _safe_pre_step.__get__(dp_optimizer, type(dp_optimizer))  # type: ignore[assignment]
+
+    # Lightning will call configure_optimizers(); provide the DP-aware optimizer there.
+    if hasattr(engine, "_build_optimizer_config"):
+        engine._optimizer_override_cfg = engine._build_optimizer_config(dp_optimizer)
+    else:
+        engine._optimizer_override_cfg = {"optimizer": dp_optimizer}
+    engine.privacy_engine = privacy_engine
+    engine.dp_delta = target_delta
+    engine.dp_target_epsilon = target_epsilon
+
+    noise_multiplier = getattr(dp_optimizer, "noise_multiplier", None)
+    print(
+        f"\033[96m[DP] Enabled (ε={target_epsilon}, δ={target_delta}, "
+        f"max_grad_norm={max_grad_norm}, noise_mult={noise_multiplier})\033[0m"
+    )
+
+    return private_loader, privacy_engine
+
+
 def maybe_freeze_parameters(train_dataloader,  y_to_freeze, model, learning, freezing = True):
     """
     This function freezes the model parameters related to the concepts masked for the client when learning = 'federated'
@@ -2408,5 +2537,3 @@ def _print_concept_availability(tag, loader, cfg, cid):
     )
     if unavailable_names:
         print(f"\033[95m[{tag}] client {cid} unavailable concepts: {unavailable_names}\033[0m")
-
-

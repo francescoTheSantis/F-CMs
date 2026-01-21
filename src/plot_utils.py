@@ -163,7 +163,7 @@ def single_c_plot(
                 offset = (model_idx - (len(model_styles) - 1) / 2) * bar_width
 
                 bar_heights = [interventions.get(label, 0) for label in x_labels]
-                bar_errors = [1.96 * interventions_std.get(label, 0) / np.sqrt(len(model_subset)) for label in x_labels]
+                bar_errors = [interventions_std.get(label, 0) / np.sqrt(len(model_subset)) for label in x_labels] # 1.96 *
 
                 color = {el['name']:el['color'] for el in model_styles.values()}[model['name']]
 
@@ -1144,7 +1144,7 @@ def plot_cumulative_accuracy_multi_modality(
             label_array = np.array(label_avg_per_seed)
             mean_label = np.mean(label_array, axis=0)
             std_label = np.std(label_array, axis=0)
-            stderr_label = 1.96 * std_label / np.sqrt(len(label_avg_per_seed))
+            stderr_label = std_label / np.sqrt(len(label_avg_per_seed)) #1.96 *
 
             # Aggregate missing mask: a concept is missing if it's missing in ALL seeds
             if missing_masks_per_seed:
@@ -1501,7 +1501,7 @@ def plot_cumulative_accuracy_multi_model(
             label_array = np.array(label_avg_per_seed)
             mean_label = np.mean(label_array, axis=0)
             std_label = np.std(label_array, axis=0)
-            stderr_label = 1.96 * std_label / np.sqrt(len(label_avg_per_seed))
+            stderr_label = std_label / np.sqrt(len(label_avg_per_seed)) #1.96 *
 
             # Aggregate missing mask: a concept is missing if it's missing in ALL seeds
             if missing_masks_per_seed:
@@ -1678,7 +1678,7 @@ def level_interventions_plot(
                 interventions, interventions_std = average_over_seed(model_subset[plot_name])
 
                 line_heights = [interventions.get(label, 0) for label in x_labels]
-                line_errors = [1.96 * interventions_std.get(label, 0) / np.sqrt(len(model_subset)) for label in x_labels]
+                line_errors = [interventions_std.get(label, 0) / np.sqrt(len(model_subset)) for label in x_labels] # 1.96 *
 
                 color = {el['name']:el['color'] for el in model_styles.values()}[model['name']]
 
@@ -1936,7 +1936,7 @@ def compute_statistics(
     ).reset_index().fillna(0)
 
     # compute confidence intervals
-    task_stats['ci_task'] = 1.96 * task_stats['std_accuracy_task'] / np.sqrt(task_stats['total_occurrences'])
+    task_stats['ci_task'] = task_stats['std_accuracy_task'] / np.sqrt(task_stats['total_occurrences']) # 1.96 *
 
     # Compute mean and std for 'concept'
     concept_stats = concept_df.groupby(['model', 'dataset', 'learning']).agg(
@@ -1947,7 +1947,7 @@ def compute_statistics(
     ).reset_index().fillna(0)
 
     # compute confidence intervals
-    concept_stats['ci_concept'] = 1.96 * concept_stats['std_accuracy_concept'] / np.sqrt(concept_stats['total_occurrences'])
+    concept_stats['ci_concept'] = concept_stats['std_accuracy_concept'] / np.sqrt(concept_stats['total_occurrences']) # 1.96 *
 
     # Aggregated concepts and task performance
     label_stats = concept_df.groupby(['model', 'dataset', 'learning']).agg(
@@ -1958,7 +1958,7 @@ def compute_statistics(
     ).reset_index().fillna(0)
 
     # compute confidence intervals
-    label_stats['ci_label'] = 1.96 * label_stats['std_accuracy_label'] / np.sqrt(label_stats['total_occurrences'])
+    label_stats['ci_label'] = label_stats['std_accuracy_label'] / np.sqrt(label_stats['total_occurrences']) # 1.96 *
 
     return task_stats, concept_stats, label_stats    
 
@@ -2145,7 +2145,7 @@ def compute_drift_statistics(performance):
                 std_coverage=('concept_coverage', 'std'),
                 total_occurrences=('concept_coverage', 'count')
             ).reset_index().fillna(0)
-            coverage_stats['ci_coverage'] = 1.96 * coverage_stats['std_coverage'] / np.sqrt(coverage_stats['total_occurrences'])
+            coverage_stats['ci_coverage'] = coverage_stats['std_coverage'] / np.sqrt(coverage_stats['total_occurrences']) # 1.96 *
 
     if 'percent_params_changed' in performance.columns:
         params_df = performance[['model', 'dataset', 'learning', 'percent_params_changed']].dropna(subset=['percent_params_changed'])
@@ -2155,7 +2155,7 @@ def compute_drift_statistics(performance):
                 std_param_change=('percent_params_changed', 'std'),
                 total_occurrences=('percent_params_changed', 'count')
             ).reset_index().fillna(0)
-            param_change_stats['ci_param_change'] = 1.96 * param_change_stats['std_param_change'] / np.sqrt(param_change_stats['total_occurrences'])
+            param_change_stats['ci_param_change'] = param_change_stats['std_param_change'] / np.sqrt(param_change_stats['total_occurrences']) # 1.96 *
 
     return coverage_stats, param_change_stats
 

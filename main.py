@@ -29,6 +29,7 @@ from src.utils import (
     model_is_causal,
     seed_everything, 
     maybe_freeze_parameters, 
+    maybe_make_private,
     update_config_from_data_subgroup_clients,
     aggregate_graph_proposals,
     aggregate, 
@@ -361,6 +362,9 @@ def main(cfg: DictConfig) -> None:
             test_dataloader = DataLoader(datasets[0].data['test'], batch_size=cfg.dataset.batch_size, collate_fn=static_graph_collate)
 
         engine = instantiate(cfg.engine)
+        train_dataloader, privacy_engine = maybe_make_private(
+            engine, train_dataloader, cfg, epochs=cfg.trainer.max_epochs
+        )
         
         try:
             trainer = Trainer(cfg)
@@ -369,6 +373,11 @@ def main(cfg: DictConfig) -> None:
             trainer.fit(engine, train_dataloader, val_dataloader)
             # ----- test
             trainer.test(engine, test_dataloader, ckpt_path='best')
+            if privacy_engine is not None:
+                spent_eps = privacy_engine.get_epsilon(getattr(engine, "dp_delta", None))
+                print(
+                    f"\033[96m[DP] Spent ε={spent_eps:.3f} for δ={getattr(engine, 'dp_delta', None)}\033[0m"
+                )
             trainer.logger.finalize("success")
         finally:
             if isinstance(trainer.logger, WandbLogger):
@@ -657,10 +666,22 @@ def main(cfg: DictConfig) -> None:
                     freezing=cfg.learning.settings.freezing,
                 )
 
+                train_loader, privacy_engine = maybe_make_private(
+                    local_engine,
+                    train_dataloaders[cid],
+                    cfg_round,
+                    epochs=cfg.trainer.max_epochs,
+                )
+
                 # local train
                 trainer = Trainer(cfg, client_id=cid)
                 trainer.logger.log_hyperparams(parse_hyperparams(cfg)) 
-                trainer.fit(local_engine, train_dataloaders[cid])
+                trainer.fit(local_engine, train_loader)
+                if privacy_engine is not None:
+                    spent_eps = privacy_engine.get_epsilon(getattr(local_engine, "dp_delta", None))
+                    print(
+                        f"\033[96m[DP][Client {cid}] Spent ε={spent_eps:.3f} for δ={getattr(local_engine, 'dp_delta', None)}\033[0m"
+                    )
                 local_engine.model.to(cfg.device) # put back to device
                 n_samples = len(train_dataloaders[cid].dataset)
                                     

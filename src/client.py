@@ -33,7 +33,7 @@ parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
 from src.utils import get_split_paths_fl
 from src.my_hydra import parse_hyperparams
-from src.utils import seed_everything, maybe_freeze_parameters
+from src.utils import seed_everything, maybe_freeze_parameters, maybe_make_private
 from src.trainer import Trainer
 from env import CACHE
 import argparse
@@ -75,6 +75,13 @@ class FlowerClient(fl.client.NumPyClient):
                                 learning = self.cfg.learning.mode,
                                 freezing = self.cfg.learning.settings.freezing)
 
+        train_loader, privacy_engine = maybe_make_private(
+            self.engine,
+            self.train_dataloader,
+            self.cfg,
+            epochs=self.cfg.trainer.max_epochs,
+        )
+
         # check freezing
         #print("c_to_freeze",self.train_dataloader.dataset.c[0])
         #for name, param in self.engine.model.named_parameters():
@@ -83,7 +90,12 @@ class FlowerClient(fl.client.NumPyClient):
 
         self.trainer = Trainer(self.cfg, client_id=self.client_id)
         self.trainer.logger.log_hyperparams(parse_hyperparams(self.cfg)) 
-        self.trainer.fit(self.engine, self.train_dataloader)
+        self.trainer.fit(self.engine, train_loader)
+        if privacy_engine is not None:
+            spent_eps = privacy_engine.get_epsilon(getattr(self.engine, "dp_delta", None))
+            print(
+                f"\033[96m[DP][Client {self.client_id}] Spent ε={spent_eps:.3f} for δ={getattr(self.engine, 'dp_delta', None)}\033[0m"
+            )
 
         return self.get_parameters(config), len(self.train_dataloader.dataset), {}
     

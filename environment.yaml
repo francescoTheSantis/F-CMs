@@ -52,5 +52,6 @@ dependencies:
     - lxml
     - duckduckgo_search
     - flwr
+    - opacus
     - seaborn
     - SciencePlots
