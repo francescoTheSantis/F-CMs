@@ -466,6 +466,9 @@ class Predictor(pl.LightningModule):
                         if self.learning_modality not in ["centralized", "localized"]:
                             if self.c_names_all[child_index] not in c_hat_id.keys():
                                 continue
+                        elif self.learning_modality == "localized":
+                            if self.c_names_all[child_index] not in c_hat.keys():
+                                continue
                         if client_id == len(self.c_names_ood)+1 or self.learning_modality in ["centralized", "localized"]:
                             c_name = self.c_names_all[child_index]
                             self.test_intervention_level_c[f'level {l}/child {c_name}'].update(c_hat[c_name], c[:,child_index])
