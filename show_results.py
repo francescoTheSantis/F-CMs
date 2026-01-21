@@ -36,8 +36,9 @@ paths = [
     # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-19/15-48-10_fff_siim_s"  
     # CL and Loc
     "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-20/11-15-52_cl_as_hail", # correct
-    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-20/11-22-47_cl_others", # errors in localized alarm and insurance
-    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-20/11-26-27_cl_siim" # errore in localized
+    "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-20/15-52-13_cl_others_correct",
+    "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-21/09-44-04_cl_siim_correct_loc", # only localized
+    "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-21/10-20-06_cl_siim_correct_cl" , # only centralized
 ]
 
 # folder to save processed results
