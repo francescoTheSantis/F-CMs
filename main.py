@@ -254,8 +254,8 @@ def main(cfg: DictConfig) -> None:
     else:
         # seed_everything(cfg.get("seed"))
         # subgraphs, subgraphs_concept_names, subgraphs_with_add_nodes, add_nodes_values, add_nodes_names = generate_split(cfg, datasets, graph, y_index)
-        # if cfg.get("seed_plot_interventions") is not None:
-            # seed_everything(cfg.get("seed_plot_interventions"))
+        if cfg.learning.get("seed_plot_interventions") is not None:
+            seed_everything(cfg.learning.get("seed_plot_interventions"))
         subgraphs, subgraphs_concept_names, subgraphs_with_add_nodes, add_nodes_values, add_nodes_names = \
             generate_split_with_fallback(
                 cfg, datasets, graph, y_index,
@@ -263,8 +263,8 @@ def main(cfg: DictConfig) -> None:
                 step=100,
                 max_tries=20,
             )  
-        # if cfg.get("seed_plot_interventions") is not None:
-        #     seed_everything(cfg.get("seed"))      
+        if cfg.learning.get("seed_plot_interventions") is not None:
+            seed_everything(cfg.get("seed"))      
         
         
         ## Save subgraphs_concept_names, add_nodes_values, and subgraphs_with_add_nodes

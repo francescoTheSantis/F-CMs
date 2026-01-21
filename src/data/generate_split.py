@@ -1181,7 +1181,10 @@ def generate_split_with_fallback(
     On each failure, tries seed = base_seed + k*step for k=0..max_tries-1.
     Always restores the original seed in cfg and reseeds it (if seed_everything_fn is given).
     """
-    original_seed = cfg.get(seed_key, 0)
+    if cfg.learning.get("seed_plot_interventions") is not None:
+        original_seed = cfg.learning.get("seed_plot_interventions")
+    else:
+        original_seed = cfg.get(seed_key, 0)
     base_seed = int(original_seed) if original_seed is not None else 0
 
     last_err: Optional[Exception] = None
