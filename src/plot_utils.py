@@ -1104,22 +1104,22 @@ def plot_cumulative_accuracy_multi_modality(
                             continue
                             
                         # Replace NaN with worst classifier
-                        if np.isnan(value):
-                            if dataset.lower() in c_info and c_info[dataset.lower()] is not None:
-                                try:
-                                    concept_idx = c_info[dataset.lower()]['names'].index(concept_name)
-                                    concept_cardinality = c_info[dataset.lower()]['cardinality'][concept_idx]
-                                    value = 1.0 / concept_cardinality
-                                except (ValueError, KeyError, IndexError):
-                                    value = 0.5  # Default fallback
-                            else:
-                                value = 0.5  # Default fallback
+                        #if np.isnan(value):
+                        #    if dataset.lower() in c_info and c_info[dataset.lower()] is not None:
+                        #        try:
+                        #            concept_idx = c_info[dataset.lower()]['names'].index(concept_name)
+                        #            concept_cardinality = c_info[dataset.lower()]['cardinality'][concept_idx]
+                        #            value = 1.0 / concept_cardinality
+                        #        except (ValueError, KeyError, IndexError):
+                        #            value = 0.5  # Default fallback
+                        #    else:
+                        #         value = 0.5  # Default fallback
                             
                         concept_values.append(value)
                     
                     # Compute average for this level
                     if concept_values:
-                        concept_avg_for_level.append(np.mean(concept_values))
+                        concept_avg_for_level.append(float(np.mean([x for x in concept_values if not math.isnan(x)])))
                     else:
                         concept_avg_for_level.append(0.0)
                     
@@ -1144,7 +1144,7 @@ def plot_cumulative_accuracy_multi_modality(
             label_array = np.array(label_avg_per_seed)
             mean_label = np.mean(label_array, axis=0)
             std_label = np.std(label_array, axis=0)
-            stderr_label = std_label / np.sqrt(len(label_avg_per_seed)) #1.96 *
+            stderr_label = 1.96*std_label / np.sqrt(len(label_avg_per_seed)) #1.96 *
 
             # Aggregate missing mask: a concept is missing if it's missing in ALL seeds
             if missing_masks_per_seed:
@@ -1461,22 +1461,22 @@ def plot_cumulative_accuracy_multi_model(
                             continue
                             
                         # Replace NaN with worst classifier
-                        if np.isnan(value):
-                            if dataset.lower() in c_info and c_info[dataset.lower()] is not None:
-                                try:
-                                    concept_idx = c_info[dataset.lower()]['names'].index(concept_name)
-                                    concept_cardinality = c_info[dataset.lower()]['cardinality'][concept_idx]
-                                    value = 1.0 / concept_cardinality
-                                except (ValueError, KeyError, IndexError):
-                                    value = 0.5  # Default fallback
-                            else:
-                                value = 0.5  # Default fallback
+                        #if np.isnan(value):
+                        #    if dataset.lower() in c_info and c_info[dataset.lower()] is not None:
+                        #        try:
+                        #            concept_idx = c_info[dataset.lower()]['names'].index(concept_name)
+                        #            concept_cardinality = c_info[dataset.lower()]['cardinality'][concept_idx]
+                        #            value = 1.0 / concept_cardinality
+                        #        except (ValueError, KeyError, IndexError):
+                        #            value = 0.5  # Default fallback
+                        #     else:
+                        #         value = 0.5  # Default fallback
                             
                         concept_values.append(value)
                     
                     # Compute average for this level
                     if concept_values:
-                        concept_avg_for_level.append(np.mean(concept_values))
+                        concept_avg_for_level.append(float(np.mean([x for x in concept_values if not math.isnan(x)])))
                     else:
                         concept_avg_for_level.append(0.0)
                     
@@ -1501,7 +1501,7 @@ def plot_cumulative_accuracy_multi_model(
             label_array = np.array(label_avg_per_seed)
             mean_label = np.mean(label_array, axis=0)
             std_label = np.std(label_array, axis=0)
-            stderr_label = std_label / np.sqrt(len(label_avg_per_seed)) #1.96 *
+            stderr_label = 1.96*std_label / np.sqrt(len(label_avg_per_seed)) #1.96 *
 
             # Aggregate missing mask: a concept is missing if it's missing in ALL seeds
             if missing_masks_per_seed:
@@ -1936,7 +1936,7 @@ def compute_statistics(
     ).reset_index().fillna(0)
 
     # compute confidence intervals
-    task_stats['ci_task'] = task_stats['std_accuracy_task'] / np.sqrt(task_stats['total_occurrences']) # 1.96 *
+    task_stats['ci_task'] = 1.96 * task_stats['std_accuracy_task'] / np.sqrt(task_stats['total_occurrences']) # 1.96 *
 
     # Compute mean and std for 'concept'
     concept_stats = concept_df.groupby(['model', 'dataset', 'learning']).agg(
@@ -1947,7 +1947,7 @@ def compute_statistics(
     ).reset_index().fillna(0)
 
     # compute confidence intervals
-    concept_stats['ci_concept'] = concept_stats['std_accuracy_concept'] / np.sqrt(concept_stats['total_occurrences']) # 1.96 *
+    concept_stats['ci_concept'] = 1.96*concept_stats['std_accuracy_concept'] / np.sqrt(concept_stats['total_occurrences'])
 
     # Aggregated concepts and task performance
     label_stats = concept_df.groupby(['model', 'dataset', 'learning']).agg(
@@ -1958,7 +1958,7 @@ def compute_statistics(
     ).reset_index().fillna(0)
 
     # compute confidence intervals
-    label_stats['ci_label'] = label_stats['std_accuracy_label'] / np.sqrt(label_stats['total_occurrences']) # 1.96 *
+    label_stats['ci_label'] = 1.96*label_stats['std_accuracy_label'] / np.sqrt(label_stats['total_occurrences']) # 1.96 *
 
     return task_stats, concept_stats, label_stats    
 
@@ -2145,7 +2145,7 @@ def compute_drift_statistics(performance):
                 std_coverage=('concept_coverage', 'std'),
                 total_occurrences=('concept_coverage', 'count')
             ).reset_index().fillna(0)
-            coverage_stats['ci_coverage'] = coverage_stats['std_coverage'] / np.sqrt(coverage_stats['total_occurrences']) # 1.96 *
+            coverage_stats['ci_coverage'] = 1.96*coverage_stats['std_coverage'] / np.sqrt(coverage_stats['total_occurrences'])
 
     if 'percent_params_changed' in performance.columns:
         params_df = performance[['model', 'dataset', 'learning', 'percent_params_changed']].dropna(subset=['percent_params_changed'])
@@ -2155,7 +2155,7 @@ def compute_drift_statistics(performance):
                 std_param_change=('percent_params_changed', 'std'),
                 total_occurrences=('percent_params_changed', 'count')
             ).reset_index().fillna(0)
-            param_change_stats['ci_param_change'] = param_change_stats['std_param_change'] / np.sqrt(param_change_stats['total_occurrences']) # 1.96 *
+            param_change_stats['ci_param_change'] = 1.96* param_change_stats['std_param_change'] / np.sqrt(param_change_stats['total_occurrences'])
 
     return coverage_stats, param_change_stats
 
@@ -2963,8 +2963,8 @@ def load_exps(exps_path, n_clients=5, args=None):
     # For missing concepts (NaN values), we predict them using a random classifier 
     # (uniform distribution based on concept cardinality: 1/cardinality).
     performance['concept_left_out'] = performance.apply(lambda x: _format_results(x['concept_acc'], x['true_graph'], x['dataset'], x['model'], count_nan=True), axis=1)
-    performance['agg_concept'] = performance.apply(lambda x: _format_results(x['concept_acc'], x['true_graph'], x['dataset'], x['model'], count_nan=False, worst_classifier=True), axis=1)
-    performance['agg_label'] = performance.apply(lambda x: _format_results(x['concept_acc'], x['true_graph'], x['dataset'], x['model'], count_nan=False, task=x['task_acc'], worst_classifier=True), axis=1)
+    performance['agg_concept'] = performance.apply(lambda x: _format_results(x['concept_acc'], x['true_graph'], x['dataset'], x['model'], count_nan=False, worst_classifier=False), axis=1)
+    performance['agg_label'] = performance.apply(lambda x: _format_results(x['concept_acc'], x['true_graph'], x['dataset'], x['model'], count_nan=False, task=x['task_acc'], worst_classifier=False), axis=1)
 
     return performance, c_info
 
