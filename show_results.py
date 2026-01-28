@@ -21,26 +21,6 @@ args = parser.parse_args()
 
 # List the paths containing the sweeps' results
 paths = [
-    # FL (static and dynamic)
-    "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-18/23-45-49_fff_as_d",
-    "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-18/23-45-50_fff_as_s",
-    "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-18/23-39-36_fff_sac_d",
-    "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-18/23-39-41_fff_sac_s",
-    "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-18/18-48-19_fff_al_d",
-    "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-18/18-48-20_fff_al_s",
-    "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-19/10-35-05_fff_ins_d", 
-    "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-19/10-35-12_fff_ins_s", 
-    "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-18/18-47-00_fff_hail_d", 
-    "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-18/18-47-13_fff_hail_s",  
-    "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-19/15-42-27_fff_siim_d", 
-    "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-19/15-48-10_fff_siim_s",  
-    # CL and Loc
-    "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-20/11-15-52_cl_as_hail", # correct
-    "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-20/15-52-13_cl_others_correct",
-    "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-21/09-44-04_cl_siim_correct_loc", # only localized
-    "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-21/10-20-06_cl_siim_correct_cl" , # only centralized
-    #
-    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-21/13-21-19_test2"
 ]
 
 # folder to save processed results
@@ -87,7 +67,7 @@ dataset_styles = {
     'insurance': {'name': 'Insurance'},
     # 'nih_chest_images': {'name': 'NIH Chest X-Ray'},
     # 'cub_causal_struct': {'name': 'CUB_CAUSAL'},
-    'siim_pneumothorax': {'name': 'SIIM-ACR Pneumothorax'},
+    'siim_pneumothorax': {'name': 'SIIM-Pneumothorax'},
 }
 
 # Define the custom order
@@ -100,7 +80,7 @@ custom_order = [
     'Hailfinder',
     # 'NIH Chest X-Ray',
     # 'CUB_CAUSAL',
-    'SIIM-ACR Pneumothorax'
+    'SIIM-Pneumothorax'
 ]
 
 apply_styles(performance, dataset_styles, model_styles, custom_order)
@@ -139,6 +119,7 @@ tabular_drift_metrics(
     visualization_folder,
 )
 
+
 ########## Intervention plots ##########
 # Eliminate blackbox and blackbox_multi from the model style
 #model_styles = {k: v for k, v in model_styles.items() if k not in ['blackbox', 'blackbox_multi']}
@@ -154,47 +135,59 @@ tabular_drift_metrics(
 
 ### Cumulative intervention plots ###
 
+# Collect data for grid plot
+plot_data_dict = {}
+
 # plot cumulative interventions for each architecture, multi learning modalities
 for architecture in performance['model'].unique():
-    #plot_cumulative_accuracy_multi_modality(
-    #    performance,
-    #    custom_order,
-    #    architecture_name=architecture,
-    #    c_info=c_info,
-    #    variable = 'task',
-    #    folder=visualization_folder,
-    #)
-
-    plot_cumulative_accuracy_multi_modality(
+    data = plot_cumulative_accuracy_multi_modality(
         performance,
         custom_order,
         architecture_name=architecture,
-        variable = 'labels',
+        variable='task',
         c_info=c_info,
         folder=visualization_folder,
+        return_data=True,  # Return data for grid plot
     )
+    if data:
+        plot_data_dict.update(data)
 
-# plot cumulative interventions for all architectures together, single learning modality
-plot_cumulative_accuracy_multi_model(
-    performance,
-    custom_order,
-    learning_modality='local_federated_drift',
-    variable = 'labels',
-    c_info=c_info,
+# Create grid plot with CEM and C2BM only
+grid_model_names = ['cem','c2bm']  # Only CEM and C2BM
+datasets = ['Asia','Hailfinder', "SIIM-Pneumothorax"]
+# Sort datasets according to custom_order
+datasets = sorted(datasets, key=lambda x: custom_order.index(x) if x in custom_order else len(custom_order))
+
+
+plot_cumulative_accuracy_grid_multi_modality(
+    plot_data_dict=plot_data_dict,
+    model_names=grid_model_names,
+    datasets=datasets,
+    variable='task',
     folder=visualization_folder,
 )
 
-# Optional: Plot for specific localized client
-# Uncomment to generate plots for a specific client
-# plot_cumulative_single_architecture_multi_modality(
-#     performance,
-#     custom_order,
-#     architecture_name='c2bm',
-#     folder=visualization_folder,
-#     localized_client_id=1,  # Change to desired client ID
-# )
+# plot cumulative interventions for all architectures together, single learning modality
 
 
+data_2 = plot_cumulative_accuracy_multi_model(
+        performance,
+        custom_order,
+        learning_modality='local_federated_drift',
+        variable='task',
+        c_info=c_info,
+        folder=visualization_folder,
+        return_data=True  # Return data for grid plot
+        #seeds_to_average = [3,4,5],
+    )
+
+plot_cumulative_accuracy_grid_multi_model(
+    plot_data_dict=data_2,
+    learning_modalities=['local_federated_drift'],
+    datasets=datasets,
+    variable='task',
+    folder=visualization_folder,
+)
 
 
 

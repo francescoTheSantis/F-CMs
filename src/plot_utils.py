@@ -22,6 +22,501 @@ plt.style.use(['science', 'ieee', 'no-latex'])
 ############## FUNCTIONS #######################
 ################################################
 
+def plot_cumulative_accuracy_grid_multi_modality(
+    plot_data_dict,
+    model_names,
+    datasets,
+    variable='task',
+    folder=None,
+    figsize_per_subplot=(3.5, 2.8),
+    title_size=11,
+    label_size=9,
+    tick_size=8,
+    legend_size=8,
+    dataset_label_size=11,
+    linewidth=1.7,
+    markersize=4
+):
+    """
+    Create a grid of cumulative accuracy plots using pre-computed data.
+    Datasets as columns, models as rows. Legend in each subplot.
+    Style matching plot_graph_6.py (ICML/NeurIPS-like with seaborn).
+    
+    Args:
+        plot_data_dict: Dictionary with keys (model_name, dataset) containing plot data
+                        Each value is a dict with 'learning_data' containing per-learning-method data
+        model_names: List of model names (rows)
+        datasets: List of dataset names (columns)
+        variable: 'task' or 'labels'
+        folder: Output folder path
+    """
+    import shutil
+    
+    # ICML/NeurIPS-like typography + seaborn styling (from plot_graph_6.py)
+    AXIS_COLOR = "black"
+    TICK_LENGTH = 3
+    TICK_WIDTH = 0.6
+    
+    use_tex = shutil.which("latex") is not None
+    rc = {
+        "text.usetex": use_tex,
+        "font.family": "serif",
+        "axes.labelsize": label_size,
+        "axes.titlesize": title_size,
+        "legend.fontsize": legend_size,
+        "xtick.labelsize": tick_size,
+        "ytick.labelsize": tick_size,
+        "lines.linewidth": linewidth,
+        "lines.markersize": markersize,
+        "figure.dpi": 300,
+        "axes.grid": True,
+        "grid.alpha": 0.3,
+        "grid.linestyle": "--",
+        "legend.frameon": False,
+        "pdf.fonttype": 42,
+        "ps.fonttype": 42,
+        "axes.edgecolor": AXIS_COLOR,
+        "axes.labelcolor": AXIS_COLOR,
+        "xtick.color": AXIS_COLOR,
+        "ytick.color": AXIS_COLOR,
+        "text.color": AXIS_COLOR,
+    }
+    if use_tex:
+        rc["text.latex.preamble"] = r"\usepackage{mathptmx}"  # Times New Roman via LaTeX
+    else:
+        rc["font.serif"] = ["Times New Roman", "Times", "DejaVu Serif"]
+    sns.set_theme(context="paper", style="whitegrid", palette="deep", rc=rc)
+    
+    # Use seaborn deep palette like plot_graph_6.py
+    METHOD_PALETTE = sns.color_palette("deep", n_colors=4)
+    
+    # Define styles for learning methods (matching reference image: solid lines, no markers)
+    learning_styles = {
+        'local_federated_drift': {'color': METHOD_PALETTE[0], 'linestyle': '-', 'linewidth': 1.5, 'name': 'F-CM'},
+        'local_federated_no_drift': {'color': METHOD_PALETTE[1], 'linestyle': '-', 'linewidth': 1.5, 'name': 'S-F-CM'},
+        'centralized': {'color': METHOD_PALETTE[2], 'linestyle': '-', 'linewidth': 1.5, 'name': 'Centralized'},
+        'localized': {'color': METHOD_PALETTE[3], 'linestyle': '-', 'linewidth': 1.5, 'name': 'Localized'},
+    }
+    
+    # Model display names
+    model_display_names = {
+        'cem': 'CEM',
+        'c2bm': 'C2BM',
+        'cbm_linear': 'CBM+Linear',
+        'cbm_mlp': 'CBM',
+        'cgm': 'CGM',
+        'blackbox': 'BlackBox',
+        'blackbox_multi': 'BlackBox (Multi)',
+    }
+    
+    n_rows = len(model_names)
+    n_cols = len(datasets)
+    
+    fig_width = figsize_per_subplot[0] * n_cols
+    fig_height = figsize_per_subplot[1] * n_rows
+    
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(fig_width, fig_height), squeeze=False)
+    
+    for row_idx, model_name in enumerate(model_names):
+        for col_idx, dataset in enumerate(datasets):
+            ax = axes[row_idx, col_idx]
+            
+            key = (model_name, dataset)
+            if key not in plot_data_dict or plot_data_dict[key] is None:
+                ax.text(0.5, 0.5, 'No data', ha='center', va='center', transform=ax.transAxes, fontsize=9)
+                ax.axis('off')
+                continue
+            
+            data = plot_data_dict[key]
+            learning_data = data.get('learning_data', {})
+            n_interventions = data.get('n_interventions', 0)
+            
+            if not learning_data or n_interventions == 0:
+                ax.text(0.5, 0.5, 'No data', ha='center', va='center', transform=ax.transAxes, fontsize=9)
+                continue
+            
+            x_for_plot = np.arange(0, n_interventions)
+            
+            # Compute y-limits for this subplot
+            all_means = []
+            all_stds = []
+            for lm_data in learning_data.values():
+                all_means.append(np.array(lm_data['mean']) * 100)
+                all_stds.append(np.array(lm_data['stderr']) * 100)
+            ymin = min((m - s).min() for m, s in zip(all_means, all_stds))
+            ymax = max((m + s).max() for m, s in zip(all_means, all_stds))
+            pad = 0.05 * (ymax - ymin if ymax > ymin else 1.0)
+
+            # Shift x for plotting so that ticks go from 1 to n_interventions
+            x_ticks = np.arange(1, n_interventions + 1)
+            x_for_plot_shifted = x_for_plot + 1
+            
+            for learning_method, lm_data in learning_data.items():
+                mean_label = np.array(lm_data['mean']) * 100
+                stderr_label = np.array(lm_data['stderr']) * 100
+                missing_mask = np.array(lm_data.get('missing_mask', [False] * len(mean_label)))
+
+                style = learning_styles.get(learning_method, {
+                    'color': '#333333', 'linestyle': '-', 'linewidth': 1.5, 'name': learning_method
+                })
+
+                # Plot line segments: solid where data exists, dashed where next point is missing
+                for k in range(len(x_for_plot) - 1):
+                    linestyle = '--' if missing_mask[k+1] else '-'
+                    ax.plot(
+                        x_for_plot_shifted[k:k+2],
+                        mean_label[k:k+2],
+                        color=style['color'],
+                        linestyle=linestyle,
+                        linewidth=style['linewidth'],
+                    )
+
+                # Plot error band with different alpha based on missing data
+                for k in range(len(x_for_plot) - 1):
+                    alpha_value = 0.10 if missing_mask[k+1] else 0.15
+                    ax.fill_between(
+                        x_for_plot_shifted[k:k+2],
+                        (mean_label - stderr_label)[k:k+2],
+                        (mean_label + stderr_label)[k:k+2],
+                        color=style['color'],
+                        alpha=alpha_value,
+                        linewidth=0,
+                    )
+
+                # Add star marker at the end of the line
+                ax.plot(x_for_plot_shifted[-1], mean_label[-1], marker='*', color=style['color'], 
+                       markersize=markersize + 5, markeredgecolor=style['color'], zorder=5)
+
+            # Add dummy solid line for legend (not dashed)
+            for method_key, style_leg in learning_styles.items():
+                if method_key in learning_data:
+                    ax.plot([], [], color=style_leg['color'], linestyle='-', linewidth=style_leg['linewidth'], label=style_leg['name'])
+
+            # Configure subplot (matching plot_graph_6.py style)
+            ax.set_xlim(0.5, n_interventions + 0.5)
+            # For Hailfinder, show ticks every 5 to avoid overlap
+            if dataset.lower() == 'hailfinder':
+                ax.set_xticks(np.arange(5, n_interventions + 1, 5))
+            else:
+                ax.set_xticks(x_ticks)
+            ax.set_ylim(ymin - pad, ymax + pad)
+            ax.grid(True, linewidth=0.4, alpha=0.3, linestyle="--")
+            ax.tick_params(
+                axis="both",
+                which="major",
+                length=TICK_LENGTH,
+                width=TICK_WIDTH,
+                direction="out",
+                colors=AXIS_COLOR,
+                bottom=True,
+                left=True,
+            )
+            for spine in ("left", "bottom"):
+                ax.spines[spine].set_color(AXIS_COLOR)
+
+            # Dataset name as column title (only first row)
+            if row_idx == 0:
+                ax.set_title(dataset, pad=4)
+
+            # Model name as row label (only first column)
+            if col_idx == 0:
+                model_display = model_display_names.get(model_name, model_name.replace("_", " ").upper())
+                title_label = "Label" if variable == 'labels' else "Task"
+                ax.set_ylabel(f"{model_display}\nAvg. Val. {title_label} Acc. (%)")
+            else:
+                ax.set_ylabel("")
+                ax.tick_params(axis="y", labelleft=False)
+
+            # X-axis label (solo ultima riga)
+            if row_idx == n_rows - 1:
+                ax.set_xlabel("Number of intervened concepts")
+
+            # Legenda in ogni subplot in alto a sinistra
+            ax.legend(loc='upper left', frameon=False, fontsize=legend_size)
+    
+    sns.despine(fig=fig)
+    fig.tight_layout(rect=[0, 0.02, 1, 0.98], h_pad=1.2, w_pad=0.6)
+    
+    if folder:
+        title_label = "labels" if variable == 'labels' else "task"
+        output_path = f"{folder}/cumulative_{title_label}_acc_grid.pdf"
+        plt.savefig(output_path, bbox_inches='tight', dpi=300)
+        print(f"Grid saved to {output_path}")
+    
+    plt.close(fig)
+
+
+def plot_cumulative_accuracy_grid_multi_model(
+    plot_data_dict,
+    learning_modalities,
+    datasets,
+    variable='task',
+    folder=None,
+    figsize_per_subplot=(3.5, 2.8),
+    title_size=11,
+    label_size=9,
+    tick_size=8,
+    legend_size=8,
+    dataset_label_size=11,
+    linewidth=1.7,
+    markersize=4
+):
+    """
+    Create a grid of cumulative accuracy plots using pre-computed data from plot_cumulative_accuracy_multi_model.
+    Datasets as columns, learning modalities as rows. Legend per figure.
+    Style matching plot_graph_6.py (ICML/NeurIPS-like with seaborn).
+    
+    Args:
+        plot_data_dict: Dictionary with keys (learning_modality, dataset) containing plot data.
+                        Each value is a dict with 'model_data' containing per-model data:
+                        {'model_data': {model_name: {'mean': [...], 'stderr': [...], 'missing_mask': [...]}}, 'n_interventions': int}
+        learning_modalities: List of learning modality names (rows)
+        datasets: List of dataset names (columns)
+        variable: 'task' or 'labels'
+        folder: Output folder path
+    """
+    import shutil
+    
+    # ICML/NeurIPS-like typography + seaborn styling (from plot_graph_6.py)
+    AXIS_COLOR = "black"
+    TICK_LENGTH = 3
+    TICK_WIDTH = 0.6
+    
+    use_tex = shutil.which("latex") is not None
+    rc = {
+        "text.usetex": use_tex,
+        "font.family": "serif",
+        "axes.labelsize": label_size,
+        "axes.titlesize": title_size,
+        "legend.fontsize": legend_size,
+        "xtick.labelsize": tick_size,
+        "ytick.labelsize": tick_size,
+        "lines.linewidth": linewidth,
+        "lines.markersize": markersize,
+        "figure.dpi": 300,
+        "axes.grid": True,
+        "grid.alpha": 0.3,
+        "grid.linestyle": "--",
+        "legend.frameon": False,
+        "pdf.fonttype": 42,
+        "ps.fonttype": 42,
+        "axes.edgecolor": AXIS_COLOR,
+        "axes.labelcolor": AXIS_COLOR,
+        "xtick.color": AXIS_COLOR,
+        "ytick.color": AXIS_COLOR,
+        "text.color": AXIS_COLOR,
+    }
+    if use_tex:
+        rc["text.latex.preamble"] = r"\usepackage{mathptmx}"  # Times New Roman via LaTeX
+    else:
+        rc["font.serif"] = ["Times New Roman", "Times", "DejaVu Serif"]
+    sns.set_theme(context="paper", style="whitegrid", palette="deep", rc=rc)
+    
+    # Use seaborn deep palette like plot_graph_6.py
+    MODEL_PALETTE = sns.color_palette("deep", n_colors=7)
+    
+    # Define styles for models (matching reference image: solid lines, no markers)
+    model_styles = {
+        'cem': {'color': MODEL_PALETTE[2], 'linestyle': '-', 'linewidth': 1.5, 'name': 'CEM'},
+        'c2bm': {'color': MODEL_PALETTE[0], 'linestyle': '-', 'linewidth': 1.5, 'name': 'C2BM'},
+        'cbm_linear': {'color': MODEL_PALETTE[5], 'linestyle': '-', 'linewidth': 1.5, 'name': 'CBM+Linear'},
+        'cbm_mlp': {'color': MODEL_PALETTE[1], 'linestyle': '-', 'linewidth': 1.5, 'name': 'CBM'},
+        'cgm': {'color': MODEL_PALETTE[4], 'linestyle': '-', 'linewidth': 1.5, 'name': 'CGM'},
+        'blackbox': {'color': MODEL_PALETTE[3], 'linestyle': '-', 'linewidth': 1.5, 'name': 'BlackBox'},
+        'blackbox_multi': {'color': MODEL_PALETTE[6], 'linestyle': '-', 'linewidth': 1.5, 'name': 'BlackBox (Multi)'},
+    }
+    
+    # Learning modality display names
+    learning_display_names = {
+        'centralized': 'Centralized',
+        'local_federated_drift': 'F-CM',
+        'local_federated_no_drift': 'S-F-CM',
+        'localized': 'Localized',
+    }
+    
+    n_rows = len(learning_modalities)
+    n_cols = len(datasets)
+    
+    fig_width = figsize_per_subplot[0] * n_cols
+    fig_height = figsize_per_subplot[1] * n_rows
+    
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(fig_width, fig_height), squeeze=False)
+    
+    for row_idx, learning_modality in enumerate(learning_modalities):
+        for col_idx, dataset in enumerate(datasets):
+            ax = axes[row_idx, col_idx]
+            
+            key = (learning_modality, dataset)
+            if key not in plot_data_dict or plot_data_dict[key] is None:
+                ax.text(0.5, 0.5, 'No data', ha='center', va='center', transform=ax.transAxes, fontsize=9)
+                ax.axis('off')
+                continue
+            
+            data = plot_data_dict[key]
+            model_data = data.get('model_data', {})
+            n_interventions = data.get('n_interventions', 0)
+            
+            if not model_data or n_interventions == 0:
+                ax.text(0.5, 0.5, 'No data', ha='center', va='center', transform=ax.transAxes, fontsize=9)
+                continue
+            
+            x_for_plot = np.arange(0, n_interventions)
+            
+            # Compute y-limits for this subplot
+            all_means = []
+            all_stds = []
+            for m_data in model_data.values():
+                all_means.append(np.array(m_data['mean']) * 100)
+                all_stds.append(np.array(m_data['stderr']) * 100)
+            ymin = min((m - s).min() for m, s in zip(all_means, all_stds))
+            ymax = max((m + s).max() for m, s in zip(all_means, all_stds))
+            pad = 0.05 * (ymax - ymin if ymax > ymin else 1.0)
+
+            # Shift x for plotting so that ticks go from 1 to n_interventions
+            x_ticks = np.arange(1, n_interventions + 1)
+            x_for_plot_shifted = x_for_plot + 1
+            
+            for model_name, m_data in model_data.items():
+                mean_label = np.array(m_data['mean']) * 100
+                stderr_label = np.array(m_data['stderr']) * 100
+                missing_mask = np.array(m_data.get('missing_mask', [False] * len(mean_label)))
+                
+                style = model_styles.get(model_name, {
+                    'color': '#333333', 'linestyle': '-', 'linewidth': 1.5, 'name': model_name
+                })
+                
+                # Plot line segments: solid where data exists, dashed where next point is missing
+                for k in range(len(x_for_plot) - 1):
+                    linestyle = '--' if missing_mask[k+1] else '-'
+                    ax.plot(
+                        x_for_plot_shifted[k:k+2],
+                        mean_label[k:k+2],
+                        color=style['color'],
+                        linestyle=linestyle,
+                        linewidth=style['linewidth'],
+                    )
+                
+                # Plot error band with different alpha based on missing data
+                for k in range(len(x_for_plot) - 1):
+                    alpha_value = 0.10 if missing_mask[k+1] else 0.15
+                    ax.fill_between(
+                        x_for_plot_shifted[k:k+2],
+                        (mean_label - stderr_label)[k:k+2],
+                        (mean_label + stderr_label)[k:k+2],
+                        color=style['color'],
+                        alpha=alpha_value,
+                        linewidth=0,
+                    )
+                
+                # Add star marker at the end of the line
+                ax.plot(x_for_plot_shifted[-1], mean_label[-1], marker='*', color=style['color'], 
+                       markersize=markersize + 5, markeredgecolor=style['color'], zorder=5)
+
+            # Add dummy solid line for legend (not dashed)
+            for model_key, style_leg in model_styles.items():
+                if model_key in model_data:
+                    ax.plot([], [], color=style_leg['color'], linestyle='-', linewidth=style_leg['linewidth'], label=style_leg['name'])
+
+            # Configure subplot (matching plot_graph_6.py style)
+            ax.set_xlim(0.5, n_interventions + 0.5)
+            # Show ticks every 5 for Hailfinder to avoid overlap
+            if dataset.lower() == 'hailfinder':
+                ax.set_xticks(np.arange(5, n_interventions + 1, 5))
+            else:
+                ax.set_xticks(x_ticks)
+            ax.set_ylim(ymin - pad, ymax + pad)
+            ax.grid(True, linewidth=0.4, alpha=0.3, linestyle="--")
+            ax.tick_params(
+                axis="both",
+                which="major",
+                length=TICK_LENGTH,
+                width=TICK_WIDTH,
+                direction="out",
+                colors=AXIS_COLOR,
+                bottom=True,
+                left=True,
+            )
+            for spine in ("left", "bottom"):
+                ax.spines[spine].set_color(AXIS_COLOR)
+
+            # Dataset name as column title (only first row)
+            if row_idx == 0:
+                ax.set_title(dataset, pad=4)
+
+            # Learning modality name as row label (only first column)
+            if col_idx == 0:
+                learning_display = learning_display_names.get(learning_modality, learning_modality.replace("_", " ").title())
+                title_label = "Label" if variable == 'labels' else "Task"
+                ax.set_ylabel(f"{learning_display}\nAvg. Val. {title_label} Acc. (%)")
+            else:
+                ax.set_ylabel("")
+                ax.tick_params(axis="y", labelleft=False)
+
+            # X-axis label (solo ultima riga)
+            if row_idx == n_rows - 1:
+                ax.set_xlabel("Number of intervened concepts")
+
+            # Legenda in ogni subplot in alto a sinistra
+            ax.legend(loc='upper left', frameon=False, fontsize=legend_size)
+    
+    sns.despine(fig=fig)
+    fig.tight_layout(rect=[0, 0.02, 1, 0.98], h_pad=1.2, w_pad=0.6)
+    
+    if folder:
+        title_label = "labels" if variable == 'labels' else "task"
+        output_path = f"{folder}/cumulative_{title_label}_acc_multi_model_grid.pdf"
+        plt.savefig(output_path, bbox_inches='tight', dpi=300)
+        print(f"Multi-model grid saved to {output_path}")
+    
+    plt.close(fig)
+
+
+def combine_figures_2x4(figure_paths, output_path, figsize=(20, 10), dpi=150):
+    """
+    Combine 8 figures into a single PDF with 2 rows and 4 columns.
+    
+    Args:
+        figure_paths: List of 8 paths to figure files (PDF, PNG, etc.)
+        output_path: Path for the output PDF file
+        figsize: Tuple (width, height) for the combined figure
+        dpi: Resolution for reading/saving images
+    """
+    from matplotlib.backends.backend_pdf import PdfPages
+    from PIL import Image
+    import fitz  # PyMuPDF for reading PDFs
+    
+    if len(figure_paths) != 8:
+        raise ValueError(f"Expected 8 figures, got {len(figure_paths)}")
+    
+    fig, axes = plt.subplots(2, 4, figsize=figsize)
+    axes = axes.flatten()
+    
+    for i, fig_path in enumerate(figure_paths):
+        if not os.path.exists(fig_path):
+            print(f"Warning: {fig_path} not found, skipping.")
+            axes[i].axis('off')
+            continue
+        
+        # Handle PDF files
+        if fig_path.lower().endswith('.pdf'):
+            doc = fitz.open(fig_path)
+            page = doc[0]
+            pix = page.get_pixmap(dpi=dpi)
+            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            doc.close()
+        else:
+            # Handle image files (PNG, JPG, etc.)
+            img = Image.open(fig_path)
+        
+        axes[i].imshow(img)
+        axes[i].axis('off')
+    
+    plt.tight_layout()
+    plt.savefig(output_path, bbox_inches='tight', dpi=dpi)
+    plt.close(fig)
+    print(f"Combined figure saved to {output_path}")
+
+
 def delta_single_c_interventions_on_y(d):
     baseline = d['_baseline']
     delta_dict = {k:(v - baseline) for k, v in d.items()}
@@ -708,7 +1203,7 @@ def plot_single_architecture_multi_modality_OLD(
         'centralized': 'Centralized',
         'localized': 'Localized',
         'local_federated_no_drift': 'Federated (no drift)',
-        'local_federated_drift': 'Federated (with drift)'
+        'local_federated_drift': 'F-CMs'
     }
 
     axis_label_pad = 3
@@ -897,7 +1392,8 @@ def plot_cumulative_accuracy_multi_modality(
     legend_bgcolor='lightgray',
     legend_edgecolor='black',
     legend_alpha=0.3,
-    localized_client_id=None
+    localized_client_id=None,
+    return_data=False
 ):
     """
     Plot average cumulative concept accuracies and task interventions for a single architecture 
@@ -975,22 +1471,25 @@ def plot_cumulative_accuracy_multi_modality(
 
     if len(learning_methods) == 0 or len(datasets) == 0:
         print(f"Warning: No data available to plot. Skipping.")
-        return
+        return {} if return_data else None
+
+    # Dictionary to store return data
+    return_dict = {}
 
     # Define colors for different learning methods
     learning_colors = {
         'centralized': '#2ca02c',
-        'localized': '#d62728',
+        'local_federated_drift': '#1f77b4',
         'local_federated_no_drift': '#ff7f0e',
-        'local_federated_drift': '#1f77b4'
+        'localized': '#d62728',
     }
     
     # Define display names for learning methods
     learning_display_names = {
         'centralized': 'Centralized',
-        'localized': 'Localized',
+        'local_federated_drift': 'F-CMs',
         'local_federated_no_drift': 'Federated (no drift)',
-        'local_federated_drift': 'Federated (with drift)'
+        'localized': 'Localized',
     }
 
     axis_label_pad = 3
@@ -998,14 +1497,19 @@ def plot_cumulative_accuracy_multi_modality(
 
     # Create a separate plot for each dataset
     for dataset in datasets:
+        # Initialize data storage for this dataset
+        dataset_learning_data = {}
+        
         figsize = (10, 6)
-        fig, ax = plt.subplots(figsize=figsize)
+        if not return_data:
+            fig, ax = plt.subplots(figsize=figsize)
         handles_labels = []
 
         subset = input_filtered[input_filtered['dataset'] == dataset]
         
         if subset.empty:
-            plt.close(fig)
+            if not return_data:
+                plt.close(fig)
             continue
 
         # Get intervention levels from cumulative_task_interventions
@@ -1014,16 +1518,24 @@ def plot_cumulative_accuracy_multi_modality(
             intervention_c_order = list(first_row_interventions.keys())
         else:
             print(f"Warning: cumulative_task_interventions is not a dict for dataset {dataset}. Skipping.")
-            plt.close(fig)
+            if not return_data:
+                plt.close(fig)
             continue
 
         if not intervention_c_order:
-            plt.close(fig)
+            if not return_data:
+                plt.close(fig)
             continue
 
         # Add baseline level to intervention order
-        intervention_c_order_with_baseline = ['0_baseline'] + intervention_c_order
-        x = np.arange(len(intervention_c_order_with_baseline))
+        intervention_c_order  = sorted(
+            intervention_c_order ,
+            key=lambda x: int(x.split('_')[0])
+        )
+        #intervention_c_order_with_baseline = ['0_baseline'] + intervention_c_order
+
+        x = np.arange(len(intervention_c_order))
+        #x = np.arange(len(intervention_c_order))
         
         for learning_method in learning_methods:
             method_subset = subset[subset['learning_label'] == learning_method]
@@ -1042,40 +1554,42 @@ def plot_cumulative_accuracy_multi_modality(
                 baseline_concept_acc = row['concept_acc'] if 'concept_acc' in row else None
                 baseline_task_acc = row['task_acc'] if 'task_acc' in row else None
                 method_graph = row['predicted_concepts'] if 'predicted_concepts' in row else None
-
-                assert set(baseline_concept_acc)== set(method_graph), "Mismatch between concept_acc keys and predicted_concepts keys"
+                
+                if method_graph is not None:
+                    assert set(baseline_concept_acc)== set(method_graph), "Mismatch between concept_acc keys and predicted_concepts keys"
                 
                 if not isinstance(cumulative_concept_dict, dict) or not isinstance(cumulative_task_dict, dict):
                     continue
                 
                 # Build missing mask for this seed
                 missing_mask_seed = np.zeros(len(intervention_c_order), dtype=bool)
-                if method_graph is not None:
-                    # Convert method_graph to a list if it's a dict, listconfig, or other iterable
-                    if isinstance(method_graph, dict):
-                        method_concepts = list(method_graph.keys())
+                #if method_graph is not None:
+                #    # Convert method_graph to a list if it's a dict, listconfig, or other iterable
+                #    if isinstance(method_graph, dict):
+                #        method_concepts = list(method_graph.keys())
+                #    else:
+                #        # Handle listconfig, list, or other iterables
+                #        method_concepts = list(method_graph)
+                #    
+                #    # Convert to set for fast lookup
+                #    method_concepts_set = set(str(c) for c in method_concepts)
+                method_concepts_set = [k for k, v in row['concept_acc'].items() if not math.isnan(v)]
+                    
+                # Mark intervention levels that are NOT in this seed's graph as missing
+                for i, level in enumerate(intervention_c_order):
+                    # Extract clean concept name from intervention level (remove numeric prefix like "1_asia" -> "asia")
+                    level_str = str(level)
+                    if '_' in level_str and level_str.split('_')[0].isdigit():
+                        clean_level = '_'.join(level_str.split('_')[1:])
                     else:
-                        # Handle listconfig, list, or other iterables
-                        method_concepts = list(method_graph)
+                        clean_level = level_str
                     
-                    # Convert to set for fast lookup
-                    method_concepts_set = set(str(c) for c in method_concepts)
-                    
-                    # Mark intervention levels that are NOT in this seed's graph as missing
-                    for i, level in enumerate(intervention_c_order):
-                        # Extract clean concept name from intervention level (remove numeric prefix like "1_asia" -> "asia")
-                        level_str = str(level)
-                        if '_' in level_str and level_str.split('_')[0].isdigit():
-                            clean_level = '_'.join(level_str.split('_')[1:])
-                        else:
-                            clean_level = level_str
-                        
-                        # Level is missing if clean name is NOT in method_concepts
-                        if clean_level not in method_concepts_set:
-                            missing_mask_seed[i] = True
+                    # Level is missing if clean name is NOT in method_concepts
+                    if clean_level not in method_concepts_set:
+                        missing_mask_seed[i] = True
                 
                 # add a False at the beginning to missing_mask_seed for baseline
-                missing_mask_seed = np.insert(missing_mask_seed, 0, False)
+                #missing_mask_seed = np.insert(missing_mask_seed, 0, False)
                 missing_masks_per_seed.append(missing_mask_seed)
                 
                
@@ -1084,7 +1598,7 @@ def plot_cumulative_accuracy_multi_modality(
                 task_values_for_level = []
                 
                 # Iterate over levels including baseline
-                for level in intervention_c_order_with_baseline:
+                for level in intervention_c_order:
                     # Get all concept accuracies for this level (e.g., all '1_asia/*')
                     concept_values = []
                     for key, value in cumulative_concept_dict.items():
@@ -1152,9 +1666,22 @@ def plot_cumulative_accuracy_multi_modality(
             else:
                 missing_mask = np.zeros(len(intervention_c_order), dtype=bool)
 
+            # Store data for return
+            dataset_learning_data[learning_method] = {
+                'mean': mean_label.tolist(),
+                'stderr': stderr_label.tolist(),
+                'missing_mask': missing_mask.tolist()
+            }
+
             color = learning_colors.get(learning_method, '#333333')
             learning_method_name = learning_display_names.get(learning_method, learning_method)
 
+            x_for_plot = np.array([int(i+1) for i in x])
+            
+            # Skip plotting if return_data is True
+            if return_data:
+                continue
+                
             # Plot label average line with segments (dashed when concept is missing)
             for k in range(len(x)-1):
                 # Use dashed line if next level is missing (skip k=0 which is baseline)
@@ -1164,7 +1691,7 @@ def plot_cumulative_accuracy_multi_modality(
                     linestyle = '-'
                 
                 ax.plot(
-                    x[k:k+2],
+                    x_for_plot[k:k+2],
                     mean_label[k:k+2],
                     color=color,
                     linestyle=linestyle,
@@ -1178,7 +1705,7 @@ def plot_cumulative_accuracy_multi_modality(
                 # Check if next level is missing (skip k=0 which is baseline)
                 alpha_value = 0.2 if (missing_mask[k+1]) else 0.4
                 ax.fill_between(
-                    x[k:k+2],
+                    x_for_plot[k:k+2],
                     (mean_label - stderr_label)[k:k+2],
                     (mean_label + stderr_label)[k:k+2],
                     color=color,
@@ -1189,8 +1716,18 @@ def plot_cumulative_accuracy_multi_modality(
             line, = ax.plot([], [], color=color, linestyle='-', linewidth=2, marker='o', label=learning_method_name)
             handles_labels.append((line, learning_method_name))
 
+        # Store return data for this dataset
+        return_dict[(architecture_name, dataset)] = {
+            'learning_data': dataset_learning_data,
+            'n_interventions': len(intervention_c_order)
+        }
+        
+        # Skip the rest of plotting if return_data is True
+        if return_data:
+            continue
+
         # Use only indices for x-axis labels
-        level_labels = list(range(len(intervention_c_order_with_baseline)))
+        level_labels = list(range(len(intervention_c_order)))
         
         # replace _ with space
         architecture_name = architecture_name.replace("_", " ")
@@ -1206,7 +1743,13 @@ def plot_cumulative_accuracy_multi_modality(
         ax.set_title(f"{dataset} - {architecture_name} ({title} Accuracy)", fontsize=title_size, pad=title_pad)
 
         if handles_labels:
-            handles, labels = zip(*handles_labels)
+            # Sort handles_labels according to the order in learning_display_names
+            display_order = list(learning_display_names.values())
+            handles_labels_sorted = sorted(
+                handles_labels,
+                key=lambda x: display_order.index(x[1]) if x[1] in display_order else len(display_order)
+            )
+            handles, labels = zip(*handles_labels_sorted)
             legend = ax.legend(
                 handles,
                 labels,
@@ -1230,6 +1773,9 @@ def plot_cumulative_accuracy_multi_modality(
             raise ValueError("Folder path is required to save the figure.")
         
         plt.close(fig)
+    
+    if return_data:
+        return return_dict
 
 
 def plot_cumulative_accuracy_multi_model(
@@ -1248,7 +1794,8 @@ def plot_cumulative_accuracy_multi_model(
     legend_bgcolor='lightgray',
     legend_edgecolor='black',
     legend_alpha=0.3,
-    localized_client_id=None
+    localized_client_id=None,
+    return_data=False
 ):
     """
     Plot average cumulative concept accuracies and task interventions for a single architecture 
@@ -1260,7 +1807,7 @@ def plot_cumulative_accuracy_multi_model(
     
     Args:
         input: DataFrame containing the results
-        architecture_name: Name of the architecture to plot
+        learning_modality: Learning modality to plot
         c_info: Dictionary with concept cardinality information per dataset
         rnd_drift_values: Dictionary mapping indices to rnd_drift values
         localized_client_id: ID of the specific localized client to consider
@@ -1327,7 +1874,10 @@ def plot_cumulative_accuracy_multi_model(
 
     if len(models) == 0 or len(datasets) == 0:
         print(f"Warning: No data available to plot. Skipping.")
-        return
+        return {} if return_data else None
+
+    # Dictionary to store return data
+    return_dict = {}
 
     # Define colors for different learning methods
     model_colors = {
@@ -1349,20 +1899,24 @@ def plot_cumulative_accuracy_multi_model(
     'cgm': 'CGM'
     }
 
-
     axis_label_pad = 3
     title_pad = 15
 
     # Create a separate plot for each dataset
     for dataset in datasets:
+        # Initialize data storage for this dataset
+        dataset_model_data = {}
+        
         figsize = (10, 6)
-        fig, ax = plt.subplots(figsize=figsize)
+        if not return_data:
+            fig, ax = plt.subplots(figsize=figsize)
         handles_labels = []
 
         subset = input_filtered[input_filtered['dataset'] == dataset]
         
         if subset.empty:
-            plt.close(fig)
+            if not return_data:
+                plt.close(fig)
             continue
 
         # Get intervention levels from cumulative_task_interventions
@@ -1371,16 +1925,24 @@ def plot_cumulative_accuracy_multi_model(
             intervention_c_order = list(first_row_interventions.keys())
         else:
             print(f"Warning: cumulative_task_interventions is not a dict for dataset {dataset}. Skipping.")
-            plt.close(fig)
+            if not return_data:
+                plt.close(fig)
             continue
 
         if not intervention_c_order:
-            plt.close(fig)
+            if not return_data:
+                plt.close(fig)
             continue
 
         # Add baseline level to intervention order
-        intervention_c_order_with_baseline = ['0_baseline'] + intervention_c_order
-        x = np.arange(len(intervention_c_order_with_baseline))
+        intervention_c_order  = sorted(
+            intervention_c_order ,
+            key=lambda x: int(x.split('_')[0])
+        )
+        #intervention_c_order_with_baseline = ['0_baseline'] + intervention_c_order
+
+        #x = np.arange(len(intervention_c_order_with_baseline))
+        x = np.arange(len(intervention_c_order))
         
         for model in models:
             method_subset = subset[subset['model'] == model]
@@ -1399,40 +1961,42 @@ def plot_cumulative_accuracy_multi_model(
                 baseline_concept_acc = row['concept_acc'] if 'concept_acc' in row else None
                 baseline_task_acc = row['task_acc'] if 'task_acc' in row else None
                 method_graph = row['predicted_concepts'] if 'predicted_concepts' in row else None
-
-                assert set(baseline_concept_acc)== set(method_graph), "Mismatch between concept_acc keys and predicted_concepts keys"
+                
+                if method_graph is not None:
+                    assert set(baseline_concept_acc)== set(method_graph), "Mismatch between concept_acc keys and predicted_concepts keys"
                 
                 if not isinstance(cumulative_concept_dict, dict) or not isinstance(cumulative_task_dict, dict):
                     continue
                 
                 # Build missing mask for this seed
                 missing_mask_seed = np.zeros(len(intervention_c_order), dtype=bool)
-                if method_graph is not None:
-                    # Convert method_graph to a list if it's a dict, listconfig, or other iterable
-                    if isinstance(method_graph, dict):
-                        method_concepts = list(method_graph.keys())
+                #if method_graph is not None:
+                #    # Convert method_graph to a list if it's a dict, listconfig, or other iterable
+                #    if isinstance(method_graph, dict):
+                #        method_concepts = list(method_graph.keys())
+                #    else:
+                #        # Handle listconfig, list, or other iterables
+                #        method_concepts = list(method_graph)
+                #    
+                #    # Convert to set for fast lookup
+                #    method_concepts_set = set(str(c) for c in method_concepts)
+                method_concepts_set = [k for k, v in row['concept_acc'].items() if not math.isnan(v)]
+                    
+                # Mark intervention levels that are NOT in this seed's graph as missing
+                for i, level in enumerate(intervention_c_order):
+                    # Extract clean concept name from intervention level (remove numeric prefix like "1_asia" -> "asia")
+                    level_str = str(level)
+                    if '_' in level_str and level_str.split('_')[0].isdigit():
+                        clean_level = '_'.join(level_str.split('_')[1:])
                     else:
-                        # Handle listconfig, list, or other iterables
-                        method_concepts = list(method_graph)
+                        clean_level = level_str
                     
-                    # Convert to set for fast lookup
-                    method_concepts_set = set(str(c) for c in method_concepts)
-                    
-                    # Mark intervention levels that are NOT in this seed's graph as missing
-                    for i, level in enumerate(intervention_c_order):
-                        # Extract clean concept name from intervention level (remove numeric prefix like "1_asia" -> "asia")
-                        level_str = str(level)
-                        if '_' in level_str and level_str.split('_')[0].isdigit():
-                            clean_level = '_'.join(level_str.split('_')[1:])
-                        else:
-                            clean_level = level_str
-                        
-                        # Level is missing if clean name is NOT in method_concepts
-                        if clean_level not in method_concepts_set:
-                            missing_mask_seed[i] = True
+                    # Level is missing if clean name is NOT in method_concepts
+                    if clean_level not in method_concepts_set:
+                        missing_mask_seed[i] = True
                 
                 # add a False at the beginning to missing_mask_seed for baseline
-                missing_mask_seed = np.insert(missing_mask_seed, 0, False)
+                #missing_mask_seed = np.insert(missing_mask_seed, 0, False)
                 missing_masks_per_seed.append(missing_mask_seed)
                 
                
@@ -1441,7 +2005,7 @@ def plot_cumulative_accuracy_multi_model(
                 task_values_for_level = []
                 
                 # Iterate over levels including baseline
-                for level in intervention_c_order_with_baseline:
+                for level in intervention_c_order:
                     # Get all concept accuracies for this level (e.g., all '1_asia/*')
                     concept_values = []
                     for key, value in cumulative_concept_dict.items():
@@ -1469,7 +2033,7 @@ def plot_cumulative_accuracy_multi_model(
                         #            value = 1.0 / concept_cardinality
                         #        except (ValueError, KeyError, IndexError):
                         #            value = 0.5  # Default fallback
-                        #     else:
+                        #    else:
                         #         value = 0.5  # Default fallback
                             
                         concept_values.append(value)
@@ -1509,10 +2073,22 @@ def plot_cumulative_accuracy_multi_model(
             else:
                 missing_mask = np.zeros(len(intervention_c_order), dtype=bool)
 
+            # Store data for return
+            dataset_model_data[model] = {
+                'mean': mean_label.tolist(),
+                'stderr': stderr_label.tolist(),
+                'missing_mask': missing_mask.tolist()
+            }
+
             color = model_colors.get(model, '#333333')
             model_name = model_display_names.get(model, model)
-            model_name = model_name.replace("_", " ")
 
+            x_for_plot = np.array([int(i+1) for i in x])
+            
+            # Skip plotting if return_data is True
+            if return_data:
+                continue
+                
             # Plot label average line with segments (dashed when concept is missing)
             for k in range(len(x)-1):
                 # Use dashed line if next level is missing (skip k=0 which is baseline)
@@ -1522,7 +2098,7 @@ def plot_cumulative_accuracy_multi_model(
                     linestyle = '-'
                 
                 ax.plot(
-                    x[k:k+2],
+                    x_for_plot[k:k+2],
                     mean_label[k:k+2],
                     color=color,
                     linestyle=linestyle,
@@ -1536,7 +2112,7 @@ def plot_cumulative_accuracy_multi_model(
                 # Check if next level is missing (skip k=0 which is baseline)
                 alpha_value = 0.2 if (missing_mask[k+1]) else 0.4
                 ax.fill_between(
-                    x[k:k+2],
+                    x_for_plot[k:k+2],
                     (mean_label - stderr_label)[k:k+2],
                     (mean_label + stderr_label)[k:k+2],
                     color=color,
@@ -1547,12 +2123,23 @@ def plot_cumulative_accuracy_multi_model(
             line, = ax.plot([], [], color=color, linestyle='-', linewidth=2, marker='o', label=model_name)
             handles_labels.append((line, model_name))
 
-        # Use only indices for x-axis labels
-        level_labels = list(range(len(intervention_c_order_with_baseline)))
+        # Store return data for this dataset
+        return_dict[(learning_modality, dataset)] = {
+            'model_data': dataset_model_data,
+            'n_interventions': len(intervention_c_order)
+        }
         
-        learning_modality = learning_modality.replace("_", " ")
+        # Skip the rest of plotting if return_data is True
+        if return_data:
+            continue
 
-        ax.set_xticks(x)
+        # Use only indices for x-axis labels
+        level_labels = list(range(len(intervention_c_order)))
+        
+        # replace _ with space
+        learning_modality = learning_modality.replace("_", " ")
+        
+        ax.set_xticks(x_for_plot)
         ax.set_xticklabels(level_labels, rotation=0, ha='center', fontsize=tick_size)
         ax.tick_params(axis='y', labelsize=tick_size)
         ax.minorticks_off()
@@ -1563,7 +2150,13 @@ def plot_cumulative_accuracy_multi_model(
         ax.set_title(f"{dataset} - {learning_modality} ({title} Accuracy)", fontsize=title_size, pad=title_pad)
 
         if handles_labels:
-            handles, labels = zip(*handles_labels)
+            # Sort handles_labels according to the order in model_display_names
+            display_order = list(model_display_names.values())
+            handles_labels_sorted = sorted(
+                handles_labels,
+                key=lambda x: display_order.index(x[1]) if x[1] in display_order else len(display_order)
+            )
+            handles, labels = zip(*handles_labels_sorted)
             legend = ax.legend(
                 handles,
                 labels,
@@ -1587,7 +2180,10 @@ def plot_cumulative_accuracy_multi_model(
             raise ValueError("Folder path is required to save the figure.")
         
         plt.close(fig)
-
+    
+    if return_data:
+        return return_dict
+    
 def delta_single_c_interventions_on_y_id_ood(d, base):
     baseline = base['_baseline']
     delta_dict = {}
@@ -1625,14 +2221,14 @@ def level_interventions_plot(
     datasets = input['dataset'].unique()
     # Reorder datasets according to custom order
     datasets = sorted(datasets, key=lambda x: custom_order.index(x) if x in custom_order else len(custom_order))
-    learning_methods = input['learning'].unique()
+    models = input['model'].unique()
 
-    learning_methods = reorder(learning_methods, clients_flag)
+    models = reorder(models, clients_flag)
 
     # change models' names according to model_styles
     input['model'] = input['model'].apply(lambda x: model_styles[x]['name'] if x in model_styles else x)
 
-    n_rows = len(learning_methods)
+    n_rows = len(models)
     n_cols = len(datasets)
 
     if n_rows == 0 or n_cols == 0 or len(model_styles) == 0:
@@ -3314,7 +3910,7 @@ def plot_training_metrics_across_seeds(
                 ax.set_title(f"Client {cid}")
                 ax.grid(True, linestyle="--", alpha=0.7)
 
-            axes[-1].set_xlabel("Round")
+            axes[-1].set_xlabel("Number of intervened concepts")
             if legend_items:
                 fig.legend(
                     list(legend_items.values()),
@@ -3349,7 +3945,7 @@ def plot_training_metrics_across_seeds(
             )
             plt.fill_between(rounds, avg_mean - avg_ci, avg_mean + avg_ci, color=color, alpha=0.2)
 
-        plt.xlabel("Round")
+        plt.xlabel("Number of intervened concepts")
         plt.ylabel("Validation Loss")
         plt.title("Average Validation Loss Across Clients")
         plt.legend(ncol=min(len(models), 3), frameon=True)
@@ -3394,3 +3990,5 @@ def plot_training_metrics_across_seeds(
         plt.close("all")
         plt.rcParams.update(rc_backup)
         print(f"Training plots saved to {save_dir}/")
+
+

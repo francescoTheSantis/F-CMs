@@ -1,4 +1,5 @@
 import itertools
+import shutil
 import sys
 import numpy as np
 import torch
@@ -1048,6 +1049,9 @@ def main(cfg: DictConfig) -> None:
     else:
         raise ValueError('The learning mode is not supported. Please choose one of the following: centralized, localized, federated.')
 
+    # delete checkpoints folder
+    if os.path.exists("checkpoints"):
+        shutil.rmtree("checkpoints")
 
 if __name__ == "__main__":
     main()
