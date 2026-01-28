@@ -28,7 +28,8 @@ def get_dataset(dataset_cfg, device_cfg, seed):
         dataset = instantiate(dataset_cfg.loader)
         dataset = preprocess_dataset(dataset_cfg, 
                                 dataset, 
-                                device=device_cfg)
+                                device=device_cfg,
+                                seed=seed)
         with open(destination_path, 'wb') as f: 
             pickle.dump(dataset, f)
     else:

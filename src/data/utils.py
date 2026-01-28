@@ -73,7 +73,9 @@ def split_dataset(_dataset, split_size):
     # get the indices of samples to be split
     index_split = np.random.choice(len_dataset, n_split, replace=False)
     # get the indices of the training (or test) samples
+    # np.setdiff1d returns a sorted array; shuffle so the retained order depends on the seed
     index_original = np.setdiff1d(np.arange(len_dataset), index_split)
+    # np.random.shuffle(index_original)
 
     dataset_split = reduce_dataset(_dataset, index_split)
     dataset_original = reduce_dataset(_dataset, index_original)

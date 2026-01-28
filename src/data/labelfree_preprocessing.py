@@ -278,8 +278,8 @@ def generate_img_embeddings_and_assign_concepts(dataset_name: str,
     
     processed_dir = os.path.join(CACHE, "siim_pneumothorax", "processed_datasets")
     processed_path = os.path.join(processed_dir, f"{dataset_name}_with_concepts.pt")
-    if os.path.exists(processed_path):
-        return torch.load(processed_path, map_location=device, weights_only=False)
+    # if os.path.exists(processed_path):
+    #     return torch.load(processed_path, map_location=device, weights_only=False)
 
     os.makedirs(processed_dir, exist_ok=True)
     input_encoder = _load_resnet18_encoder(device)

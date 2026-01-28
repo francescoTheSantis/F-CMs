@@ -25,7 +25,10 @@ class GradientMonitor_afterB(pl.Callback):
         for p in pl_module.parameters():
             if p.grad is not None:
                 norms.append(p.grad.norm().item())
-        # print(f"Gradient Norms after backward: {norms}")       
+        # if norms:
+        #     total_norm = (sum(n ** 2 for n in norms) ** 0.5)
+        #     max_norm = max(norms)
+        #     print(f"[GradNorm] step={trainer.global_step} total={total_norm:.6f} max_param={max_norm:.6f}")
 
 
 # ------------------------ EpochLossPrinter callback ------------------------

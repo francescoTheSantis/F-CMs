@@ -39,7 +39,7 @@ paths = [
     # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-20/15-52-13_cl_others_correct",
     # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-21/09-44-04_cl_siim_correct_loc", # only localized
     # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-21/10-20-06_cl_siim_correct_cl" , # only centralized
-    # DP
+    # # DP
     # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-21/13-49-03_DP_c2bm_good", # good results c2bm
     # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-22_DP_pretest/00-07-50_seed1_c2bm", # seed1 c2bm (small patience=5)
     # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-22_DP_pretest/00-08-14_seed2_c2bm", # seed2 c2bm
@@ -76,19 +76,18 @@ paths = [
     # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-22/23-09-12_int_sachs",
     # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-22/23-11-33_int_sachs_s"
     
-    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-24/19-25-10_int_sachs_s"
+    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-24/19-25-10_int_sachs_s",
     # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-24/19-26-18_int_sachs"
+
+    # SOLI SEEDs. 
+    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-18/18-47-00_fff_hail_d_345",
+    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-18/18-47-13_fff_hail_s_345",
+    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-20/11-15-52_cl_as_hail_345"
     
-    "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-26/00-08-27_int_hail_3",
-    "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-25/12-14-23_int_hail_4",
-    "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-26/00-09-21_int_hail_5",
-    "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-26/00-20-28_int_hail_3s",
-    "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-26/00-21-43_int_hail_4s",
-    "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-26/00-22-47_int_hail_5s",
-    "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-26/09-12-40"
-    
-    
-    
+    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-19/15-42-27_fff_siim_d_1235",
+    "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-19/15-48-10_fff_siim_s_1235"
+    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-21/09-44-04_cl_siim_correct_loc_1235",
+    # "/home/dario/Projects/Federated_Learning/c2bm_v2/new_version/Federated-C2BM/outputs/multirun/2026-01-21/10-20-06_cl_siim_correct_cl_1235"
     
 ]
 

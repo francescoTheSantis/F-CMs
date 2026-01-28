@@ -202,7 +202,7 @@ def maybe_reduce(reduce_fraction, dataset):
             dataset.data[split] = data
     return dataset
 
-def preprocess_dataset(dataset_cfg, _dataset, device, backbone ='resnet18') -> dict:
+def preprocess_dataset(dataset_cfg, _dataset, device, backbone ='resnet18', seed=None) -> dict:
     """
     Preprocess the dataset.
     Args:
@@ -270,7 +270,9 @@ def preprocess_dataset(dataset_cfg, _dataset, device, backbone ='resnet18') -> d
         
     elif dataset_name == 'siim_pneumothorax':
         clip_model, clip_tokenizer, ckpt_config = load_pretrained_clip_model("r50_mcc", device=device)
-        dataset.split(ckpt_config)
+        dataset.split(ckpt_config, seed=seed)
+        # print in red color the seed
+        # print(f"\033[91mUsing seed: {seed}\033[0m")
         	   
         # if we already generated the concepts we simply read them form the respective json file,
         # otherwise we generate them using the llm.

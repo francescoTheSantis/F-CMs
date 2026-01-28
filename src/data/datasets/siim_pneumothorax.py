@@ -150,10 +150,13 @@ class ImageClassificationDataset(Dataset):
         self.adj = None
         return self.adj
 
-    def split(self, ckpt_config):
+    def split(self, ckpt_config, seed=None):
         """ 
         Create training, validation and test partitions
         """
+        
+        # if seed is not None:
+        #     np.random.seed(seed)
         
         data_file = os.path.join(str(CACHE / "siim_pneumothorax/siim_train.csv"))
 
