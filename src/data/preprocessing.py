@@ -349,31 +349,36 @@ def preprocess_dataset(dataset_cfg, _dataset, device, backbone ='resnet18', seed
         #dataset = maybe_reduce(cfg.dataset.get('reduce_fraction', None), dataset)
         #dataset = generate_img_embeddings(dataset, batch_size=cfg.dataset.get('batch_size'), device=device)
 
-    elif dataset_name == 'nih_chest_images' or dataset_name == 'nih_chest_tabular':
+    #elif dataset_name == 'nih_chest_images' or dataset_name == 'nih_chest_tabular' or dataset_name == 'derm7pt':
+    elif dataset_name == 'derm7pt':
         
         dataset.split()
         dataset = maybe_reduce(dataset_cfg.get('reduce_fraction', None), dataset)
         # check modality
+        #if dataset_name == 'nih_chest_images':
+        #    backbone = 'res224-all'
 
-        if dataset_name == 'nih_chest_images':
-            backbone = 'res224-all'
-            dataset = generate_img_embeddings(dataset, 
-                                            batch_size= dataset_cfg.get('batch_size', 32), 
-                                            device=device,
-                                            backbone=backbone)
+        dataset = generate_img_embeddings(dataset, 
+                                        batch_size= dataset_cfg.get('batch_size', 32), 
+                                        device=device,
+                                        backbone=dataset_cfg.get('backbone', backbone))
+        
+        dataset.data['train'].update_lists()
+        dataset.data['val'].update_lists()
+        dataset.data['test'].update_lists()
 
-        else:
-            scaler = StandardScaler()
-            X_train = dataset.data['train'].X
+        #else:
+        #    scaler = StandardScaler()
+        #    X_train = dataset.data['train'].X
+        #
+        #    scaler.fit(X_train)
+        #
+        #    for split in dataset.data:
+        #        dataset.data[split].X = scaler.transform(dataset.data[split].X)
 
-            scaler.fit(X_train)
-
-            for split in dataset.data:
-                dataset.data[split].X = scaler.transform(dataset.data[split].X)
-
-            dataset = generate_tabular_embeddings(dataset,
-                                                  batch_size= dataset_cfg.get('batch_size', 32),
-                                                  device=device)
+        #    dataset = generate_tabular_embeddings(dataset,
+        #                                          batch_size= dataset_cfg.get('batch_size', 32),
+        #                                          device=device)
 
     else:
         raise ValueError(f"Preprocessing is missing for dataset: {dataset_cfg.get('name')}")
