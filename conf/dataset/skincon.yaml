@@ -1,0 +1,24 @@
+defaults:
+  - commons
+  - _self_
+
+name: skincon
+loader:
+    _target_: src.data.datasets.skincon.SkinConDataset
+    ftune_size: 0.
+    
+hidden_size: 64
+batch_size: 128
+
+is_image_dataset: true
+reduce_fraction: Null       # does not work with CelebA
+onehot_to_concepts: false
+
+load_embeddings: true
+
+backbone: densenet121
+
+label_descriptions:
+  diagnosis::nevus: The lesion is a nevus, which is a common benign skin growth.
+  diagnosis::melanoma: The lesion is a melanoma, which is a type of skin cancer that can be aggressive and potentially life-threatening if not detected early.
+  
