@@ -54,6 +54,8 @@ from src.dra import (
     run_dra_attack,
     summarize_dra_results,
 )
+from src.fedcbm import run_fedcbm_baseline
+from src.fcl import run_fcl_baseline
 from src.metrics import _evaluate_graph_against_truth
 
 # data loading
@@ -1025,6 +1027,101 @@ def main(cfg: DictConfig) -> None:
         #         summarize_dra_results(f"dra_results_client_{testid}.json", metrics=("mse", "loss"))
 
   
+    elif cfg.learning.mode == 'FedCBM':
+        n_rounds = int(cfg.learning.settings.n_rounds)
+        n_clients = int(cfg.learning.n_clients)
+        dataset_client_multiplier = int(cfg.learning.subgraphs.get('dataset_client_multiplier', 1))
+        num_threads = int(cfg.learning.settings.get("num_threads", 1))
+        torch.set_num_threads(num_threads)
+
+        print(f"\033[93mFedCBM baseline with {n_clients} clients\033[0m")
+        if int(cfg.learning.subgraphs.get("rnd_drift", 0)) <= n_rounds:
+            raise ValueError(
+                "[FedCBM] This baseline is static. "
+                "Set learning.subgraphs.rnd_drift > learning.settings.n_rounds "
+                "(or trainer.max_epochs) to prevent drift during FedCBM runs."
+            )
+
+        train_dataloaders, val_dataloaders, test_dataloaders = load_dataloaders(
+            cfg,
+            path,
+            n_clients * dataset_client_multiplier,
+        )
+
+        available_clients = min(n_clients, len(train_dataloaders))
+        active_client_indices = list(range(available_clients))
+        if available_clients < n_clients:
+            print(
+                f"\033[91m[FedCBM] Requested {n_clients} clients but found {available_clients}."
+                " Proceeding with available clients.\033[0m"
+            )
+
+        fedcbm_metrics = run_fedcbm_baseline(
+            cfg=cfg,
+            train_dataloaders=train_dataloaders,
+            val_dataloaders=val_dataloaders,
+            test_dataloaders=test_dataloaders,
+            active_client_indices=active_client_indices,
+            concept_names=datasets[0].c_info["names"],
+            essential_concepts=ordered_nodes,
+            device=cfg.device,
+        )
+
+        print(
+            "\033[92mFedCBM completed: "
+            f"task_accuracy_weighted={fedcbm_metrics.get('task_accuracy_weighted', float('nan')):.4f}, "
+            f"task_accuracy_macro={fedcbm_metrics.get('task_accuracy_macro', float('nan')):.4f}, "
+            f"heads_trained={fedcbm_metrics.get('n_clients_with_local_head', 0)}/"
+            f"{fedcbm_metrics.get('n_active_clients', len(active_client_indices))}\033[0m"
+        )
+
+    elif cfg.learning.mode == 'FCL':
+        n_rounds = int(cfg.learning.settings.n_rounds)
+        n_clients = int(cfg.learning.n_clients)
+        dataset_client_multiplier = int(cfg.learning.subgraphs.get('dataset_client_multiplier', 1))
+        num_threads = int(cfg.learning.settings.get("num_threads", 1))
+        torch.set_num_threads(num_threads)
+
+        print(f"\033[93mFCL baseline with {n_clients} clients\033[0m")
+        if int(cfg.learning.subgraphs.get("rnd_drift", 0)) <= n_rounds:
+            raise ValueError(
+                "[FCL] This baseline is static. "
+                "Set learning.subgraphs.rnd_drift > learning.settings.n_rounds "
+                "(or trainer.max_epochs) to prevent drift during FCL runs."
+            )
+
+        train_dataloaders, val_dataloaders, test_dataloaders = load_dataloaders(
+            cfg,
+            path,
+            n_clients * dataset_client_multiplier,
+        )
+
+        available_clients = min(n_clients, len(train_dataloaders))
+        active_client_indices = list(range(available_clients))
+        if available_clients < n_clients:
+            print(
+                f"\033[91m[FCL] Requested {n_clients} clients but found {available_clients}."
+                " Proceeding with available clients.\033[0m"
+            )
+
+        fcl_metrics = run_fcl_baseline(
+            cfg=cfg,
+            train_dataloaders=train_dataloaders,
+            val_dataloaders=val_dataloaders,
+            test_dataloaders=test_dataloaders,
+            active_client_indices=active_client_indices,
+            concept_names=datasets[0].c_info["names"],
+            n_classes=int(datasets[0].y_info["cardinality"][0]),
+            device=cfg.device,
+        )
+
+        print(
+            "\033[92mFCL completed: "
+            f"task_accuracy_weighted={fcl_metrics.get('task_accuracy_weighted', float('nan')):.4f}, "
+            f"task_accuracy_macro={fcl_metrics.get('task_accuracy_macro', float('nan')):.4f}, "
+            f"active_clients={fcl_metrics.get('n_active_clients', len(active_client_indices))}\033[0m"
+        )
+
     elif cfg.learning.mode == 'federated':
 
         # Add path to cfg
@@ -1048,7 +1145,10 @@ def main(cfg: DictConfig) -> None:
         # Delete the temporary config file
         os.remove(config_filepath)
     else:
-        raise ValueError('The learning mode is not supported. Please choose one of the following: centralized, localized, federated.')
+        raise ValueError(
+            "The learning mode is not supported. Please choose one of the following: "
+            "centralized, localized, local_federated, FedCBM, FCL, federated."
+        )
 
     # delete any created checkpoints
     if os.path.exists("checkpoints"):

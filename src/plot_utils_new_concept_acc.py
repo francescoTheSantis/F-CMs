@@ -38,7 +38,7 @@ def reorder(learning_methods, clients_flag=False, clients_perspective=False):
         else:
             custom_order = [f'localized_{i+1}' for i in range(len(learning_methods))]
     else:
-        custom_order = ['centralized', 'local_federated', 'localized']
+        custom_order = ['centralized', 'local_federated', 'FedCBM', 'FCL', 'localized']
     # Reorder the learning methods according to the custom order
     ordered_learning_methods = [method for method in custom_order if method in learning_methods]
     return ordered_learning_methods
@@ -57,6 +57,10 @@ def rename_learning_methods(learning_method):
             renamed_method = [f'Federated (cl. {num})']
         elif method == 'local_federated':
             renamed_method = ['Federated']
+        elif method == 'FedCBM':
+            renamed_method = ['FedCBM']
+        elif method == 'FCL':
+            renamed_method = ['FCL']
         else:
             raise ValueError(f"Unknown learning method: {method}")
     return renamed_method
@@ -1965,8 +1969,10 @@ def compute_statistics(
 
 def produce_accuracy_tables(performance):
 
-    # Apply the following averaging only to centralied and federated, eliminate local results
-    performance_centr_fed = performance[performance['learning'].isin(['centralized', 'local_federated'])]
+    # Apply the following averaging only to shared/global methods, eliminate local results.
+    performance_centr_fed = performance[
+        performance['learning'].isin(['centralized', 'local_federated', 'FedCBM', 'FCL'])
+    ]
 
     # Centralized and federated only
     task_stats, concept_stats, label_stats = compute_statistics(

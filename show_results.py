@@ -21,6 +21,42 @@ args = parser.parse_args()
 
 # List the paths containing the sweeps' results
 paths = [
+    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-12/14-47-43_test_1", # round_drift 10
+    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-12/15-00-54_test_2", # round_drift 20
+    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-12/15-25-49_test_3", # round_drift 20
+    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-12/15-25-56_test_4" # round_drift 10
+    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-12/19-15-43_test_5"
+    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-12/19-17-14_test_6"
+    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-12/19-19-36_test_7"
+    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-12/19-26-02_test_8"
+    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-12/21-42-18_test_9"
+    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-12/21-44-35_test_10"
+    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-12/22-51-44_test_11"
+    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-12/22-51-49_test_12"
+    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-13/10-10-35_test_13" 
+    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-13/09-46-48_test_14"
+    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-13/12-52-02_test_15"
+    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-13/12-32-25_test_16"  
+    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-13/18-25-48_test_17"
+    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-13/18-22-18_test_18"
+    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-14/11-55-02_test_19"
+    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-14/12-19-12_test_20"
+    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-14/12-38-44_test_21"
+    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-14/12-39-02_test_22"
+    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-14/15-45-58_test_23"
+    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-14/15-47-01_test_24"
+    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-03-16/23-13-05_test_25_baselines",
+    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-03-16/23-13-19_test_26_baselines",
+    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-03-16/23-29-18_test_27_fcl_oursetting",
+    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-03-16/23-29-23_test_28_fcl_oursetting"
+    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-03-17/09-59-37",
+    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-03-17/10-00-10"
+    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-03-17/10-15-48",
+    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-03-17/10-15-51",
+    "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-03-17/10-31-32_test_29_siim"
+    
+    
+    
 ]
 
 # folder to save processed results
@@ -121,6 +157,16 @@ tabular_drift_metrics(
 
 
 ########## Intervention plots ##########
+# FedCBM runs can legitimately miss intervention artifacts; keep accuracy tables
+# and skip intervention plots only when no intervention data is available.
+has_intervention_data = (
+    ('cumulative_task_interventions' in performance.columns and performance['cumulative_task_interventions'].notna().any())
+    and ('cumulative_concept_interventions' in performance.columns and performance['cumulative_concept_interventions'].notna().any())
+)
+
+if not has_intervention_data:
+    print("[show_results] No intervention artifacts found. Skipping intervention plots.")
+else:
 # Eliminate blackbox and blackbox_multi from the model style
 #model_styles = {k: v for k, v in model_styles.items() if k not in ['blackbox', 'blackbox_multi']}
 
@@ -136,58 +182,58 @@ tabular_drift_metrics(
 ### Cumulative intervention plots ###
 
 # Collect data for grid plot
-plot_data_dict = {}
+    plot_data_dict = {}
 
-# plot cumulative interventions for each architecture, multi learning modalities
-for architecture in performance['model'].unique():
-    data = plot_cumulative_accuracy_multi_modality(
-        performance,
-        custom_order,
-        architecture_name=architecture,
+    # plot cumulative interventions for each architecture, multi learning modalities
+    for architecture in performance['model'].unique():
+        data = plot_cumulative_accuracy_multi_modality(
+            performance,
+            custom_order,
+            architecture_name=architecture,
+            variable='task',
+            c_info=c_info,
+            folder=visualization_folder,
+            return_data=True,  # Return data for grid plot
+        )
+        if data:
+            plot_data_dict.update(data)
+
+    # Create grid plot with CEM and C2BM only
+    grid_model_names = ['cem','c2bm']  # Only CEM and C2BM
+    datasets = ['Asia','Hailfinder', "SIIM-Pneumothorax"]
+    # Sort datasets according to custom_order
+    datasets = sorted(datasets, key=lambda x: custom_order.index(x) if x in custom_order else len(custom_order))
+
+
+    plot_cumulative_accuracy_grid_multi_modality(
+        plot_data_dict=plot_data_dict,
+        model_names=grid_model_names,
+        datasets=datasets,
         variable='task',
-        c_info=c_info,
         folder=visualization_folder,
-        return_data=True,  # Return data for grid plot
-    )
-    if data:
-        plot_data_dict.update(data)
-
-# Create grid plot with CEM and C2BM only
-grid_model_names = ['cem','c2bm']  # Only CEM and C2BM
-datasets = ['Asia','Hailfinder', "SIIM-Pneumothorax"]
-# Sort datasets according to custom_order
-datasets = sorted(datasets, key=lambda x: custom_order.index(x) if x in custom_order else len(custom_order))
-
-
-plot_cumulative_accuracy_grid_multi_modality(
-    plot_data_dict=plot_data_dict,
-    model_names=grid_model_names,
-    datasets=datasets,
-    variable='task',
-    folder=visualization_folder,
-)
-
-# plot cumulative interventions for all architectures together, single learning modality
-
-
-data_2 = plot_cumulative_accuracy_multi_model(
-        performance,
-        custom_order,
-        learning_modality='local_federated_drift',
-        variable='task',
-        c_info=c_info,
-        folder=visualization_folder,
-        return_data=True  # Return data for grid plot
-        #seeds_to_average = [3,4,5],
     )
 
-plot_cumulative_accuracy_grid_multi_model(
-    plot_data_dict=data_2,
-    learning_modalities=['local_federated_drift'],
-    datasets=datasets,
-    variable='task',
-    folder=visualization_folder,
-)
+    # plot cumulative interventions for all architectures together, single learning modality
+
+
+    data_2 = plot_cumulative_accuracy_multi_model(
+            performance,
+            custom_order,
+            learning_modality='local_federated_drift',
+            variable='task',
+            c_info=c_info,
+            folder=visualization_folder,
+            return_data=True  # Return data for grid plot
+            #seeds_to_average = [3,4,5],
+        )
+
+    plot_cumulative_accuracy_grid_multi_model(
+        plot_data_dict=data_2,
+        learning_modalities=['local_federated_drift'],
+        datasets=datasets,
+        variable='task',
+        folder=visualization_folder,
+    )
 
 
 

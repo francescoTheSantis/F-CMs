@@ -533,7 +533,7 @@ def reorder(learning_methods, clients_flag=False, clients_perspective=False):
         else:
             custom_order = [f'localized_{i+1}' for i in range(len(learning_methods))]
     else:
-        custom_order = ['centralized', 'local_federated', 'localized']
+        custom_order = ['centralized', 'local_federated', 'FedCBM', 'FCL', 'localized']
     # Reorder the learning methods according to the custom order
     ordered_learning_methods = [method for method in custom_order if method in learning_methods]
     return ordered_learning_methods
@@ -552,6 +552,10 @@ def rename_learning_methods(learning_method):
             renamed_method = [f'Federated (cl. {num})']
         elif method == 'local_federated':
             renamed_method = ['Federated']
+        elif method == 'FedCBM':
+            renamed_method = ['FedCBM']
+        elif method == 'FCL':
+            renamed_method = ['FCL']
         else:
             raise ValueError(f"Unknown learning method: {method}")
     return renamed_method
@@ -2561,8 +2565,11 @@ def compute_statistics(
 
 def produce_accuracy_tables(performance):
 
-    # Apply the following averaging only to centralied and federated, eliminate local results
-    performance_centr_fed = performance[performance['learning'].isin(['centralized', 'local_federated'])]
+    # Apply the following averaging to shared/global methods (exclude per-client localized rows).
+    # FedCBM/FCL are static global baselines and are reported alongside centralized/federated.
+    performance_centr_fed = performance[
+        performance['learning'].isin(['centralized', 'local_federated', 'FedCBM', 'FCL'])
+    ]
 
     # Centralized and federated only
     task_stats, concept_stats, label_stats = compute_statistics(
@@ -3284,6 +3291,26 @@ def load_exps(exps_path, n_clients=5, args=None):
                         d['percent_params_changed'] = float(additional_metrics.get("percent_params_changed", np.nan))
                     except Exception:
                         pass
+                else:
+                    # Backward-compatible fallback for FedCBM runs saved before additional_metrics.json.
+                    fedcbm_metrics_path = os.path.join(result_file, "fedcbm_metrics.json")
+                    if os.path.exists(fedcbm_metrics_path):
+                        try:
+                            with open(fedcbm_metrics_path, "r") as f:
+                                fedcbm_metrics = json.load(f)
+                            if "concept_coverage" in fedcbm_metrics:
+                                d['concept_coverage'] = float(fedcbm_metrics.get("concept_coverage", np.nan))
+                            elif "concept_training" in fedcbm_metrics:
+                                ct = fedcbm_metrics.get("concept_training", {})
+                                total = len(ct)
+                                trained = sum(
+                                    1
+                                    for v in ct.values()
+                                    if isinstance(v, dict) and v.get("status") == "trained"
+                                )
+                                d['concept_coverage'] = float(trained / total) if total > 0 else np.nan
+                        except Exception:
+                            pass
 
                 try:
                     # Collect graph
@@ -3523,6 +3550,16 @@ def load_exps(exps_path, n_clients=5, args=None):
 
     def _format_results(row, graph, dataset, model, count_nan=False, task=None, worst_classifier=False):
         if model != 'blackbox':
+            # FedCBM (and potentially other static baselines) may not write graph.pkl.
+            # Fallback order: dataset c_info -> concept_acc keys.
+            if graph is None or (isinstance(graph, float) and math.isnan(graph)):
+                if dataset in c_info and c_info[dataset] is not None and 'names' in c_info[dataset]:
+                    graph = list(c_info[dataset]['names'])
+                elif isinstance(row, dict):
+                    graph = list(row.keys())
+                else:
+                    graph = []
+
             # Build values list based on the graph - include all concepts from graph
             # If a concept is not in row (filtered out), it's a missing concept
             values = []
@@ -3990,5 +4027,3 @@ def plot_training_metrics_across_seeds(
         plt.close("all")
         plt.rcParams.update(rc_backup)
         print(f"Training plots saved to {save_dir}/")
-
-

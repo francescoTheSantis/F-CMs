@@ -1,0 +1,23 @@
+defaults:
+  - commons
+  - _self_
+
+mode: FCL
+
+subgraphs:
+  rnd_drift: 1000000
+
+settings:
+  n_rounds: ${trainer.max_epochs}
+  local_epochs: 2
+  num_threads: 1
+  lr: 0.01
+  lr_gamma: 0.7
+  weight_decay: 0.01
+  encoder_hidden_dim: 128
+  quantization_bias: 0.05
+  matrix_l2_weight: 0.0
+  robust_aggregation: true
+  trim_ratio: 0.2
+  patience: ${trainer.patience}
+  min_delta: 1e-8

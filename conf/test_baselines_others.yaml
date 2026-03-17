@@ -1,0 +1,63 @@
+defaults:
+  - default
+  - override causal_discovery: ges
+  - _self_
+
+client_id: 3
+
+hydra:
+  mode: MULTIRUN
+  sweeper:
+    params:
+      seed: 1, 2, 3, 4, 5
+      # possible datsets are: asia, sachs, alarm, hailfinder, insurance
+      dataset: sachs, alarm, insurance 
+      # possible models are:
+      # blackbox, blackbox_multi, cbm_linear, cbm_mlp, cem, cgm, c2bm
+      model: c2bm
+      learning: FedCBM # FCL 
+
+model:
+  concept_loss_weight: 0.8
+
+dataset:
+  load_embeddings: true
+  load_graph: false
+  load_true_graph: true
+  batch_size: 512
+  autoencoder:
+   noise: 0.5  # for bndatasets only
+
+learning:
+  subgraphs:
+   min_number_subgraphs: 2
+   max_number_subgraphs: 6
+   randomly_eliminate_task_from_subgraphs: true
+   dataset_client_multiplier: 2
+   drift_add_nodes_ratio: 0.5
+   dict_subgraph_with_add_nodes:
+     modality: at_least_one_parent_and_child
+     number_add_nodes: 2
+     number_subgraphs_add_nodes: 3 # sachs, alarm, insurance=3
+   rnd_drift: 1000
+   aggregate_graph:
+     local_graphs: from_true_graph
+     perc_clients_alterations: 0.1
+     graph_alteration_prob: 0.1
+
+engine:
+  intervention_prob: 0.8
+  test_interv_noise: 0.8
+  optim_kwargs:
+    lr: 0.01
+
+trainer:
+  # logger: wandb
+  devices: [0]
+  max_epochs: 200
+  patience: 10
+
+rag:
+  verbose: false
+
+notes: test_fcl
