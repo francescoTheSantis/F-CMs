@@ -32,6 +32,9 @@ def generate_img_embeddings(dataset: torch.utils.data.Dataset,
         input_encoder = tv_models.resnet50(weights=ResNet50_Weights.DEFAULT)
     elif backbone == 'res224-all':
         input_encoder = xrv.models.DenseNet(weights="densenet121-res224-all")
+    elif backbone == 'densenet121':
+        input_encoder = tv_models.densenet121(weights=tv_models.DenseNet121_Weights.DEFAULT)
+        input_encoder.classifier = torch.nn.Identity()
     else:
         raise ValueError(f"Backbone {backbone} not supported for image embeddings generation.")
 
@@ -350,7 +353,7 @@ def preprocess_dataset(dataset_cfg, _dataset, device, backbone ='resnet18', seed
         #dataset = generate_img_embeddings(dataset, batch_size=cfg.dataset.get('batch_size'), device=device)
 
     #elif dataset_name == 'nih_chest_images' or dataset_name == 'nih_chest_tabular' or dataset_name == 'derm7pt':
-    elif dataset_name == 'derm7pt':
+    elif dataset_name == 'derm7pt' or dataset_name == 'skincon':
         
         dataset.split()
         dataset = maybe_reduce(dataset_cfg.get('reduce_fraction', None), dataset)
