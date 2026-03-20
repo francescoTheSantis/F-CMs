@@ -20,7 +20,7 @@ XLSX_PATH = "temp_table.xlsx"  # <-- your new multi-sheet file
 OUT_PDF = "neurips_plot_all_datasets6.pdf"
 OUT_PNG = "neurips_plot_all_datasets6.png"
 
-METHODS_ORDER = ["Ours", "TFL", "Loc."]
+METHODS_ORDER = ["F-CMs (Ours)", "S-F-CMs", "Loc."]
 DATASETS_PER_ROW = 2
 SUBPLOT_WIDTH = 1.5
 ROW_HEIGHT = 1.95
@@ -37,8 +37,8 @@ X_LABEL_RAW = "% Client Alteration"
 X_LABEL_Y = -0.22
 
 METHOD_STYLES = {
-    "Ours": {"marker": "o", "linestyle": "-",  "linewidth": 1.7},
-    "TFL":   {"marker": "s", "linestyle": "--", "linewidth": 1.6},
+    "F-CMs (Ours)": {"marker": "o", "linestyle": "-",  "linewidth": 1.7},
+    "S-F-CMs":   {"marker": "s", "linestyle": "--", "linewidth": 1.6},
     "Loc.":   {"marker": "^", "linestyle": ":",  "linewidth": 1.8},
 }
 
