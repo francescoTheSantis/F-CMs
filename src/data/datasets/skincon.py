@@ -21,8 +21,42 @@ from PIL import Image
 ROOT = CACHE / "skincon"
 IMAGES_DIRECTORY = ROOT / "images" 
 os.makedirs(IMAGES_DIRECTORY, exist_ok=True)
+TARGET_NAME = "label"
 TARGET_CLASSES = ["malignant", "benign", "non-neoplastic"]
 CLASS_MAPPING = {"benign": 0, "malignant": 1, "non-neoplastic": 2}
+CONCEPT_NAMES = ["papule", "plaque", "pustule", "bulla", "patch", "nodule", 
+                                  "ulcer", "crust", "erosion", "atrophy", "exudate", "telangiectasia", 
+                                  "scale", "scar", "friable", "dome-shaped", "brown(hyperpigmentation)", 
+                                  "white(hypopigmentation)", "purple", "yellow", "black", "erythema"]
+
+#---- Transformations ----
+transResize = 224
+
+train_transform = transforms.Compose([
+    transforms.Resize(transResize),                     # resize mantenendo proporzioni
+    transforms.CenterCrop(224),                        # crop centrato 224x224, standard ImageNet
+    transforms.RandomAffine(
+        degrees=5,                                    # piccola rotazione
+        translate=(0.05, 0.05),                       # piccola traslazione
+        shear=5                                       # shear leggero
+    ),
+    # transforms.RandomHorizontalFlip(),             # sconsigliato per RX toraciche, opzionale
+    transforms.ToTensor(),
+    transforms.Normalize(
+        mean=[0.485, 0.456, 0.406], 
+        std=[0.229, 0.224, 0.225]
+    )
+])
+
+test_transform = transforms.Compose([
+    transforms.Resize(transResize),
+    transforms.CenterCrop(224),
+    transforms.ToTensor(),
+    transforms.Normalize(
+        mean=[0.485, 0.456, 0.406], 
+        std=[0.229, 0.224, 0.225]
+    )
+])
 
 # create a unique file containing both target, images and annotations
 def create_unique_csv(root, annotations_path=None, target_path=None, concept_names=None):
@@ -116,28 +150,18 @@ class SkinConDataset():
                  ftune_val_size: float = 0., # proportion of the finetuning set to include in the finetuning validation set
         ):
 
-        self.transform = transforms.Compose([
-            transforms.RandomResizedCrop(224),
-            transforms.RandomHorizontalFlip(),
-            transforms.ColorJitter(brightness=0.2, contrast=0.2),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                std=[0.229, 0.224, 0.225])
-        ])
+        self.transform = {'train': train_transform, 'test': test_transform}
 
         self.target_transform = target_transform
         self.ftune_size = ftune_size
         self.val_size = val_size
         self.ftune_val_size = ftune_val_size
 
-        self.c_info = {'names':  ["papule", "plaque", "pustule", "bulla", "patch", "nodule", 
-                                  "ulcer", "crust", "erosion", "atrophy", "exudate", "telangiectasia", 
-                                  "scale", "scar", "friable", "dome-shaped", "brown(hyperpigmentation)", 
-                                  "white(hypopigmentation)", "purple", "yellow", "black", "erythema"], 
-        'cardinality': [2] * 22}
+        self.c_info = {'names':  CONCEPT_NAMES, 
+        'cardinality': [2] * len(CONCEPT_NAMES)}
 
-        self.y_info = {'names': ["malignant"],
-                       'cardinality': [2]}
+        self.y_info = {'names': [TARGET_NAME],
+                       'cardinality': [3]}
         
 
         self.data = {}
@@ -173,18 +197,18 @@ class SkinConDataset():
         self.adj = None
         return self.adj
 
-    def split(self):
+    def split(self, **kwargs):
         """ 
         Split the dataset into training, validation and test sets 
         """
         self.data['train'] = _SkinConDataset(root = ROOT, 
                                             train = True, 
-                                            transform = self.transform,
+                                            transform = self.transform['train'],
                                             target_transform = self.target_transform,
                                             concept_names = self.c_info['names'])
         self.data['test'] = _SkinConDataset(root = ROOT, 
                                             train = False, 
-                                            transform = self.transform,
+                                            transform = self.transform['test'],
                                             target_transform = self.target_transform,
                                             concept_names = self.c_info['names'])
         self.data['train'], self.data['val'] = split_dataset(self.data['train'], self.val_size)
@@ -212,12 +236,13 @@ class _SkinConDataset(Dataset):
         self.transform = transform
         self.target_transform = target_transform
         self.concept_names = concept_names
+        self.graph = {}
 
         if csv_path is None:
             csv_path = os.path.join(root, "skincon_merged.csv")
         self.df = pd.read_csv(csv_path)
 
-        if train:
+        if self.split == 'train':
             train_images = pd.read_csv(os.path.join(ROOT, "skincon_train.csv"))["img_id"].tolist()
             self.df = self.df[self.df["img_id"].apply(lambda x: x in train_images)]
 
@@ -228,6 +253,7 @@ class _SkinConDataset(Dataset):
         self.df = self.df.reset_index(drop=True)
         # convert the "label" column to 0 for benign and 1 for malignant using CLASS_MAPPING
         self.df["label"] = self.df["label"].apply(lambda x: CLASS_MAPPING[x])
+
         # Attention: unbalanced dataset for the moment
         self.X = None
         self.c = None
@@ -244,8 +270,11 @@ class _SkinConDataset(Dataset):
             self.y.append(out['y'])
 
         # concatena in tensori
-        self.c = torch.cat([c.unsqueeze(0) for c in self.c], dim=0).type(torch.int)
-        self.y = torch.cat([y.unsqueeze(0) for y in self.y], dim=0).unsqueeze(-1).type(torch.int)
+        self.c = torch.cat([c.unsqueeze(0) for c in self.c], dim=0)
+        self.y = torch.tensor(self.df[TARGET_NAME].values, dtype=torch.float32).unsqueeze(1)
+
+    def register_graph(self, graph):
+        self.graph = graph
 
     def __len__(self):
         """
@@ -275,10 +304,9 @@ class _SkinConDataset(Dataset):
 
         # Get skin concepts
         concepts = torch.from_numpy(sample[self.concept_names].values.astype(np.float32))
-        concepts = concepts.type(torch.long)
 
         # Get the target label
-        label = torch.tensor(sample["label"], dtype=torch.long)
+        label = torch.tensor(sample[TARGET_NAME])
 
-        return {"x": image,  "c": concepts, "y": label}
+        return {"x": image,  "c": concepts, "y": label, "graph": self.graph}
 

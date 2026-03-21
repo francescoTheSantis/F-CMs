@@ -19,6 +19,26 @@ load_embeddings: true
 backbone: densenet121
 
 label_descriptions:
-  diagnosis::nevus: The lesion is a nevus, which is a common benign skin growth.
-  diagnosis::melanoma: The lesion is a melanoma, which is a type of skin cancer that can be aggressive and potentially life-threatening if not detected early.
-  
+  papule: "small, solid, raised skin lesion, typically less than 1 cm in diameter"
+  plaque: "broad, flat-topped, raised lesion larger than a papule"
+  pustule: "small skin lesion filled with pus"
+  bulla: "large fluid-filled blister"
+  patch: "flat area of skin with a change in color, without elevation"
+  nodule: "solid, palpable lesion that is larger and deeper than a papule"
+  ulcer: "open sore with loss of skin and underlying tissue"
+  crust: "dried residue of serum, blood, or pus on the skin surface"
+  erosion: "superficial loss of the epidermis without deeper tissue damage"
+  atrophy: "thinning or loss of skin tissue"
+  exudate: "fluid (such as serum, pus, or blood) that leaks from a lesion"
+  telangiectasia: "visible dilation of small superficial blood vessels"
+  scale: "flaking or shedding of the outer layer of the skin"
+  scar: "fibrous tissue replacing normal skin after injury"
+  friable: "tissue that is easily damaged or bleeds with minimal trauma"
+  dome-shaped: "lesion with a rounded, convex shape"
+  brown (hyperpigmentation): "area of skin with increased pigmentation appearing brown"
+  white (hypopigmentation): "area of skin with reduced pigmentation appearing lighter"
+  purple: "lesion with a purple coloration, often due to bleeding under the skin"
+  yellow: "lesion with yellow coloration, often associated with pus or lipid content"
+  black: "lesion with black pigmentation, possibly indicating necrosis or melanin"
+  erythema: "redness of the skin caused by increased blood flow"
+  label: "categorical label indicating the clinical outcome of the lesion, with possible values benign (non-cancerous growth), malignant (cancerous and potentially invasive), and non-neoplastic (not related to abnormal cell proliferation, e.g., inflammatory or reactive conditions)"

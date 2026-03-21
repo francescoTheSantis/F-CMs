@@ -223,7 +223,7 @@ def main(cfg: DictConfig) -> None:
     #graph, dataset = remove_problematic_edges(graph, dataset)
     y_index = graph.columns.get_loc(datasets[0].y_info['names'][0])
     maybe_plot_graph(graph, 'graph')
-    if cfg.dataset.name == "siim_pneumothorax" and cfg.learning.mode == "localized":
+    if cfg.dataset.name in ["siim_pneumothorax", "skincon", "cheXpert"] and cfg.learning.mode == "localized":
             true_graph = graph
 
       # it is ok also for multimodal because c_info and y_info contain all the variables of the datasets
@@ -323,7 +323,7 @@ def main(cfg: DictConfig) -> None:
         # eliminate task from the ordered columns
         #ordered_nodes = [node for node in ordered_nodes if node != datasets[0].y_info['names'][0]]
         # flatten get_intervention_policy output
-        if cfg.dataset.name == "siim_pneumothorax":
+        if cfg.dataset.name in ["siim_pneumothorax", "skincon", "cheXpert"]:
             # true_graph = graph
             if cfg.learning.mode != "localized":
                 true_graph = graph

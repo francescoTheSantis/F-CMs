@@ -3,6 +3,7 @@ from copy import deepcopy
 import os
 import json
 import torch
+import torch.nn as nn
 from torch.utils.data import DataLoader
 import torchvision.models as tv_models
 from torchvision.models.resnet import ResNet50_Weights, ResNet18_Weights
@@ -21,6 +22,18 @@ from src.data.labelfree_preprocessing import load_pretrained_clip_model, generat
 from src.completion.concepts_retrieval import concepts_generation, filtering_concepts_from_llm
 #from src.data.datasets.synthetic import get_synthetic_datasets, SyntheticDatasetContainer
 
+
+class Identity(nn.Module):
+	"""
+	Generates identity block as layer of a model
+	"""
+	def __init__(self):
+		super(Identity, self).__init__()
+
+	def forward(self, x):
+		return x
+
+
 def generate_img_embeddings(dataset: torch.utils.data.Dataset,
                            batch_size: int = 32,
                            device: str = 'cpu',
@@ -28,6 +41,16 @@ def generate_img_embeddings(dataset: torch.utils.data.Dataset,
     
     if backbone == 'resnet18':
         input_encoder = tv_models.resnet18(weights= ResNet18_Weights.DEFAULT)
+    elif backbone == 'resnet18_cxr':
+        model_directory = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'models')
+        input_encoder_res = tv_models.resnet18(weights=None)
+        input_encoder_res.load_state_dict(
+            torch.load(os.path.join(model_directory, 'resnet18-5c106cde.pth'), map_location='cpu', weights_only=True))
+        n_features = input_encoder_res.fc.in_features
+        projector = nn.Sequential(nn.Linear(n_features, n_features, bias=False), nn.ReLU(),
+                                        nn.Linear(n_features, 256, bias=False), )
+        input_encoder_res.fc = Identity()
+        input_encoder = nn.Sequential(input_encoder_res, projector)
     elif backbone == 'resnet50':
         input_encoder = tv_models.resnet50(weights=ResNet50_Weights.DEFAULT)
     elif backbone == 'res224-all':
@@ -72,11 +95,15 @@ def _generate_img_embeddings(dataset, model, batch_size, device) -> None:
             images = batch['x'].to(device)
             # TODO: check this handles colors correctly
             #check if the dataset root contains "NIH_chest"
+            #embeddings.append(emb)
             emb = model(images)
-            embeddings.append(emb)
+
+            embeddings.append(emb.cpu())
+            del images, emb
                 
     # Concatenate and save embeddings
-    embeddings = torch.cat(embeddings, dim=0).cpu()
+    #embeddings = torch.cat(embeddings, dim=0).cpu()
+    embeddings = torch.cat(embeddings, dim=0)
     dataset.X = embeddings
     return dataset
 
@@ -353,9 +380,9 @@ def preprocess_dataset(dataset_cfg, _dataset, device, backbone ='resnet18', seed
         #dataset = generate_img_embeddings(dataset, batch_size=cfg.dataset.get('batch_size'), device=device)
 
     #elif dataset_name == 'nih_chest_images' or dataset_name == 'nih_chest_tabular' or dataset_name == 'derm7pt':
-    elif dataset_name == 'derm7pt' or dataset_name == 'skincon':
+    elif dataset_name == 'derm7pt' or dataset_name == 'skincon' or dataset_name == 'cheXpert':
         
-        dataset.split()
+        dataset.split(seed=seed)
         dataset = maybe_reduce(dataset_cfg.get('reduce_fraction', None), dataset)
         # check modality
         #if dataset_name == 'nih_chest_images':

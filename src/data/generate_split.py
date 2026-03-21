@@ -621,7 +621,7 @@ def get_subgraphs(graph, y_index, min_number_subgraphs = 3, max_number_subgraphs
                 couples_covered = set()
                 subgraph_from_missing_root = None
                 retry_count = 0
-                hist_add_nodes_values = []
+                #hist_add_nodes_values = []
                 
                 if dict_subgraph_with_add_nodes:
                     n_subgraphs_add_nodes_generated = 0

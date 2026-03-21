@@ -22,10 +22,13 @@ from src.plots import maybe_plot_graph
 
 def process_data_for_causal_discovery(data, label_names, causal_discovery_library):
     if causal_discovery_library=="causallearn":
-        if not isinstance(data.c, torch.Tensor):
-            data.c = torch.tensor(data.c, dtype=torch.long)
-            data.y = torch.tensor(data.y, dtype=torch.long)
-        processed_data = torch.cat((data.c, data.y), dim=1)
+        #if not isinstance(data.c, torch.Tensor):
+        #    data.c = torch.tensor(data.c, dtype=torch.long)
+        #    data.y = torch.tensor(data.y, dtype=torch.long)
+        #processed_data = torch.cat((data.c, data.y), dim=1)
+        c = torch.as_tensor(data.c, dtype=torch.long)
+        y = torch.as_tensor(data.y, dtype=torch.long)
+        processed_data = torch.cat((c, y), dim=1)
 
     #elif model_name == "pc":
     #    data = torch.cat((data.c, data.y), dim=1).numpy()
