@@ -2538,6 +2538,21 @@ def compute_statistics(
     # compute confidence intervals
     task_stats['ci_task'] = 1.96 * task_stats['std_accuracy_task'] / np.sqrt(task_stats['total_occurrences']) # 1.96 *
 
+    # Compute mean and std for balanced task accuracy
+    if 'balanced_task_acc' in task_df.columns and task_df['balanced_task_acc'].notna().any():
+        bal_task_df = task_df.dropna(subset=['balanced_task_acc'])
+        balanced_task_stats = bal_task_df.groupby(['model', 'dataset', 'learning']).agg(
+            avg_balanced_task=('balanced_task_acc', 'mean'),
+            std_balanced_task=('balanced_task_acc', 'std'),
+            count_balanced_task=('balanced_task_acc', 'count'),
+        ).reset_index().fillna(0)
+        balanced_task_stats['ci_balanced_task'] = 1.96 * balanced_task_stats['std_balanced_task'] / np.sqrt(balanced_task_stats['count_balanced_task'])
+        task_stats = task_stats.merge(balanced_task_stats, on=['model', 'dataset', 'learning'], how='left')
+    else:
+        task_stats['avg_balanced_task'] = np.nan
+        task_stats['std_balanced_task'] = np.nan
+        task_stats['ci_balanced_task'] = np.nan
+
     # Compute mean and std for 'concept'
     concept_stats = concept_df.groupby(['model', 'dataset', 'learning']).agg(
         avg_accuracy_concept=('accuracy', 'mean'),
@@ -2568,7 +2583,10 @@ def produce_accuracy_tables(performance):
     # Apply the following averaging to shared/global methods (exclude per-client localized rows).
     # FedCBM/FCL are static global baselines and are reported alongside centralized/federated.
     performance_centr_fed = performance[
-        performance['learning'].isin(['centralized', 'local_federated', 'FedCBM', 'FCL'])
+        performance['learning'].str.startswith('centralized') |
+        performance['learning'].str.startswith('local_federated') |
+        performance['learning'].str.startswith('FedCBM') |
+        performance['learning'].str.startswith('FCL')
     ]
 
     # Centralized and federated only
@@ -2577,9 +2595,12 @@ def produce_accuracy_tables(performance):
     )
 
     # Localized only
-    performance_local = performance[performance['learning'].str.startswith('localized')]
-    # all localized are renamed to 'localized'
-    performance_local['learning'] = 'localized'
+    performance_local = performance[performance['learning'].str.startswith('localized')].copy()
+    # Strip client ID but keep _sf suffix: localized_3_sf0.3 -> localized_sf0.3
+    import re as _re
+    performance_local['learning'] = performance_local['learning'].apply(
+        lambda s: 'localized' + (_re.search(r'(_sf[\d.]+)', s).group(1) if _re.search(r'(_sf[\d.]+)', s) else '')
+    )
 
     # Centralized and federated only
     task_stats_local, concept_stats_local, label_stats_local = compute_statistics(
@@ -2731,6 +2752,41 @@ def tabular_task_and_concept_accuracy(
 
             # store the table in a csv file
             result_file = f'{visualization_folder}/{learning}/label_accuracy.csv'
+            if not os.path.exists(os.path.dirname(result_file)):
+                os.makedirs(os.path.dirname(result_file))
+            final_table.to_csv(result_file, index=True)
+
+        elif label == 'balanced_task':
+            ########## Balanced Task Accuracy Table ##########
+            if 'avg_balanced_task' not in task_stats.columns or task_stats['avg_balanced_task'].isna().all():
+                print('\n\nBalanced Task Accuracy Table: N/A (no balanced accuracy data)')
+                continue
+
+            bal_avg = task_stats[['model', 'dataset', 'avg_balanced_task']]
+            bal_std = task_stats[['model', 'dataset', 'ci_balanced_task']]
+
+            pivot_avg = bal_avg.pivot(index='model', columns='dataset', values=['avg_balanced_task'])
+            pivot_avg.columns = pivot_avg.columns.get_level_values(1)
+            pivot_std = bal_std.pivot(index='model', columns='dataset', values=['ci_balanced_task'])
+            pivot_std.columns = pivot_std.columns.get_level_values(1)
+
+            final_table = pd.DataFrame()
+            for i, row in pivot_avg.iterrows():
+                d = {}
+                for j in pivot_std.columns:
+                    acc = row[j] * 100
+                    std = pivot_std.loc[i, j] * 100
+                    d[j] = f"{acc:.2f} ± {std:.2f}"
+                final_table = pd.concat([final_table, pd.DataFrame(d, index=[row.name])], axis=0)
+
+            final_table = final_table.reindex(columns=custom_order)
+            final_table.index = final_table.index.map(lambda x: model_styles[x]['name'] if x in model_styles else x)
+
+            print('\n\nBalanced Task Accuracy Table:')
+            print('-------------------')
+            print(final_table)
+
+            result_file = f'{visualization_folder}/{learning}/balanced_task_accuracy.csv'
             if not os.path.exists(os.path.dirname(result_file)):
                 os.makedirs(os.path.dirname(result_file))
             final_table.to_csv(result_file, index=True)
@@ -3221,6 +3277,11 @@ def load_exps(exps_path, n_clients=5, args=None):
                 else:
                     d['learning'] = conf['learning']['mode']
 
+                # Append swapping_factor to learning label when present
+                swapping_factor = conf['learning'].get('swapping_factor', None)
+                if swapping_factor is not None:
+                    d['learning'] = d['learning'] + f'_sf{swapping_factor}'
+
                 # Extract rnd_drift information
                 try:
                     if 'subgraphs' in conf['learning'] and 'rnd_drift' in conf['learning']['subgraphs']:
@@ -3278,6 +3339,15 @@ def load_exps(exps_path, n_clients=5, args=None):
                     task_results = pickle.load(file)
 
                 d['task_acc'] = task_results['_baseline']
+
+                # Balanced task accuracy (optional, backward-compatible)
+                balanced_task_file = os.path.join(result_file, 'y_balanced_accuracy.pkl')
+                if os.path.exists(balanced_task_file):
+                    with open(balanced_task_file, 'rb') as file:
+                        balanced_task_results = pickle.load(file)
+                    d['balanced_task_acc'] = balanced_task_results['_baseline']
+                else:
+                    d['balanced_task_acc'] = np.nan
 
                 # Additional drift metrics (optional)
                 d['concept_coverage'] = np.nan
@@ -4027,3 +4097,188 @@ def plot_training_metrics_across_seeds(
         plt.close("all")
         plt.rcParams.update(rc_backup)
         print(f"Training plots saved to {save_dir}/")
+
+
+def plot_label_accuracy_vs_sampling_fraction(
+    base_folder,
+    csv_name='label_accuracy.csv',
+    sf_values=None,
+    figsize_per_subplot=(3.5, 2.8),
+    title_size=11,
+    label_size=9,
+    tick_size=8,
+    legend_size=8,
+):
+    """
+    Read accuracy CSVs from local_federated_sf{X} folders and produce
+    bar plots with one column per dataset, row 1 = CEM, row 2 = C2BM.
+    X-axis = sampling fractions, Y-axis = accuracy, with error bars.
+    """
+    import shutil
+
+    # derive y-label and output name from csv_name
+    base_name = csv_name.replace('.csv', '')
+    y_label = base_name.replace('_', ' ').title()
+    out_name = f'{base_name}_vs_sf.png'
+
+    if sf_values is None:
+        sf_values = [0.3, 0.6, 0.9, 1.0]
+
+    # ---- read data --------------------------------------------------------
+    frames = {}
+    for sf in sf_values:
+        csv_path = os.path.join(base_folder, f'local_federated_sf{sf}', csv_name)
+        if not os.path.exists(csv_path):
+            print(f"[plot_sf] Missing {csv_path}, skipping sf={sf}")
+            continue
+        df = pd.read_csv(csv_path, index_col=0)
+        frames[sf] = df
+
+    if not frames:
+        print("[plot_sf] No data loaded, aborting.")
+        return
+
+    # discover datasets with at least one non-empty value
+    all_datasets = []
+    for df in frames.values():
+        for col in df.columns:
+            if col not in all_datasets:
+                # check any non-NaN string value
+                if df[col].dropna().astype(str).str.strip().ne('').any():
+                    all_datasets.append(col)
+
+    model_rows = ['CEM', 'C2BM']
+
+    # filter datasets that actually have data for both models
+    datasets = []
+    for ds in all_datasets:
+        has_data = False
+        for sf, df in frames.items():
+            if ds in df.columns:
+                for model in model_rows:
+                    if model in df.index:
+                        val = str(df.loc[model, ds]).strip()
+                        if val and val != 'nan':
+                            has_data = True
+                            break
+            if has_data:
+                break
+        if has_data:
+            datasets.append(ds)
+
+    if not datasets:
+        print("[plot_sf] No datasets with data found.")
+        return
+
+    # ---- parse mean/std ---------------------------------------------------
+    def parse_val(s):
+        s = str(s).strip()
+        if not s or s == 'nan':
+            return np.nan, np.nan
+        parts = s.split('±')
+        return float(parts[0].strip()), float(parts[1].strip()) if len(parts) > 1 else 0.0
+
+    # ---- style setup ------------------------------------------------------
+    AXIS_COLOR = "black"
+    use_tex = shutil.which("latex") is not None
+    rc = {
+        "text.usetex": use_tex,
+        "font.family": "serif",
+        "axes.labelsize": label_size,
+        "axes.titlesize": title_size,
+        "legend.fontsize": legend_size,
+        "xtick.labelsize": tick_size,
+        "ytick.labelsize": tick_size,
+        "figure.dpi": 300,
+        "axes.grid": True,
+        "grid.alpha": 0.3,
+        "grid.linestyle": "--",
+        "legend.frameon": False,
+        "pdf.fonttype": 42,
+        "ps.fonttype": 42,
+        "axes.edgecolor": AXIS_COLOR,
+        "axes.labelcolor": AXIS_COLOR,
+        "xtick.color": AXIS_COLOR,
+        "ytick.color": AXIS_COLOR,
+        "text.color": AXIS_COLOR,
+    }
+    if use_tex:
+        rc["text.latex.preamble"] = r"\usepackage{mathptmx}"
+    else:
+        rc["font.serif"] = ["Times New Roman", "Times", "DejaVu Serif"]
+    sns.set_theme(context="paper", style="whitegrid", palette="deep", rc=rc)
+
+    # ---- build a long-form DataFrame for seaborn ----------------------------
+    records = []
+    for model_name in model_rows:
+        for ds in datasets:
+            for sf in sf_values:
+                if sf in frames and ds in frames[sf].columns and model_name in frames[sf].index:
+                    m, s = parse_val(frames[sf].loc[model_name, ds])
+                else:
+                    m, s = np.nan, np.nan
+                records.append({
+                    'Model': model_name,
+                    'Dataset': ds,
+                    'SF': str(sf),
+                    'mean': m,
+                    'std': s,
+                })
+    plot_df = pd.DataFrame(records)
+
+    palette = dict(zip([str(sf) for sf in sf_values],
+                       sns.color_palette("deep", n_colors=len(sf_values))))
+
+    n_cols = len(datasets)
+    n_rows = len(model_rows)
+    fig_w = figsize_per_subplot[0] * n_cols
+    fig_h = figsize_per_subplot[1] * n_rows
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(fig_w, fig_h), squeeze=False)
+
+    for row_idx, model_name in enumerate(model_rows):
+        for col_idx, ds in enumerate(datasets):
+            ax = axes[row_idx, col_idx]
+            sub = plot_df[(plot_df['Model'] == model_name) & (plot_df['Dataset'] == ds)]
+
+            sns.barplot(
+                data=sub, x='SF', y='mean', hue='SF',
+                palette=palette, dodge=False, ax=ax,
+                edgecolor='black', linewidth=0.5,
+                legend=False,
+                err_kws={'linewidth': 0.8},
+                capsize=0.15,
+            )
+            # add error bars manually (seaborn ci won't use our pre-computed std)
+            for i, (_, row) in enumerate(sub.iterrows()):
+                if not np.isnan(row['std']):
+                    ax.errorbar(i, row['mean'], yerr=row['std'],
+                                fmt='none', color='black',
+                                capsize=3, capthick=0.8, linewidth=0.8)
+
+            if row_idx == 0:
+                ax.set_title(ds)
+            if col_idx == 0:
+                ax.set_ylabel(y_label)
+            else:
+                ax.set_ylabel('')
+            ax.set_xlabel('')
+
+            # model name as row label on the right
+            if col_idx == n_cols - 1:
+                ax.annotate(
+                    model_name, xy=(1.05, 0.5), xycoords='axes fraction',
+                    fontsize=title_size, ha='left', va='center', rotation=270,
+                )
+
+    # shared legend at top
+    handles = [plt.Rectangle((0, 0), 1, 1, facecolor=palette[str(sf)], edgecolor='black', linewidth=0.5)
+               for sf in sf_values]
+    labels = [f'SF={sf}' for sf in sf_values]
+    fig.legend(handles, labels, loc='upper center', ncol=len(sf_values),
+               bbox_to_anchor=(0.5, 1.05), frameon=False, fontsize=legend_size)
+
+    fig.tight_layout(rect=[0, 0, 0.95, 1.0])
+    out_path = os.path.join(base_folder, out_name)
+    fig.savefig(out_path, dpi=300, bbox_inches='tight')
+    plt.close(fig)
+    print(f"[plot_sf] Saved {out_path}")

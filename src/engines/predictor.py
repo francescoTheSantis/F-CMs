@@ -114,6 +114,16 @@ class Predictor(pl.LightningModule):
         # we want to compute the accuracy on both ID and OOD concepts (if any)
         c_acc_metrics = {k: metrics.get('classification_acc') for k in self.c_names_all}
 
+        # --- balanced accuracy metrics (task only) ---
+        bal_acc_metric = metrics.get('balanced_classification_acc')
+        if bal_acc_metric is not None:
+            y_bal_metrics = {'y_balanced_accuracy': bal_acc_metric}
+            self.test_y_bal_metrics = MetricCollection(
+                metrics={k: self._check_metric(m) for k, m in y_bal_metrics.items()},
+                prefix="test/y_bal/")
+        else:
+            self.test_y_bal_metrics = None
+
         # task accuracy metrics
         self.train_y_metrics = MetricCollection(
             metrics={k: self._check_metric(m) for k, m in y_acc_metrics.items()},
@@ -534,6 +544,10 @@ class Predictor(pl.LightningModule):
             y_collection = getattr(self, f"{step}_y_metrics")
             y_collection.update(y_hat, y)
             self.log_metrics(y_collection, batch_size=batch['batch_size'])
+            # update balanced accuracy (test only)
+            if step == "test" and self.test_y_bal_metrics is not None:
+                self.test_y_bal_metrics.update(y_hat, y)
+                self.log_metrics(self.test_y_bal_metrics, batch_size=batch['batch_size'])
         if calculate_c_metrics and self.model.has_concepts:
             # update and log concept metrics
             c_collection = getattr(self, f"{step}_c_metrics")
@@ -616,6 +630,14 @@ class Predictor(pl.LightningModule):
         y_baseline = self.test_y_metrics['y_accuracy'].compute().item()
         print(f"Baseline task accuracy: {y_baseline}")
         pickle.dump({'_baseline':y_baseline}, open(f'results/y_accuracy.pkl', 'wb'))
+
+        # balanced task accuracy
+        if self.test_y_bal_metrics is not None:
+            y_balanced = self.test_y_bal_metrics['y_balanced_accuracy'].compute().item()
+            print(f"Balanced task accuracy: {y_balanced}")
+            pickle.dump({'_baseline': y_balanced}, open(f'results/y_balanced_accuracy.pkl', 'wb'))
+        else:
+            y_balanced = None
 
         # baseline concept accuracy
         c_baseline = {}

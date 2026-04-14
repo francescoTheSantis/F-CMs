@@ -9,6 +9,8 @@ from tqdm import tqdm
 import requests
 from typing import Union
 from torch_geometric.utils import to_dense_adj
+from imblearn.under_sampling import RandomUnderSampler
+from imblearn.over_sampling import SMOTE
 
 from src.data.utils import split_dataset
 from sklearn.model_selection import train_test_split
@@ -82,7 +84,7 @@ def clean_and_split_data(data_path, seed=42):
     full_df = full_df.reset_index(drop=True)
 
     # Filter frontal and AP/PA images
-    #full_df = full_df[(full_df["Frontal/Lateral"] == "Frontal") & (full_df["AP/PA"].isin(["AP", "PA"]))]
+    full_df = full_df[full_df["Frontal/Lateral"] == "Frontal"]
     full_df = full_df.drop(columns=["Frontal/Lateral", "AP/PA"])
 
     # Discretize Age
@@ -103,9 +105,9 @@ def clean_and_split_data(data_path, seed=42):
     full_df = full_df.drop_duplicates(subset=['subject_id'], keep='last')
     full_df = full_df.sort_values(by=['subject_id']).reset_index(drop=True)
     
-    # Fill NaNs and -1
+    # Fill NaNs as absent, uncertain (-1) as present (U-Ones strategy from CheXpert paper)
     full_df[CONCEPT_NAMES] = full_df[CONCEPT_NAMES].fillna(0)
-    full_df[CONCEPT_NAMES] = full_df[CONCEPT_NAMES].replace(-1, 0)
+    full_df[CONCEPT_NAMES] = full_df[CONCEPT_NAMES].replace(-1, 1)
     # if full_df[TERGET_NAME] is 0 replace it with 1, otherwise put 0
     full_df[TARGET_NAME] = np.where(full_df[TARGET_NAME] == 1, 0, 1)
 
@@ -113,16 +115,71 @@ def clean_and_split_data(data_path, seed=42):
     full_df["img_id"] = full_df["Path"].apply(lambda x: x.split("/", 1)[1] if "/" in x else x) # correct in this way it just keep the name without /train
     full_df = full_df.drop(columns=["Path"])  
 
+    # # Balance: reduce minority to 1/3, then undersample majority to 1.5x minority
+    majority = full_df[full_df[TARGET_NAME] == 1]
+    minority = full_df[full_df[TARGET_NAME] == 0]
+
+    # # Reduce minority class to 1/3
+    # target_minority_size = int(len(minority) / 3)
+    # minority = minority.sample(n=target_minority_size, random_state=42)
+    # print(f"[CheXpert] Minority reduced: {len(full_df[full_df[TARGET_NAME] == 0])}->{len(minority)}")
+
+    # # Reduce majority class to 1.5x minority, with stratified sampling
+    target_majority_size = min(len(majority), int(len(minority)))
+
+    if target_majority_size < len(majority):
+         majority_sampled = majority.sample(n=target_majority_size, random_state=42)
+         print(f"[CheXpert] Majority reduced: {len(majority)}->{len(majority_sampled)}")
+    else:
+         majority_sampled = majority
+
+    full_df_balanced = pd.concat([minority, majority_sampled], ignore_index=True)
+    print(f"[CheXpert] Total balanced: {len(full_df_balanced)}")
+
+    # No balancing — use all data, handle imbalance via class weights in loss
+    #full_df_all = full_df.copy()
+    #n_pos_task = (full_df_all[TARGET_NAME] == 1).sum()
+    #n_neg_task = (full_df_all[TARGET_NAME] == 0).sum()
+    #n_total_task = n_pos_task + n_neg_task
+    #print(f"[CheXpert] Using full dataset: {n_total_task} samples (target=1: {n_pos_task}, target=0: {n_neg_task})")
+
+    full_df_all = full_df_balanced.copy()
     # Shuffle and split into train, val and test
-    full_df = full_df.sample(frac=1, random_state=seed).reset_index(drop=True)  # Shuffle the dataset
-    split_idx = int(len(full_df) * (0.7))  # 20% test size, 10% val size
-    val_idx = int(len(full_df) * (0.8))  # 10% val size
-    full_df.iloc[:split_idx][["img_id"]].to_csv(os.path.join(data_path, "custom_train.csv"), index=False)
-    full_df.iloc[split_idx:val_idx][["img_id"]].to_csv(os.path.join(data_path, "custom_val.csv"), index=False)
-    full_df.iloc[val_idx:][["img_id"]].to_csv(os.path.join(data_path, "custom_test.csv"), index=False)
+    full_df_all = full_df_all.sample(frac=1, random_state=seed).reset_index(drop=True)
+    split_idx = int(len(full_df_all) * (0.7))  # 70% train
+    val_idx = int(len(full_df_all) * (0.8))     # 10% val, 20% test
+    full_df_all.iloc[:split_idx][["img_id"]].to_csv(os.path.join(data_path, "custom_train.csv"), index=False)
+    full_df_all.iloc[split_idx:val_idx][["img_id"]].to_csv(os.path.join(data_path, "custom_val.csv"), index=False)
+    full_df_all.iloc[val_idx:][["img_id"]].to_csv(os.path.join(data_path, "custom_test.csv"), index=False)
     
-    # Shuffle and split
-    full_df.to_csv(os.path.join(data_path, "cheXpert_merged.csv"), index=False)
+    full_df_all.to_csv(os.path.join(data_path, "cheXpert_merged.csv"), index=False)
+
+    # Compute task class weights (balanced: n_samples / (2 * n_class_samples))
+    #import torch
+    #train_df = full_df_all.iloc[:split_idx]
+    #n_pos_train = (train_df[TARGET_NAME] == 1).sum()
+    #n_neg_train = (train_df[TARGET_NAME] == 0).sum()
+    #n_total_train = n_pos_train + n_neg_train
+    #w_neg = n_total_train / (2.0 * n_neg_train)
+    #w_pos = n_total_train / (2.0 * n_pos_train)
+    #class_weights = torch.tensor([w_neg, w_pos], dtype=torch.float32)
+    #print(f"[CheXpert] Task weights: neg={w_neg:.2f} ({n_neg_train}), pos={w_pos:.2f} ({n_pos_train})")
+
+    # Compute per-concept class weights
+    #concept_class_weights = {}
+    #for c_name in CONCEPT_NAMES:
+    #    vals = train_df[c_name].values
+    #    n_pos = (vals == 1).sum()
+    #    n_neg = (vals == 0).sum()
+    #    n_total = n_pos + n_neg
+    #    if n_pos > 0 and n_neg > 0:
+    #        c_w_neg = n_total / (2.0 * n_neg)
+    #        c_w_pos = n_total / (2.0 * n_pos)
+    #        concept_class_weights[c_name] = torch.tensor([c_w_neg, c_w_pos], dtype=torch.float32)
+    #        print(f"[CheXpert] Concept weight {c_name}: neg={c_w_neg:.2f}, pos={c_w_pos:.2f} (pos_rate={n_pos/n_total*100:.1f}%)")
+    class_weights = None
+    concept_class_weights = None
+    return class_weights, concept_class_weights
 
 class CheXpert():
     """
@@ -152,9 +209,11 @@ class CheXpert():
         self.ftune_size = ftune_size
         self.val_size = val_size
         self.ftune_val_size = ftune_val_size
+        self.class_weights = None
+        self.concept_class_weights = {}
 
         self.c_info = {'names': CONCEPT_NAMES, 
-        'cardinality': [2, 3] + [2] * (len(CONCEPT_NAMES) - 2)}
+        'cardinality':  [2] * len(CONCEPT_NAMES)}
 
         self.y_info = {'names': [TARGET_NAME],
                        'cardinality': [2]}
@@ -175,7 +234,7 @@ class CheXpert():
         """ 
         Split the dataset into training, validation and test sets 
         """
-        clean_and_split_data(CHEXPERT_DIR, seed=seed)
+        self.class_weights, self.concept_class_weights = clean_and_split_data(CHEXPERT_DIR, seed=seed)
         self.data['train'] = _CheXpert(root = CHEXPERT_DIR, 
                                         split = 'train', 
                                         transform = self.transform['train'],
