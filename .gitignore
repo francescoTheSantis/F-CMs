@@ -23,3 +23,14 @@ batches*
 # ignore all the folders that start with outputs
 outputs*
 */show_results_my.py
+
+# images
+*.jpg
+*.jpeg
+*.bmp
+*.gif
+*.svg
+*.tiff
+*.ico
+
+data/multi-chexpert/
