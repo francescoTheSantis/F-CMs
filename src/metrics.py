@@ -2,6 +2,46 @@ import torch
 from torchmetrics import Metric
 from torchmetrics.utilities.checks import _check_same_shape
 import numpy as np
+
+
+class BalancedClassificationAccuracy(Metric):
+    """
+    Balanced Classification Accuracy: mean of per-class recall.
+    A trivial majority-class predictor scores 50% (for binary) instead of the
+    majority fraction, making it much more informative on imbalanced datasets.
+    """
+    def __init__(self, num_classes: int = 2):
+        super().__init__()
+        self.num_classes = num_classes
+        self.add_state("correct_per_class",
+                       default=torch.zeros(num_classes), dist_reduce_fx="sum")
+        self.add_state("total_per_class",
+                       default=torch.zeros(num_classes), dist_reduce_fx="sum")
+
+    def update(self, preds: torch.Tensor, target: torch.Tensor):
+        if torch.isnan(preds).any() or torch.isnan(target).any():
+            return
+        if len(preds.shape) > 2:
+            preds = preds.mean(dim=-1)
+        preds = preds.argmax(dim=-1)
+        target = target.flatten().long()
+        _check_same_shape(preds, target)
+        for cls in range(self.num_classes):
+            mask = target == cls
+            self.correct_per_class[cls] += preds[mask].eq(cls).sum()
+            self.total_per_class[cls] += mask.sum()
+
+    def compute(self):
+        recalls = []
+        for cls in range(self.num_classes):
+            if self.total_per_class[cls] > 0:
+                recalls.append(self.correct_per_class[cls].float()
+                               / self.total_per_class[cls])
+        if len(recalls) == 0:
+            return torch.tensor(0.0)
+        return torch.stack(recalls).mean()
+
+
 class ClassificationAccuracy(Metric):
     """
     Classification Accuracy is a standard metric that measures the proportion of correct predictions

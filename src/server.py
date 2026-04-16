@@ -257,7 +257,7 @@ def main(cfg: DictConfig) -> None:
 
     # Plots and Evaluation the model on the client datasets, (averaged)
     best_loss_round, best_acc_round = plot_loss_and_accuracy(loss, accuracy, show=False)
-    model.load_state_dict(torch.load(f"checkpoints/model_round_{best_loss_round}.pth", weights_only=False))
+    model.load_state_dict(torch.load(f"checkpoints/model_round_{best_loss_round}.pth", weights_only=False, map_location="cpu"))
     engine.model = model # probably unnecessary
 
     # Evaluate the model on the client datasets    

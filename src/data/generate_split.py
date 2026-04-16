@@ -1131,6 +1131,39 @@ def split_and_save(cfg, datasets, graph, set, n, subgraphs = None, subgraphs_tas
         if subgraphs is None:
             raise ValueError("`subgraphs` cannot be None.")
 
+        # Swap concept values for a fraction of clients: invert class labels within selected concepts
+        swapping_clients = cfg.learning.get('swapping_clients', 0.0)
+        swapping_concepts = cfg.learning.get('swapping_concepts', 0.0)
+        swapping_factor = cfg.learning.get('swapping_factor', 0.0)
+        # Per-concept mapping: concept_idx -> set of client indices that will swap it
+        swap_concept_clients = {}
+
+        if swapping_clients > 0 and swapping_concepts > 0 and set == 'train':
+            # 1) Collect all available (non-masked) concept indices across all subgraphs
+            all_available_concepts = list(range(len(dataset.c_info['names']))) if len(datasets) == 1 else []
+
+            # 2) Choose which concepts to swap
+            n_swap = max(1, round(len(all_available_concepts) * swapping_concepts))
+            swap_concept_indices = random.sample(all_available_concepts, n_swap)
+
+            # 3) For each concept, find eligible clients (those who have it in their subgraph)
+            #    and select swapping_clients fraction of them
+            for col in swap_concept_indices:
+                eligible = []
+                for i in range(n):
+                    j = i % len(subgraphs) if client_subgraph_ids is None else client_subgraph_ids[i]
+                    client_concepts = subgraphs[f'subgraph_{j+1}']
+                    if col in client_concepts:
+                        eligible.append(i)
+                if eligible:
+                    n_sel = max(1, round(len(eligible) * swapping_clients))
+                    n_sel = min(n_sel, len(eligible)-1) # Ensure at least one client remains unchanged
+                    selected = random.sample(eligible, n_sel)
+                    swap_concept_clients[col] = {s for s in selected}
+                    print(f"[Swap] Concept {col}: eligible {len(eligible)}, selected clients {sorted(selected)}")
+
+            print(f"[Swap] Concepts to swap: {swap_concept_indices}, factor: {swapping_factor}")
+
         # For each split, create a dataloader containing x, c, y 
         for i in range(n):
             if client_subgraph_ids is None:
@@ -1164,6 +1197,32 @@ def split_and_save(cfg, datasets, graph, set, n, subgraphs = None, subgraphs_tas
                     masked_y_splits = datasets[j].data[set].y
                 client_modality = client_modalities[i] if client_modalities is not None else None
                 
+            if swap_concept_clients:
+                # Determine which concepts this client should swap
+                concepts_to_swap_here = [col for col, clients in swap_concept_clients.items() if i in clients]
+                if concepts_to_swap_here:
+                    rng = torch.Generator()
+                    rng.manual_seed(42 + i)
+                    for col in concepts_to_swap_here:
+                        valid = masked_c_splits[:, col] != -1
+                        if valid.any():
+                            vals = masked_c_splits[valid, col]
+                            unique_vals = vals.unique().sort()[0]
+                            if len(unique_vals) >= 2:
+                                v0, v1 = unique_vals[0], unique_vals[1]
+                                new_vals = vals.clone()
+                                # Only swap a fraction of the valid values
+                                n_valid = valid.sum().item()
+                                n_to_swap = max(1, round(n_valid * swapping_factor))
+                                swap_row_indices = torch.randperm(n_valid, generator=rng)[:n_to_swap]
+                                swap_mask = torch.zeros(n_valid, dtype=torch.bool)
+                                swap_mask[swap_row_indices] = True
+                                new_vals[swap_mask & (vals == v0)] = v1
+                                new_vals[swap_mask & (vals == v1)] = v0
+                                new_vals[~swap_mask] = vals[~swap_mask]
+                                masked_c_splits[valid, col] = new_vals
+                    print(f"[Swap] Client {i+1}: swapped concepts {concepts_to_swap_here}, factor {swapping_factor}")
+
             dataloader = DataLoader(
                 CustomDataset(x_i, masked_c_splits, masked_y_splits, graph, modality=client_modality),
                 batch_size=cfg.dataset.batch_size,
@@ -1266,6 +1325,7 @@ def generate_split_with_fallback(
 
             except Exception as e:
                 last_err = e
+                print(e)
 
         raise RuntimeError(
             f"generate_split failed after {max_tries} attempts "

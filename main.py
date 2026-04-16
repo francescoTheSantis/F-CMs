@@ -461,7 +461,8 @@ def main(cfg: DictConfig) -> None:
     # e.g., set input and output size of the model
     cfg = update_config_from_data(cfg, datasets, subgraphs_concept_names)
     if cfg.learning.mode == 'localized':
-        interv_policy, graph = update_intervention_policy_and_graph(cfg, interv_policy, graph, datasets)  
+        interv_policy, graph = update_intervention_policy_and_graph(cfg, interv_policy, graph, datasets)
+        maybe_plot_graph(graph, 'graph_localized')
 
     cfg = maybe_update_config_with_graph(cfg, graph, interv_policy)
     # check consistency
@@ -539,6 +540,10 @@ def main(cfg: DictConfig) -> None:
             test_dataloader = DataLoader(datasets[0].data['test'], batch_size=cfg.dataset.batch_size, collate_fn=static_graph_collate)
 
         engine = instantiate(cfg.engine)
+        if hasattr(datasets[0], 'class_weights') and datasets[0].class_weights is not None:
+            engine.model.class_weights = datasets[0].class_weights
+        if hasattr(datasets[0], 'concept_class_weights') and datasets[0].concept_class_weights:
+            engine.model.concept_class_weights = datasets[0].concept_class_weights
         train_dataloader, privacy_engine = maybe_make_private(
             engine, train_dataloader, cfg, epochs=cfg.trainer.max_epochs
         )
@@ -559,6 +564,45 @@ def main(cfg: DictConfig) -> None:
         finally:
             if isinstance(trainer.logger, WandbLogger):
                 trainer.logger.experiment.finish()
+
+        try:
+
+            try:
+                essential_concepts = ordered_nodes
+            except NameError:
+                essential_concepts = None
+            if not essential_concepts:
+                essential_concepts = OmegaConf.select(cfg, "engine.centralized_topological_order", default=[]) or []
+            essential_set = set(essential_concepts)
+
+            model_concepts = set()
+            predicted_concepts = getattr(engine.model, "predicted_concepts", None)
+            if predicted_concepts:
+                model_concepts.update(predicted_concepts)
+            if not model_concepts:
+                cfg_for_coverage = cfg
+                engine_c_names = getattr(engine, "c_names_id", None)
+                if engine_c_names is None:
+                    engine_c_names = OmegaConf.select(cfg_for_coverage, "engine.c_names_id", default=None)
+                if engine_c_names is None:
+                    engine_c_names = OmegaConf.select(cfg, "engine.c_names_id", default=None)
+                if engine_c_names:
+                    engine_c_names = list(engine_c_names.values())[0]
+                    model_concepts.update(engine_c_names)
+
+            covered_concepts = model_concepts & essential_set
+            concept_coverage = float(len(covered_concepts) / len(essential_set)) if len(essential_set) > 0 else float('nan')
+
+
+            additional_metrics = {
+                "concept_coverage": concept_coverage
+            }
+            os.makedirs("results", exist_ok=True)
+            with open("results/additional_metrics.json", "w") as fp:
+                json.dump(additional_metrics, fp, indent=2)
+
+        except Exception as e:
+            print(f"\033[91m[WARN] Failed to save additional metrics: {e}\033[0m")
                 
                 
     elif cfg.learning.mode == 'local_federated':
@@ -648,6 +692,9 @@ def main(cfg: DictConfig) -> None:
         cfg_postdrift = cfg
 
 
+        # timing metrics (saved for c2bm and cem)
+        timing_metrics: Dict[str, float] = {}
+
         # determine whether to use graph aggregation, see if there is the dictionary "aggregate_graph" with local_graphs not none
         use_graph_agg = False
         graph_eval_metrics: Dict[str, Dict[str, float]] = {}
@@ -673,6 +720,7 @@ def main(cfg: DictConfig) -> None:
 
             # aggregate graphs for pre-drift and post-drift clients
             # predrift
+            t_agg_predrift = time.time()
             graph_predrift, _ = aggregate_graph_proposals(
                 client_selection = predrift_clients,
                 local_graphs=local_graphs,
@@ -680,6 +728,9 @@ def main(cfg: DictConfig) -> None:
                 config_input=cfg_predrift,
                 task_node=datasets[0].y_info["names"][0]
             )
+            t_agg_predrift = time.time() - t_agg_predrift
+            print(f"\033[94m[Timing] aggregate_graph_proposals (predrift): {t_agg_predrift:.3f}s\033[0m")
+            timing_metrics["aggregate_graph_predrift"] = t_agg_predrift
 
             maybe_plot_graph(graph_predrift, 'graph_predrift')
             eval_res = _evaluate_graph_against_truth(
@@ -690,6 +741,7 @@ def main(cfg: DictConfig) -> None:
                 graph_eval_metrics[k] = metrics
 
             # postdrift
+            t_agg_postdrift = time.time()
             graph_postdrift, _ = aggregate_graph_proposals(
                 client_selection = postdrift_clients,
                 local_graphs=local_graphs,
@@ -697,6 +749,10 @@ def main(cfg: DictConfig) -> None:
                 config_input=cfg_postdrift,
                 task_node=datasets[0].y_info["names"][0]
             )
+            t_agg_postdrift = time.time() - t_agg_postdrift
+            print(f"\033[94m[Timing] aggregate_graph_proposals (postdrift): {t_agg_postdrift:.3f}s\033[0m")
+            if cfg.learning.subgraphs.rnd_drift <= n_rounds:
+                timing_metrics["aggregate_graph_postdrift"] = t_agg_postdrift
 
             maybe_plot_graph(graph_postdrift, 'graph_postdrift')
             eval_res = _evaluate_graph_against_truth(
@@ -766,7 +822,11 @@ def main(cfg: DictConfig) -> None:
 
         # start federated learning rounds
         init_cfg = cfg_predrift if cfg_predrift is not None else cfg_postdrift
+        t_predrift_init = time.time()
         init_engine = instantiate(init_cfg.engine)
+        t_predrift_init = time.time() - t_predrift_init
+        print(f"\033[94m[Timing] Predrift model instantiation: {t_predrift_init:.3f}s\033[0m")
+        timing_metrics["predrift_model_instantiation"] = t_predrift_init
         param_count_predrift = sum(p.numel() for p in init_engine.model.parameters())
         try:
             param_count_postdrift = sum(p.numel() for p in instantiate(cfg.engine).model.parameters())
@@ -775,6 +835,7 @@ def main(cfg: DictConfig) -> None:
         global_params = get_parameters(init_engine)
         global_param_keys = list(init_engine.model.state_dict().keys())
         drift_debug_printed = False
+        t_start_training = time.time()
         for rnd in range(1, n_rounds + 1):
             print(f"\033[92m\n--> ROUND {rnd}/{n_rounds}\033[0m")
             client_params: List[Tuple[List[torch.Tensor], int]] = []
@@ -805,8 +866,18 @@ def main(cfg: DictConfig) -> None:
                 else:
                     start_n_client = 0
                 cfg_round = cfg_postdrift
+            if rnd == cfg.learning.subgraphs.rnd_drift:
+                t_init_model = time.time()
             engine = instantiate(cfg_round.engine)
+            if hasattr(datasets[0], 'class_weights') and datasets[0].class_weights is not None:
+                engine.model.class_weights = datasets[0].class_weights
+            if hasattr(datasets[0], 'concept_class_weights') and datasets[0].concept_class_weights:
+                engine.model.concept_class_weights = datasets[0].concept_class_weights
             engine.model.to(cfg.device)
+            if rnd == cfg.learning.subgraphs.rnd_drift:
+                t_init_model = time.time() - t_init_model
+                print(f"\033[94m[Timing] Postdrift model instantiation: {t_init_model:.3f}s\033[0m")
+                timing_metrics["postdrift_model_instantiation"] = t_init_model
 
             # if (rnd >= cfg.learning.subgraphs.rnd_drift) and True:
             if  cfg.learning.subgraphs.rnd_drift >=1:
@@ -825,15 +896,24 @@ def main(cfg: DictConfig) -> None:
                 # clone global params → local model
                 update_config_from_client(cfg_round, datasets, cid)
                 local_engine = instantiate(cfg_round.engine)
+                if hasattr(datasets[0], 'class_weights') and datasets[0].class_weights is not None:
+                    local_engine.model.class_weights = datasets[0].class_weights
+                if hasattr(datasets[0], 'concept_class_weights') and datasets[0].concept_class_weights:
+                    local_engine.model.concept_class_weights = datasets[0].concept_class_weights
                 # first training
                 if rnd == cfg.learning.subgraphs.rnd_drift:
                     # load new architecture and update only those parameters that were present before
+                    t_set_params = time.time()
                     set_old_parameters(
                         local_engine,
                         global_params,
                         global_param_keys,
                         verbose=(cid == start_n_client),
                     )
+                    t_set_params = time.time() - t_set_params
+                    if cid == start_n_client:
+                        print(f"\033[94m[Timing] Postdrift set_old_parameters (client {cid}): {t_set_params:.3f}s\033[0m")
+                        timing_metrics["postdrift_set_old_parameters"] = t_set_params
                 else:
                     set_parameters(local_engine, global_params)
                     
@@ -1100,7 +1180,7 @@ def main(cfg: DictConfig) -> None:
         print(f"\033[92mBest round: {best_round} with loss {history['loss_val_avg'][ind_min_loss]:.4f}\033[0m")
         cfg_eval = cfg_predrift if best_round < cfg.learning.subgraphs.rnd_drift else cfg
         local_engine = instantiate(cfg_eval.engine)
-        local_engine.model.load_state_dict(torch.load(f"checkpoints/model_round_{best_round}.pth", weights_only=False))
+        local_engine.model.load_state_dict(torch.load(f"checkpoints/model_round_{best_round}.pth", weights_only=False, map_location="cpu"))
 
         # Evaluate the model on the client datasets 
         per_loader_test_artifacts = []
@@ -1167,6 +1247,16 @@ def main(cfg: DictConfig) -> None:
             os.makedirs("results", exist_ok=True)
             with open("results/additional_metrics.json", "w") as fp:
                 json.dump(additional_metrics, fp, indent=2)
+
+            # Save timing metrics (for c2bm and cem)
+            if cfg.model.name in ('c2bm', 'cem'):
+                if "postdrift_model_instantiation" in timing_metrics and "postdrift_set_old_parameters" in timing_metrics:
+                    timing_metrics["postdrift_init_total"] = timing_metrics["postdrift_model_instantiation"] + timing_metrics["postdrift_set_old_parameters"]
+                timing_metrics["total_training_time"] = time.time() - t_start_training
+                timing_metrics["n_rounds_executed"] = last_round_executed
+                timing_metrics["model_name"] = cfg.model.name
+                with open("results/timing_metrics.json", "w") as fp:
+                    json.dump(timing_metrics, fp, indent=2)
         except Exception as e:
             print(f"\033[91m[WARN] Failed to save additional metrics: {e}\033[0m")
     

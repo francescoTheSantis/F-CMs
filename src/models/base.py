@@ -30,6 +30,8 @@ class BaseModel(nn.Module, ABC):
         self.y_info = y_info
         self.c_name_index = c_name_index
         self.name = name
+        self.class_weights = None  # To be set by subclasses if needed
+        self.concept_class_weights = {}  # Per-concept class weights {name: tensor([w_neg, w_pos])}
         
         # To be set by subclasses
         self.has_concepts = False
@@ -161,6 +163,7 @@ class BaseModel(nn.Module, ABC):
     def _compute_nll_loss(self, 
                          pred_log: torch.Tensor, 
                          target: torch.Tensor, 
+                         weight: Optional[torch.Tensor] = None,
                          reduction: str = "mean", 
                          ignore_index: int = -1) -> torch.Tensor:
         """
@@ -169,16 +172,23 @@ class BaseModel(nn.Module, ABC):
         Args:
             pred_log: Log probabilities
             target: Target labels
+            weight: Class weights tensor (optional)
             reduction: Reduction method
             ignore_index: Index to ignore
             
         Returns:
             Computed NLL loss
         """
-        return torch.nn.functional.nll_loss(
-            pred_log, target, reduction=reduction, ignore_index=ignore_index
-        )
-    
+        if weight is not None:
+            weight = weight.to(pred_log.device)
+            return torch.nn.functional.nll_loss(
+                pred_log, target, weight=weight, reduction=reduction, ignore_index=ignore_index
+            )
+        else:
+            return torch.nn.functional.nll_loss(
+                pred_log, target, reduction=reduction, ignore_index=ignore_index
+            )
+        
     def _compute_task_loss(self, 
                           y_hat: torch.Tensor, 
                           y: torch.Tensor, 
@@ -190,7 +200,7 @@ class BaseModel(nn.Module, ABC):
         y_hat_log = torch.log(y_hat + 1e-6)
         task_loss = None
         if (y != ignore_index).any():  # at least one labelled sample
-            task_loss = self._compute_nll_loss(y_hat_log, y, reduction, ignore_index)
+            task_loss = self._compute_nll_loss(y_hat_log, y, weight=self.class_weights, reduction=reduction, ignore_index=ignore_index)
 
         return task_loss
 
@@ -235,7 +245,8 @@ class BaseModel(nn.Module, ABC):
                 continue
 
             c_hat_log = torch.log(c_hat + 1e-6)
-            concept_loss_i = self._compute_nll_loss(c_hat_log, label, reduction, ignore_index)
+            c_weight = self.concept_class_weights.get(name, None)
+            concept_loss_i = self._compute_nll_loss(c_hat_log, label, weight=c_weight, reduction=reduction, ignore_index=ignore_index)
             
             if reduction == "none":
                 concept_loss = concept_loss + concept_loss_i
