@@ -46,7 +46,7 @@ import os
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
-from src.utils import get_intervention_policy, remove_cycles, remove_problematic_edges, get_split_paths_fl
+from src.utils import get_intervention_policy, remove_cycles, remove_problematic_edges, get_split_paths_fl, aggregate_multimodal
 from src.my_hydra import parse_hyperparams
 from src.utils import seed_everything, create_folders, plot_loss_and_accuracy, get_split_paths
 from src.trainer import Trainer
@@ -111,7 +111,23 @@ class SaveModelStrategy(fl.server.strategy.FedAvg):
             (parameters_to_ndarrays(fit_res.parameters), fit_res.num_examples)
             for _, fit_res in results
         ]
-        aggregated_parameters_global = ndarrays_to_parameters(aggregate(weights_results))   # Global aggregation - traditional - no clustering
+        multimodal_results = [
+            (
+                parameters_to_ndarrays(fit_res.parameters),
+                fit_res.num_examples,
+                fit_res.metrics.get("modality"),
+            )
+            for _, fit_res in results
+        ]
+        if any(modality is not None for _, _, modality in multimodal_results):
+            aggregated_ndarrays = aggregate_multimodal(
+                multimodal_results,
+                list(self.model.state_dict().keys()),
+                reference_parameters=[val.cpu().numpy() for _, val in self.model.state_dict().items()],
+            )
+            aggregated_parameters_global = ndarrays_to_parameters(aggregated_ndarrays)
+        else:
+            aggregated_parameters_global = ndarrays_to_parameters(aggregate(weights_results))   # Global aggregation - traditional - no clustering
         
         # Aggregate custom metrics if aggregation fn was provided   
         aggregated_metrics = {}

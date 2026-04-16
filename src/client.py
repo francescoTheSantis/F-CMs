@@ -68,6 +68,7 @@ class FlowerClient(fl.client.NumPyClient):
     # local training
     def fit(self, parameters, config):
         self.set_parameters(parameters)
+        client_modality = getattr(self.train_dataloader.dataset, "modality", None)
 
         # Local training
         maybe_freeze_parameters(c = self.train_dataloader.dataset.c, 
@@ -97,7 +98,10 @@ class FlowerClient(fl.client.NumPyClient):
                 f"\033[96m[DP][Client {self.client_id}] Spent ε={spent_eps:.3f} for δ={getattr(self.engine, 'dp_delta', None)}\033[0m"
             )
 
-        return self.get_parameters(config), len(self.train_dataloader.dataset), {}
+        metrics = {}
+        if client_modality is not None:
+            metrics["modality"] = client_modality
+        return self.get_parameters(config), len(self.train_dataloader.dataset), metrics
     
     # local evaluation after aggregation
     def evaluate(self, parameters, config):

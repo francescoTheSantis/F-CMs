@@ -11,6 +11,7 @@ import math
 import json
 from env import CACHE
 import yaml
+from yaml import YAMLError
 from statistics import NormalDist
 
 
@@ -101,12 +102,16 @@ def plot_cumulative_accuracy_grid_multi_modality(
     # Model display names
     model_display_names = {
         'cem': 'CEM',
+        'cem_multi': 'CEM (Multi)',
         'c2bm': 'C2BM',
+        'c2bm_multi': 'C2BM (Multi)',
         'cbm_linear': 'CBM+Linear',
         'cbm_mlp': 'CBM',
         'cgm': 'CGM',
+        'cgm_multi': 'CGM (Multi)',
         'blackbox': 'BlackBox',
         'blackbox_multi': 'BlackBox (Multi)',
+        'blackbox_multi_multi': 'BlackBox (MultiModal)',
     }
     
     n_rows = len(model_names)
@@ -318,12 +323,16 @@ def plot_cumulative_accuracy_grid_multi_model(
     # Define styles for models (matching reference image: solid lines, no markers)
     model_styles = {
         'cem': {'color': MODEL_PALETTE[2], 'linestyle': '-', 'linewidth': 1.5, 'name': 'CEM'},
+        'cem_multi': {'color': 'steelblue', 'linestyle': '-', 'linewidth': 1.5, 'name': 'CEM (Multi)'},
         'c2bm': {'color': MODEL_PALETTE[0], 'linestyle': '-', 'linewidth': 1.5, 'name': 'C2BM'},
+        'c2bm_multi': {'color': 'forestgreen', 'linestyle': '-', 'linewidth': 1.5, 'name': 'C2BM (Multi)'},
         'cbm_linear': {'color': MODEL_PALETTE[5], 'linestyle': '-', 'linewidth': 1.5, 'name': 'CBM+Linear'},
         'cbm_mlp': {'color': MODEL_PALETTE[1], 'linestyle': '-', 'linewidth': 1.5, 'name': 'CBM'},
         'cgm': {'color': MODEL_PALETTE[4], 'linestyle': '-', 'linewidth': 1.5, 'name': 'CGM'},
+        'cgm_multi': {'color': 'royalblue', 'linestyle': '-', 'linewidth': 1.5, 'name': 'CGM (Multi)'},
         'blackbox': {'color': MODEL_PALETTE[3], 'linestyle': '-', 'linewidth': 1.5, 'name': 'BlackBox'},
         'blackbox_multi': {'color': MODEL_PALETTE[6], 'linestyle': '-', 'linewidth': 1.5, 'name': 'BlackBox (Multi)'},
+        'blackbox_multi_multi': {'color': 'olive', 'linestyle': '-', 'linewidth': 1.5, 'name': 'BlackBox (MultiModal)'},
     }
     
     # Learning modality display names
@@ -1886,21 +1895,27 @@ def plot_cumulative_accuracy_multi_model(
     # Define colors for different learning methods
     model_colors = {
         'c2bm': '#2ca02c',
+        'c2bm_multi': '#228B22',
         'cbm_mlp': '#9467bd',
         'cbm_linear': '#ff7f0e',
         'cem': '#1f77b4',
+        'cem_multi': '#4682B4',
         'blackbox': '#d62728',
-        'cgm': '#00008B'
+        'cgm': '#00008B',
+        'cgm_multi': '#4169E1'
     }
     
     # Define display names for learning methods
     model_display_names = {
     'c2bm': 'C2BM',
+    'c2bm_multi': 'C2BM (Multi)',
     'cbm_mlp': 'CBM+MLP',
     'cbm_linear': 'CBM+Linear',
     'cem': 'CEM',
+    'cem_multi': 'CEM (Multi)',
     'blackbox': 'BlackBox',
-    'cgm': 'CGM'
+    'cgm': 'CGM',
+    'cgm_multi': 'CGM (Multi)'
     }
 
     axis_label_pad = 3
@@ -3171,7 +3186,14 @@ def load_exps(exps_path, n_clients=5, args=None):
         conf_file = os.path.join(exp, '.hydra/config.yaml')      
         if os.path.exists(conf_file):
             with open(conf_file, 'r') as file:
-                conf = yaml.safe_load(file)
+                try:
+                    conf = yaml.safe_load(file)
+                except YAMLError as exc:
+                    print(f"[load_exps] Skipping malformed config file: {conf_file} ({exc})")
+                    continue
+                if conf is None:
+                    print(f"[load_exps] Skipping empty config file: {conf_file}")
+                    continue
                 dataset = conf['dataset']['name']
                 seed = conf['seed']
                 model = conf['model']['name']
@@ -3187,7 +3209,7 @@ def load_exps(exps_path, n_clients=5, args=None):
                 key = dataset + '' + str(seed) + '' + training_modality_full +'_' + model
                 if key not in valid_concepts.keys():
                     valid_concepts[key]= []
-                if conf['model']['name'] == 'c2bm' or conf['model']['name'] == 'cgm':
+                if conf['model']['name'] in ['c2bm', 'c2bm_multi', 'cgm', 'cgm_multi']:
                     result_file = os.path.join(exp, 'results') 
                     concept_file = os.path.join(result_file, 'c_accuracy.pkl')
                     if not os.path.exists(concept_file):
@@ -3828,12 +3850,16 @@ def plot_training_metrics_across_seeds(
     marker_size = 6
     model_styles = {
         'cem': {'marker': 'P', 'name': 'CEM', 'color': 'tab:blue', 'size': marker_size},
+        'cem_multi': {'marker': 'P', 'name': 'CEM (Multi)', 'color': 'steelblue', 'size': marker_size},
         'cbm_linear': {'marker': '*', 'name': 'CBM+Linear', 'color': 'tab:red', 'size': marker_size},
         'cbm_mlp': {'marker': '^', 'name': 'CBM+MLP', 'color': 'tab:purple', 'size': marker_size},
         'blackbox': {'marker': 'o', 'name': 'BlackBox', 'color': 'tab:black', 'size': marker_size},
         'blackbox_multi': {'marker': 'o', 'name': 'BlackBox (Multi)', 'color': 'tab:grey', 'size': marker_size},
+        'blackbox_multi_multi': {'marker': 'o', 'name': 'BlackBox (MultiModal)', 'color': 'tab:olive', 'size': marker_size},
         'cgm': {'marker': 'D', 'name': 'CGM', 'color': 'tab:orange', 'size': marker_size},
+        'cgm_multi': {'marker': 'D', 'name': 'CGM (Multi)', 'color': 'royalblue', 'size': marker_size},
         'c2bm': {'marker': 's', 'name': 'C2BM', 'color': 'tab:green', 'size': marker_size},
+        'c2bm_multi': {'marker': 's', 'name': 'C2BM (Multi)', 'color': 'forestgreen', 'size': marker_size},
     }
     
     os.makedirs(save_dir, exist_ok=True)

@@ -120,12 +120,18 @@ print()
 marker_size = 14
 model_styles = {
     'cem': {'marker': 'P', 'name': 'CEM', 'color': 'tab:blue', 'size': marker_size},
+    'cem_multi': {'marker': 'P', 'name': 'CEM (Multi)', 'color': 'steelblue', 'size': marker_size},
     'cbm_linear': {'marker': '*', 'name': 'CBM+Linear', 'color': 'tab:red', 'size': marker_size},
     'cbm_mlp': {'marker': '^', 'name': 'CBM+MLP', 'color': 'tab:purple', 'size': marker_size},
+    'cbm_linear_multi': {'marker': '*', 'name': 'CBM+Linear (Multi)', 'color': 'tab:pink', 'size': marker_size},
+    'cbm_mlp_multi': {'marker': '^', 'name': 'CBM+MLP (Multi)', 'color': 'tab:brown', 'size': marker_size},
     'blackbox': {'marker': 'o', 'name': 'BlackBox', 'color': 'tab:black', 'size': marker_size},
     'blackbox_multi': {'marker': 'o', 'name': 'BlackBox (Multi)', 'color': 'tab:grey', 'size': marker_size},
+    'blackbox_multi_multi': {'marker': 'o', 'name': 'BlackBox (MultiModal)', 'color': 'tab:olive', 'size': marker_size},
     'cgm': {'marker': 'D', 'name': 'CGM', 'color': 'tab:orange', 'size': marker_size},
+    'cgm_multi': {'marker': 'D', 'name': 'CGM (Multi)', 'color': 'royalblue', 'size': marker_size},
     'c2bm': {'marker': 's', 'name': 'C2BM', 'color': 'tab:green', 'size': marker_size},
+    'c2bm_multi': {'marker': 's', 'name': 'C2BM (Multi)', 'color': 'forestgreen', 'size': marker_size},
 }
 dataset_styles = {
     'sachs': {'name': 'Sachs'},
@@ -136,6 +142,7 @@ dataset_styles = {
     # 'nih_chest_images': {'name': 'NIH Chest X-Ray'},
     # 'cub_causal_struct': {'name': 'CUB_CAUSAL'},
     'siim_pneumothorax': {'name': 'SIIM-ACR Pneumothorax'},
+    'cheXpert_multi': {'name': 'CheXpert-Multi'},
 }
 
 # Define the custom order
@@ -148,7 +155,8 @@ custom_order = [
     'Hailfinder',
     # 'NIH Chest X-Ray',
     # 'CUB_CAUSAL',
-    'SIIM-ACR Pneumothorax'
+    'SIIM-ACR Pneumothorax',
+    'CheXpert-Multi',
 ]
 
 apply_styles(performance, dataset_styles, model_styles, custom_order)

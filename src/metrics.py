@@ -25,12 +25,22 @@ class ClassificationAccuracy(Metric):
                 preds = preds.mean(dim=-1)
             preds = preds.argmax(dim=-1)
             target = target.flatten().long()
+
+            # Masked targets are encoded as -1 and should not contribute to accuracy.
+            valid_mask = target != -1
+            if valid_mask.sum() == 0:
+                return
+
+            preds = preds[valid_mask]
+            target = target[valid_mask]
             _check_same_shape(preds, target)
             correct = preds.eq(target).sum()
             self.correct += correct
             self.total += target.numel()
 
     def compute(self):
+        if self.total == 0:
+            return torch.tensor(float("nan"), device=self.correct.device)
         return self.correct.float() / self.total
 
 

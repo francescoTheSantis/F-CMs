@@ -18,7 +18,7 @@ from src.trainer import Trainer
 from src.plots_mia import plot_and_save_max_mia, plot_and_save_max_sia
 import subprocess
 import json
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional, Tuple
 
 from hydra.utils import instantiate, call # type: ignore
 from omegaconf import DictConfig, open_dict, OmegaConf # type: ignore
@@ -35,6 +35,7 @@ from src.utils import (
     update_config_from_data_subgroup_clients,
     aggregate_graph_proposals,
     aggregate, 
+    aggregate_multimodal,
     get_parameters, 
     set_parameters, 
     set_old_parameters,
@@ -72,12 +73,184 @@ from src.plots import maybe_plot_graph
 from src.my_hydra import parse_hyperparams
 from src.data.generate_split import generate_split, get_subgraph_dict, generate_split_with_fallback
 from collections import OrderedDict
-from typing import List, Dict, Tuple
 
 from env import CACHE
 
 # Suppress specific warning
 warnings.filterwarnings("ignore", message="When grouping with a length-1 list-like")
+
+TEST_RESULT_FILENAMES = [
+    "y_accuracy.pkl",
+    "c_accuracy.pkl",
+    "single_c_interventions_on_y.pkl",
+    "single_OODc_interventions_on_y.pkl",
+    "single_IDc_interventions_on_y.pkl",
+    "level_interventions_on_y.pkl",
+    "level_ID_interventions_on_y.pkl",
+    "level_OOD_interventions_on_y.pkl",
+    "level_interventions_on_c.pkl",
+    "level_ID_interventions_on_c_OOD.pkl",
+    "level_OOD_interventions_on_c_ID.pkl",
+    "cumulative_interventions_on_y.pkl",
+    "cumulative_interventions_on_c.pkl",
+]
+
+
+def _is_numeric_scalar(value):
+    return isinstance(value, (int, float, np.integer, np.floating))
+
+
+def _weighted_average_test_artifacts(values, weights):
+    non_null = [(value, weight) for value, weight in zip(values, weights) if value is not None]
+    if not non_null:
+        return None
+
+    sample_value = non_null[0][0]
+
+    if isinstance(sample_value, dict):
+        aggregated = {}
+        keys = set()
+        for value, _ in non_null:
+            keys.update(value.keys())
+        for key in keys:
+            key_values = [value.get(key) for value, _ in non_null]
+            aggregated_value = _weighted_average_test_artifacts(key_values, weights)
+            if aggregated_value is not None:
+                aggregated[key] = aggregated_value
+        return aggregated
+
+    if _is_numeric_scalar(sample_value):
+        weighted_sum = 0.0
+        total_weight = 0.0
+        for value, weight in non_null:
+            value_float = float(value)
+            if np.isnan(value_float):
+                continue
+            weighted_sum += value_float * weight
+            total_weight += weight
+        if total_weight == 0:
+            return float("nan")
+        return weighted_sum / total_weight
+
+    return sample_value
+
+
+def _collect_test_artifacts(result_dir: str):
+    artifacts = {}
+    for filename in TEST_RESULT_FILENAMES:
+        filepath = os.path.join(result_dir, filename)
+        if os.path.exists(filepath):
+            with open(filepath, "rb") as handle:
+                artifacts[filename] = pickle.load(handle)
+    return artifacts
+
+
+def _aggregate_and_save_test_artifacts(result_dir: str, per_loader_artifacts, per_loader_weights):
+    if not per_loader_artifacts:
+        return {}
+
+    aggregated = {}
+    for filename in TEST_RESULT_FILENAMES:
+        values = [artifacts.get(filename) for artifacts in per_loader_artifacts]
+        aggregated_value = _weighted_average_test_artifacts(values, per_loader_weights)
+        if aggregated_value is None:
+            continue
+        aggregated[filename] = aggregated_value
+        filepath = os.path.join(result_dir, filename)
+        with open(filepath, "wb") as handle:
+            pickle.dump(aggregated_value, handle)
+
+    aggregated_summary = {}
+    if "y_accuracy.pkl" in aggregated and isinstance(aggregated["y_accuracy.pkl"], dict):
+        aggregated_summary["test/y/y_accuracy"] = aggregated["y_accuracy.pkl"].get("_baseline", np.nan)
+    if "c_accuracy.pkl" in aggregated and isinstance(aggregated["c_accuracy.pkl"], dict):
+        for concept_name, value in aggregated["c_accuracy.pkl"].items():
+            aggregated_summary[f"test/c/{concept_name}"] = value
+
+    with open(os.path.join(result_dir, "aggregated_test_metrics.json"), "w") as handle:
+        json.dump(aggregated_summary, handle, indent=2)
+
+    return aggregated_summary
+
+
+def _extract_task_labels(dataset) -> Optional[torch.Tensor]:
+    labels = getattr(dataset, "y", None)
+    if labels is not None:
+        if not torch.is_tensor(labels):
+            labels = torch.as_tensor(labels)
+        return labels.detach().cpu().view(-1)
+
+    subset_indices = getattr(dataset, "indices", None)
+    subset_parent = getattr(dataset, "dataset", None)
+    if subset_indices is not None and subset_parent is not None:
+        parent_labels = _extract_task_labels(subset_parent)
+        if parent_labels is None:
+            return None
+        return parent_labels[torch.as_tensor(subset_indices, dtype=torch.long)]
+
+    child_datasets = getattr(dataset, "datasets", None)
+    if child_datasets is not None:
+        child_labels = []
+        for child_dataset in child_datasets:
+            child_tensor = _extract_task_labels(child_dataset)
+            if child_tensor is None:
+                return None
+            child_labels.append(child_tensor)
+        if child_labels:
+            return torch.cat(child_labels)
+
+    return None
+
+
+def _binary_label_counts(labels: torch.Tensor) -> Tuple[int, int, int]:
+    labels = labels.to(torch.float32).view(-1)
+    labels = labels[~torch.isnan(labels)]
+    labels = labels.round().to(torch.int64)
+    class_0 = int((labels == 0).sum().item())
+    class_1 = int((labels == 1).sum().item())
+    total = class_0 + class_1
+    return class_0, class_1, total
+
+
+def _print_task_label_distribution(
+    dataloaders,
+    task_name: str,
+    split_name: str,
+    per_client: bool = True,
+) -> None:
+    if not dataloaders:
+        return
+
+    print(f"\033[94mTask label distribution for {split_name} split ({task_name}):\033[0m")
+    overall_class_0 = 0
+    overall_class_1 = 0
+
+    for client_idx, loader in enumerate(dataloaders, start=1):
+        labels = _extract_task_labels(loader.dataset)
+        if labels is None:
+            if per_client:
+                print(f"\033[94mClient {client_idx}: unable to read task labels\033[0m")
+            continue
+
+        class_0, class_1, total = _binary_label_counts(labels)
+        overall_class_0 += class_0
+        overall_class_1 += class_1
+
+        if per_client:
+            class_0_pct = (100.0 * class_0 / total) if total > 0 else 0.0
+            class_1_pct = (100.0 * class_1 / total) if total > 0 else 0.0
+            print(
+                f"\033[94mClient {client_idx}: class 0 = {class_0} ({class_0_pct:.2f}%), "
+                f"class 1 = {class_1} ({class_1_pct:.2f}%), total = {total}\033[0m"
+            )
+
+    overall_total = overall_class_0 + overall_class_1
+    overall_class_0_pct = (100.0 * overall_class_0 / overall_total) if overall_total > 0 else 0.0
+    overall_class_1_pct = (100.0 * overall_class_1 / overall_total) if overall_total > 0 else 0.0
+    print(
+        f"\033[94mOverall {split_name}: class 0 = {overall_class_0} ({overall_class_0_pct:.2f}%), "
+        f"class 1 = {overall_class_1} ({overall_class_1_pct:.2f}%), total = {overall_total}\033[0m"
+    )
 
 
 
@@ -323,7 +496,7 @@ def main(cfg: DictConfig) -> None:
         # eliminate task from the ordered columns
         #ordered_nodes = [node for node in ordered_nodes if node != datasets[0].y_info['names'][0]]
         # flatten get_intervention_policy output
-        if cfg.dataset.name in ["siim_pneumothorax", "skincon", "cheXpert"]:
+        if cfg.dataset.name in ["siim_pneumothorax", "skincon", "cheXpert", "cheXpert_multi"]:
             # true_graph = graph
             if cfg.learning.mode != "localized":
                 true_graph = graph
@@ -407,10 +580,15 @@ def main(cfg: DictConfig) -> None:
         
         # read client data
         train_dataloaders, val_dataloaders, test_dataloaders = load_dataloaders(cfg, path, n_clients * cfg.learning.subgraphs.get('dataset_client_multiplier', 1))
+        task_name = datasets[0].y_info["names"][0]
+        _print_task_label_distribution(train_dataloaders, task_name, "train", per_client=True)
+        _print_task_label_distribution(val_dataloaders, task_name, "val", per_client=False)
+        _print_task_label_distribution(test_dataloaders, task_name, "test", per_client=False)
         train_dataloaders, canary_loaders, true_in_outs, sia_loader = dataprocess_auditing(train_dataloaders, n_clients * cfg.learning.subgraphs.get('dataset_client_multiplier', 1), cfg) # NOTE: for the moment we are reducing the training data size
+        _print_task_label_distribution(train_dataloaders, task_name, "train after auditing", per_client=True)
         print("\033[94mNumber of samples per client:\033[0m")
-        for i in range(len(train_dataloaders)):
-            print(f"\033[94mClient {i}: {len(train_dataloaders[i].dataset)} samples\033[0m")
+        for client_idx, train_loader in enumerate(train_dataloaders, start=1):
+            print(f"\033[94mClient {client_idx}: {len(train_loader.dataset)} samples\033[0m")
 
         # identify if y is present or not for the clients
         #y_present = []
@@ -688,6 +866,7 @@ def main(cfg: DictConfig) -> None:
                     )
                 local_engine.model.to(cfg.device) # put back to device
                 n_samples = len(train_dataloaders[cid].dataset)
+                client_modality = getattr(train_dataloaders[cid].dataset, "modality", None)
                                     
                 # # local validation
                 # if val_dataloaders[cid] is not None:
@@ -695,7 +874,10 @@ def main(cfg: DictConfig) -> None:
                 #     history["loss_val_client"][n].append(avg_loss)
     
                 # collect weights for aggregation
-                client_params.append((get_parameters(local_engine), n_samples))
+                if hasattr(local_engine.model, "modality_encoders"):
+                    client_params.append((get_parameters(local_engine), n_samples, client_modality))
+                else:
+                    client_params.append((get_parameters(local_engine), n_samples))
 
             
             # # ------------------------------------------------------------
@@ -793,8 +975,16 @@ def main(cfg: DictConfig) -> None:
             # FedAvg aggregation
             # ------------------------------------------------------------
             print(f"\033[93mAggregating local models\033[0m")
-            global_params = aggregate(client_params)
-            global_param_keys = list(local_engine.model.state_dict().keys())
+            current_param_keys = list(local_engine.model.state_dict().keys())
+            if client_params and len(client_params[0]) == 3:
+                global_params = aggregate_multimodal(
+                    client_params,
+                    current_param_keys,
+                    reference_parameters=get_parameters(local_engine),
+                )
+            else:
+                global_params = aggregate(client_params)
+            global_param_keys = current_param_keys
             print("Saving global model parameters")
             params_dict = zip(local_engine.model.state_dict().keys(), global_params)
             state_dict = OrderedDict({k: torch.tensor(v) for k, v in params_dict})
@@ -913,9 +1103,24 @@ def main(cfg: DictConfig) -> None:
         local_engine.model.load_state_dict(torch.load(f"checkpoints/model_round_{best_round}.pth", weights_only=False))
 
         # Evaluate the model on the client datasets 
+        per_loader_test_artifacts = []
+        per_loader_test_weights = []
         for testid in range(len(test_dataloaders)):
-            test_dataloader = test_dataloaders[testid]   
-            trainer.test(local_engine, test_dataloader)        
+            test_dataloader = test_dataloaders[testid]
+            trainer.test(local_engine, test_dataloader)
+            per_loader_test_artifacts.append(_collect_test_artifacts("results"))
+            per_loader_test_weights.append(len(test_dataloader.dataset))
+
+        aggregated_test_summary = _aggregate_and_save_test_artifacts(
+            "results",
+            per_loader_test_artifacts,
+            per_loader_test_weights,
+        )
+        if "test/y/y_accuracy" in aggregated_test_summary:
+            print(
+                f"\033[92mAggregated test/y/y_accuracy="
+                f"{aggregated_test_summary['test/y/y_accuracy']:.4f}\033[0m"
+            )
         print(f"\033[90mFinished! Training time: {round((time.time() - t0)/60, 2)} minutes\033[0m")
 
         # Save additional drift-related metrics

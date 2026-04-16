@@ -4,6 +4,8 @@ import os
 import json
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
 from torch.utils.data import DataLoader
 import torchvision.models as tv_models
 from torchvision.models.resnet import ResNet50_Weights, ResNet18_Weights
@@ -19,6 +21,7 @@ from src.data.datasets.colormnist import update_concept_names_ColorMNIST, onehot
 from src.data.datasets.fashionmnist import update_concept_names_FashionMNIST, onehot_to_concepts_FashionMNIST
 from src.data.autoencoder import AutoencoderTrainer, scale_embeddings
 from src.data.labelfree_preprocessing import load_pretrained_clip_model, generate_img_embeddings_and_assign_concepts
+from src.data.model_weights import ensure_resnet18_imagenet_weights
 from src.completion.concepts_retrieval import concepts_generation, filtering_concepts_from_llm
 #from src.data.datasets.synthetic import get_synthetic_datasets, SyntheticDatasetContainer
 
@@ -43,9 +46,10 @@ def generate_img_embeddings(dataset: torch.utils.data.Dataset,
         input_encoder = tv_models.resnet18(weights= ResNet18_Weights.DEFAULT)
     elif backbone == 'resnet18_cxr':
         model_directory = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'models')
+        weights_path = ensure_resnet18_imagenet_weights(model_directory)
         input_encoder_res = tv_models.resnet18(weights=None)
         input_encoder_res.load_state_dict(
-            torch.load(os.path.join(model_directory, 'resnet18-5c106cde.pth'), map_location='cpu', weights_only=True))
+            torch.load(weights_path, map_location='cpu', weights_only=True))
         n_features = input_encoder_res.fc.in_features
         projector = nn.Sequential(nn.Linear(n_features, n_features, bias=False), nn.ReLU(),
                                         nn.Linear(n_features, 256, bias=False), )
@@ -128,8 +132,6 @@ def generate_tabular_embeddings(dataset: torch.utils.data.Dataset,
         epochs: number of training epochs
         lr: learning rate
     """
-    import torch.nn.functional as F
-    import torch.optim as optim
     
     # Get input size from the training data
     input_size = dataset.data['train'].X.shape[1]
@@ -409,6 +411,29 @@ def preprocess_dataset(dataset_cfg, _dataset, device, backbone ='resnet18', seed
         #    dataset = generate_tabular_embeddings(dataset,
         #                                          batch_size= dataset_cfg.get('batch_size', 32),
         #                                          device=device)
+
+    elif dataset_name == 'cheXpert_multi':
+        from src.data.datasets.cheXpert_multi import generate_multimodal_embeddings
+
+        dataset.split(seed=seed)
+        dataset = maybe_reduce(dataset_cfg.get('reduce_fraction', None), dataset)
+        dataset = generate_multimodal_embeddings(
+            dataset,
+            device=device,
+            image_backbone=dataset_cfg.get('backbone', backbone),
+            text_backbone=dataset_cfg.get('text_backbone', 'microsoft/BiomedVLP-CXR-BERT-specialized'),
+            text_pooling=dataset_cfg.get('text_pooling', 'cls'),
+            image_batch_size=dataset_cfg.get('image_batch_size', dataset_cfg.get('batch_size', 32)),
+            text_batch_size=dataset_cfg.get('text_batch_size', dataset_cfg.get('batch_size', 32)),
+            text_max_length=dataset_cfg.get('text_max_length', 512),
+            text_column=dataset_cfg.get('text_column', 'text_input'),
+            generate_image=dataset_cfg.get('generate_image_embeddings', True),
+            generate_text=dataset_cfg.get('generate_text_embeddings', True),
+        )
+
+        dataset.data['train'].update_lists()
+        dataset.data['val'].update_lists()
+        dataset.data['test'].update_lists()
 
     else:
         raise ValueError(f"Preprocessing is missing for dataset: {dataset_cfg.get('name')}")

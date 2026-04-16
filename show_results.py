@@ -53,10 +53,21 @@ paths = [
     # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-03-17/10-00-10"
     # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-03-17/10-15-48",
     # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-03-17/10-15-51",
-    "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-03-17/10-31-32_test_29_siim"
-    
-    
-    
+    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-03-17/10-31-32_test_29_siim"
+    # "/Users/dariofenoglio/Desktop/Federated-C2BM/outputs/multirun/2026-04-13/11-31-06" 
+    # "/Users/dariofenoglio/Desktop/Federated-C2BM/outputs/multirun/2026-04-13/15-17-46",   
+    # "/Users/dariofenoglio/Desktop/Federated-C2BM/outputs/multirun/2026-04-13/15-52-11"
+    # "/Users/dariofenoglio/Desktop/Federated-C2BM/outputs/multirun/2026-04-14/13-02-02"
+    # "/Users/dariofenoglio/Desktop/Federated-C2BM/outputs/multirun/2026-04-14/13-04-27"
+    # "/Users/dariofenoglio/Desktop/Federated-C2BM/outputs/multirun/2026-04-14/14-28-35"
+    # "/Users/dariofenoglio/Desktop/Federated-C2BM/outputs/multirun/2026-04-14/15-04-56"
+    # "/Users/dariofenoglio/Desktop/Federated-C2BM/outputs/multirun/2026-04-14/15-04-27"
+    # "/Users/dariofenoglio/Desktop/Federated-C2BM/outputs/multirun/2026-04-14/17-08-12_stat_cbm",
+    "/Users/dariofenoglio/Desktop/Federated-C2BM/outputs/multirun/2026-04-14/17-08-00_dyn_cbm",
+    # "/Users/dariofenoglio/Desktop/Federated-C2BM/outputs/multirun/2026-04-15/09-36-38_stat_black",
+    "/Users/dariofenoglio/Desktop/Federated-C2BM/outputs/multirun/2026-04-15/09-37-16_dyn_black",
+    # "/Users/dariofenoglio/Desktop/Federated-C2BM/outputs/multirun/2026-04-15/10-52-14_stat",
+    "/Users/dariofenoglio/Desktop/Federated-C2BM/outputs/multirun/2026-04-15/10-52-28_dyn",
 ]
 
 # folder to save processed results
@@ -88,12 +99,18 @@ print()
 marker_size = 14
 model_styles = {
     'cem': {'marker': 'P', 'name': 'CEM', 'color': 'tab:blue', 'size': marker_size},
+    'cem_multi': {'marker': 'P', 'name': 'CEM (Multi)', 'color': 'steelblue', 'size': marker_size},
     'cbm_linear': {'marker': '*', 'name': 'CBM+Linear', 'color': 'tab:red', 'size': marker_size},
     'cbm_mlp': {'marker': '^', 'name': 'CBM+MLP', 'color': 'tab:purple', 'size': marker_size},
+    'cbm_linear_multi': {'marker': '*', 'name': 'CBM+Linear (Multi)', 'color': 'tab:pink', 'size': marker_size},
+    'cbm_mlp_multi': {'marker': '^', 'name': 'CBM+MLP (Multi)', 'color': 'tab:brown', 'size': marker_size},
     'blackbox': {'marker': 'o', 'name': 'BlackBox', 'color': 'tab:black', 'size': marker_size},
     'blackbox_multi': {'marker': 'o', 'name': 'BlackBox (Multi)', 'color': 'tab:grey', 'size': marker_size},
+    'blackbox_multi_multi': {'marker': 'o', 'name': 'BlackBox (MultiModal)', 'color': 'tab:olive', 'size': marker_size},
     'cgm': {'marker': 'D', 'name': 'CGM', 'color': 'tab:orange', 'size': marker_size},
+    'cgm_multi': {'marker': 'D', 'name': 'CGM (Multi)', 'color': 'royalblue', 'size': marker_size},
     'c2bm': {'marker': 's', 'name': 'C2BM', 'color': 'tab:green', 'size': marker_size},
+    'c2bm_multi': {'marker': 's', 'name': 'C2BM (Multi)', 'color': 'forestgreen', 'size': marker_size},
 }
 dataset_styles = {
     'sachs': {'name': 'Sachs'},
@@ -104,6 +121,7 @@ dataset_styles = {
     # 'nih_chest_images': {'name': 'NIH Chest X-Ray'},
     # 'cub_causal_struct': {'name': 'CUB_CAUSAL'},
     'siim_pneumothorax': {'name': 'SIIM-Pneumothorax'},
+    'cheXpert_multi': {'name': 'CheXpert-Multi'},
 }
 
 # Define the custom order
@@ -116,7 +134,8 @@ custom_order = [
     'Hailfinder',
     # 'NIH Chest X-Ray',
     # 'CUB_CAUSAL',
-    'SIIM-Pneumothorax'
+    'SIIM-Pneumothorax',
+    'CheXpert-Multi',
 ]
 
 apply_styles(performance, dataset_styles, model_styles, custom_order)

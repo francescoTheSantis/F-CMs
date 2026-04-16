@@ -35,6 +35,7 @@ from torch.utils.data import (
     Dataset,
     Subset,
     ConcatDataset,
+    RandomSampler,
     random_split,
 )
 
@@ -43,6 +44,8 @@ from src.completion.completion_block import complete_graph_with_llm
 
 def load_dataloaders(cfg: DictConfig, path: str, n_clients: int):
     combined_dataset = OmegaConf.select(cfg, 'combined_datasets.other_datasets', default=None)
+    per_client_testset = OmegaConf.select(cfg, 'dataset.per_client_testset', default=False)
+    per_client_reduce_fraction = OmegaConf.select(cfg, 'dataset.per_client_reduce_fraction', default=None)
     train_dataloaders = []
     val_dataloaders = []
     test_dataloaders = []
@@ -59,20 +62,81 @@ def load_dataloaders(cfg: DictConfig, path: str, n_clients: int):
         with open(val_path, 'rb') as f:
             val_dataloader = pickle.load(f)
 
+        train_dataloader = _maybe_reduce_loader(
+            train_dataloader,
+            reduce_fraction=per_client_reduce_fraction,
+            seed=int(cfg.get("seed", 0)),
+            client_id=client_id,
+            split_name="train",
+        )
+        val_dataloader = _maybe_reduce_loader(
+            val_dataloader,
+            reduce_fraction=per_client_reduce_fraction,
+            seed=int(cfg.get("seed", 0)),
+            client_id=client_id,
+            split_name="val",
+        )
+
         train_dataloaders.append(train_dataloader)
         val_dataloaders.append(val_dataloader)
 
-        if combined_dataset is not None:
+        if combined_dataset is not None or per_client_testset:
             with open(test_path, 'rb') as f:
                 test_dataloader = pickle.load(f)
+            test_dataloader = _maybe_reduce_loader(
+                test_dataloader,
+                reduce_fraction=per_client_reduce_fraction,
+                seed=int(cfg.get("seed", 0)),
+                client_id=client_id,
+                split_name="test",
+            )
             test_dataloaders.append(test_dataloader)
         else:
             if client_id == 1:
                 with open(test_path, 'rb') as f:
                     test_dataloader = pickle.load(f)
+                test_dataloader = _maybe_reduce_loader(
+                    test_dataloader,
+                    reduce_fraction=per_client_reduce_fraction,
+                    seed=int(cfg.get("seed", 0)),
+                    client_id=client_id,
+                    split_name="test",
+                )
                 test_dataloaders.append(test_dataloader)
 
     return train_dataloaders, val_dataloaders, test_dataloaders
+
+
+def _maybe_reduce_loader(template_loader, reduce_fraction, seed: int, client_id: int, split_name: str):
+    if reduce_fraction is None:
+        return template_loader
+
+    reduce_fraction = float(reduce_fraction)
+    if not 0 < reduce_fraction <= 1:
+        raise ValueError("dataset.per_client_reduce_fraction must be in the interval (0, 1].")
+    if reduce_fraction >= 1:
+        return template_loader
+
+    base_dataset = template_loader.dataset
+    n_total = len(base_dataset)
+    n_keep = max(1, int(round(n_total * reduce_fraction)))
+    if n_keep >= n_total:
+        return template_loader
+
+    rng = np.random.default_rng(seed + client_id * 1000 + sum(ord(char) for char in split_name))
+    keep_indices = np.sort(rng.choice(n_total, size=n_keep, replace=False))
+    reduced_dataset = Subset(base_dataset, keep_indices.tolist())
+
+    for attr_name in ("c", "y", "modality", "active_modality", "split"):
+        if hasattr(base_dataset, attr_name):
+            attr_value = getattr(base_dataset, attr_name)
+            if torch.is_tensor(attr_value):
+                setattr(reduced_dataset, attr_name, attr_value[keep_indices])
+            else:
+                setattr(reduced_dataset, attr_name, attr_value)
+
+    was_shuffled = isinstance(getattr(template_loader, "sampler", None), RandomSampler)
+    return _clone_loader(template_loader, reduced_dataset, shuffle=was_shuffled)
 
             
 def remove_checkpoints(best_round: int):
@@ -158,7 +222,7 @@ def set_old_parameters(engine, parameters, parameter_keys, verbose: bool = False
 
 def model_has_concepts(model):
     name = model.name
-    if name in ['blackbox_multi', 'cbm_linear', 'cbm_mlp', 'cem', 'c2bm', 'cgm']:
+    if name in ['blackbox_multi', 'blackbox_multi_multi', 'cbm_linear', 'cbm_mlp', 'cbm_linear_multi', 'cbm_mlp_multi', 'cem', 'cem_multi', 'c2bm', 'c2bm_multi', 'cgm', 'cgm_multi']:
         return True
     elif name in ['blackbox']:
         return False
@@ -168,9 +232,9 @@ def model_has_concepts(model):
 
 def model_is_causal(model):
     name = model.name
-    if name in ['c2bm', 'cgm']:
+    if name in ['c2bm', 'c2bm_multi', 'cgm', 'cgm_multi']:
         return True
-    elif name in ['blackbox', 'blackbox_multi', 'cem', 'cbm_linear', 'cbm_mlp']:
+    elif name in ['blackbox', 'blackbox_multi', 'blackbox_multi_multi', 'cem', 'cem_multi', 'cbm_linear', 'cbm_mlp', 'cbm_linear_multi', 'cbm_mlp_multi']:
         return False
     else:
         raise ValueError(f"Unknown model type: {name}")
@@ -225,6 +289,8 @@ def update_config_from_data(cfg: DictConfig, datasets, subgraphs_concept_names, 
 
     with open_dict(cfg):
 
+        modality_input_sizes = None
+
         if cfg.learning.mode=="localized":
             if len(datasets)>1:
                 dataset = datasets[(cfg.client_id-1) % len(datasets)]
@@ -232,6 +298,12 @@ def update_config_from_data(cfg: DictConfig, datasets, subgraphs_concept_names, 
                 dataset = datasets[0]
 
             input_size = dataset.data["train"].X.shape[-1] if dataset.data["train"].X is not None else None
+            if hasattr(dataset.data["train"], "X_image") and hasattr(dataset.data["train"], "X_text"):
+                if dataset.data["train"].X_image is not None and dataset.data["train"].X_text is not None:
+                    modality_input_sizes = {
+                        "image": int(dataset.data["train"].X_image.shape[-1]),
+                        "text": int(dataset.data["train"].X_text.shape[-1]),
+                    }
 
             original_c_names = dataset.c_info['names']
             path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
@@ -270,6 +342,12 @@ def update_config_from_data(cfg: DictConfig, datasets, subgraphs_concept_names, 
             path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
             # just initialize it with dataset[0], then I'll update configuration and model with the different clients
             input_size = datasets[0].data["train"].X.shape[-1] if datasets[0].data["train"].X is not None else None
+            if hasattr(datasets[0].data["train"], "X_image") and hasattr(datasets[0].data["train"], "X_text"):
+                if datasets[0].data["train"].X_image is not None and datasets[0].data["train"].X_text is not None:
+                    modality_input_sizes = {
+                        "image": int(datasets[0].data["train"].X_image.shape[-1]),
+                        "text": int(datasets[0].data["train"].X_text.shape[-1]),
+                    }
             #input_size = dict()
             # The list of names for in-distribution concepts (concepts that the client has in its subgraph)
             c_names_id = dict()
@@ -304,6 +382,12 @@ def update_config_from_data(cfg: DictConfig, datasets, subgraphs_concept_names, 
         else:
             dataset = datasets[0]
             input_size = dataset.data["train"].X.shape[-1] if dataset.data["train"].X is not None else None
+            if hasattr(dataset.data["train"], "X_image") and hasattr(dataset.data["train"], "X_text"):
+                if dataset.data["train"].X_image is not None and dataset.data["train"].X_text is not None:
+                    modality_input_sizes = {
+                        "image": int(dataset.data["train"].X_image.shape[-1]),
+                        "text": int(dataset.data["train"].X_text.shape[-1]),
+                    }
             #input_size = dataset.data["train"].X.shape[-1] if dataset.data["train"].X is not None else None
             c_info = dataset.c_info
             original_c_names = dataset.c_info['names']
@@ -320,6 +404,10 @@ def update_config_from_data(cfg: DictConfig, datasets, subgraphs_concept_names, 
             y_info = datasets[0].y_info,
             c_name_index = {name: i for i, name in enumerate(c_names_all + datasets[0].y_info['names'])},
         )
+        if modality_input_sizes is not None:
+            cfg.engine.model.update(
+                modality_input_sizes=modality_input_sizes,
+            )
         cfg.engine.update(
             c_names_id = c_names_id,
             c_names_ood = c_names_ood,
@@ -1028,8 +1116,9 @@ def extract_between(text, split):
     
 def get_split_paths(cfg, path):
     combined_dataset = OmegaConf.select(cfg, 'combined_datasets.other_datasets', default=None)
+    per_client_testset = OmegaConf.select(cfg, 'dataset.per_client_testset', default=False)
     root = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
-    if combined_dataset is None:
+    if combined_dataset is None and not per_client_testset:
         test_path = os.path.join(root, f"test.pkl")
 
     for file in os.listdir(path):
@@ -1038,7 +1127,7 @@ def get_split_paths(cfg, path):
         if extract_between(file, 'val') == str(cfg.client_id):
             val_path = os.path.join(path, file)
         
-        if combined_dataset is not None:
+        if combined_dataset is not None or per_client_testset:
             if extract_between(file, 'test') == str(cfg.client_id):
                 test_path = os.path.join(path, file)
 
@@ -1049,13 +1138,14 @@ def get_split_paths(cfg, path):
 # to compact with the previous one
 def get_split_paths_fl(cfg, path, client_id):
     combined_dataset = OmegaConf.select(cfg, 'combined_datasets.other_datasets', default=None)
+    per_client_testset = OmegaConf.select(cfg, 'dataset.per_client_testset', default=False)
     for file in os.listdir(path):
         if extract_between(file, 'train') == str(client_id):
             train_path = os.path.join(path, file)
         if extract_between(file, 'val') == str(client_id):
             val_path = os.path.join(path, file)
 
-        if combined_dataset is not None:
+        if combined_dataset is not None or per_client_testset:
             if extract_between(file, 'test') == str(client_id):
                 test_path = os.path.join(path, file)
         else:
@@ -1294,7 +1384,7 @@ def maybe_freeze_parameters(train_dataloader,  y_to_freeze, model, learning, fre
         for param in model.parameters():
             param.requires_grad = True
 
-        if model.name=="cbm_linear" or model.name =="cbm_mlp":
+        if model.name in ["cbm_linear", "cbm_mlp", "cbm_linear_multi", "cbm_mlp_multi"]:
             c_keys = list(model.c_mlp.keys())
             c_to_freeze = [c_keys[i] for i in c_indices_to_freeze if 0 <= i < len(c_keys)]
             for name, mlp in model.c_mlp.items():
@@ -1306,7 +1396,7 @@ def maybe_freeze_parameters(train_dataloader,  y_to_freeze, model, learning, fre
                     param.requires_grad = False
             print("Parameters frozen for concepts:", c_to_freeze)
 
-        if model.name=="cem":
+        if model.name in ["cem", "cem_multi"]:
             c_keys = list(model.concept_encoders.keys())
             c_to_freeze = [c_keys[i] for i in c_indices_to_freeze if 0 <= i < len(c_keys)]
             for name, concept_encoder in model.concept_encoders.items():
@@ -1318,7 +1408,7 @@ def maybe_freeze_parameters(train_dataloader,  y_to_freeze, model, learning, fre
                     param.requires_grad = False
             print("Parameters frozen for concepts:", c_to_freeze)
         
-        if model.name=="c2bm":
+        if model.name in ["c2bm", "c2bm_multi"]:
             c_keys = list(model.concept_encoders.keys())
             c_to_freeze = [c_keys[i] for i in c_indices_to_freeze if 0 <= i < len(c_keys)]
 
@@ -1335,11 +1425,48 @@ def maybe_freeze_parameters(train_dataloader,  y_to_freeze, model, learning, fre
 
             print("Parameters frozen for concepts:", c_to_freeze)
 
+        if model.name == "cgm_multi":
+            c_keys = list(model.concept_encoders.keys())
+            c_to_freeze = [c_keys[i] for i in c_indices_to_freeze if 0 <= i < len(c_keys)]
+            for name, concept_encoder in model.concept_encoders.items():
+                if name in c_to_freeze:
+                    for param in concept_encoder.parameters():
+                        param.requires_grad = False
+            print("Parameters frozen for concepts:", c_to_freeze)
+
             # check
             #for name, param in model.named_parameters():
             #    print(f"{name}: requires_grad = {param.requires_grad}")
 
     return None
+
+
+def aggregate_multimodal(results, parameter_keys, reference_parameters=None, modality_encoder_root="modality_encoders"):
+    if not results:
+        raise ValueError("No client results were provided for aggregation.")
+
+    def _weighted_average(index, weighted_results):
+        total_examples = sum(num_examples for _, num_examples, _ in weighted_results)
+        weighted_layers = [weights[index] * num_examples for weights, num_examples, _ in weighted_results]
+        return reduce(np.add, weighted_layers) / total_examples
+
+    aggregated = []
+    modality_prefix = modality_encoder_root + "."
+
+    for idx, key in enumerate(parameter_keys):
+        if key.startswith(modality_prefix):
+            modality = key[len(modality_prefix):].split(".", 1)[0]
+            modality_results = [result for result in results if result[2] == modality]
+            if modality_results:
+                aggregated.append(_weighted_average(idx, modality_results))
+            elif reference_parameters is not None:
+                aggregated.append(reference_parameters[idx])
+            else:
+                raise ValueError(f"No client parameters available for modality '{modality}'.")
+        else:
+            aggregated.append(_weighted_average(idx, results))
+
+    return aggregated
 
 
 def parameters_to_1d(parameters):

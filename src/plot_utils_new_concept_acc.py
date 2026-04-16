@@ -1336,21 +1336,27 @@ def plot_cumulative_accuracy_multi_model(
     # Define colors for different learning methods
     model_colors = {
         'c2bm': '#2ca02c',
+        'c2bm_multi': '#228B22',
         'cbm_mlp': '#9467bd',
         'cbm_linear': '#ff7f0e',
         'cem': '#1f77b4',
+        'cem_multi': '#4682B4',
         'blackbox': '#d62728',
-        'cgm': '#00008B'
+        'cgm': '#00008B',
+        'cgm_multi': '#4169E1'
     }
     
     # Define display names for learning methods
     model_display_names = {
     'c2bm': 'C2BM',
+    'c2bm_multi': 'C2BM (Multi)',
     'cbm_mlp': 'CBM+MLP',
     'cbm_linear': 'CBM+Linear',
     'cem': 'CEM',
+    'cem_multi': 'CEM (Multi)',
     'blackbox': 'BlackBox',
-    'cgm': 'CGM'
+    'cgm': 'CGM',
+    'cgm_multi': 'CGM (Multi)'
     }
 
 
@@ -2590,7 +2596,7 @@ def load_exps(exps_path, n_clients=5, args=None):
                 key = dataset + '' + str(seed) + '' + training_modality_full +'_' + model
                 if key not in valid_concepts.keys():
                     valid_concepts[key]= []
-                if conf['model']['name'] == 'c2bm' or conf['model']['name'] == 'cgm':
+                if conf['model']['name'] in ['c2bm', 'c2bm_multi', 'cgm', 'cgm_multi']:
                     result_file = os.path.join(exp, 'results') 
                     concept_file = os.path.join(result_file, 'c_accuracy.pkl')
                     if not os.path.exists(concept_file):
@@ -3201,12 +3207,16 @@ def plot_training_metrics_across_seeds(
     marker_size = 6
     model_styles = {
         'cem': {'marker': 'P', 'name': 'CEM', 'color': 'tab:blue', 'size': marker_size},
+        'cem_multi': {'marker': 'P', 'name': 'CEM (Multi)', 'color': 'steelblue', 'size': marker_size},
         'cbm_linear': {'marker': '*', 'name': 'CBM+Linear', 'color': 'tab:red', 'size': marker_size},
         'cbm_mlp': {'marker': '^', 'name': 'CBM+MLP', 'color': 'tab:purple', 'size': marker_size},
         'blackbox': {'marker': 'o', 'name': 'BlackBox', 'color': 'tab:black', 'size': marker_size},
         'blackbox_multi': {'marker': 'o', 'name': 'BlackBox (Multi)', 'color': 'tab:grey', 'size': marker_size},
+        'blackbox_multi_multi': {'marker': 'o', 'name': 'BlackBox (MultiModal)', 'color': 'tab:olive', 'size': marker_size},
         'cgm': {'marker': 'D', 'name': 'CGM', 'color': 'tab:orange', 'size': marker_size},
+        'cgm_multi': {'marker': 'D', 'name': 'CGM (Multi)', 'color': 'royalblue', 'size': marker_size},
         'c2bm': {'marker': 's', 'name': 'C2BM', 'color': 'tab:green', 'size': marker_size},
+        'c2bm_multi': {'marker': 's', 'name': 'C2BM (Multi)', 'color': 'forestgreen', 'size': marker_size},
     }
     
     os.makedirs(save_dir, exist_ok=True)

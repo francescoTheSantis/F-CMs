@@ -12,12 +12,16 @@ from torch.utils.data import DataLoader
 from torch_geometric.utils import to_dense_adj
 
 def static_graph_collate(batch):
-    return {
+    result = {
         "x": torch.stack([item["x"] for item in batch]),
         "c": torch.stack([item["c"] for item in batch]),
         "y": torch.stack([item["y"] for item in batch]),
         "graph": batch[0]["graph"],  # Add the graph once
     }
+    if "modality" in batch[0]:
+        modalities = [item["modality"] for item in batch]
+        result["modality"] = modalities[0] if len(set(modalities)) == 1 else modalities
+    return result
 
 def create_filtering_collate_fn(original_collate_fn, concept_indices_to_keep, cfg_predrift, all_concept_names):
     """
@@ -57,6 +61,10 @@ def reduce_dataset(_dataset, index_to_keep):
     dataset = deepcopy(_dataset)
     if dataset.X is not None:
         dataset.X = dataset.X[index_to_keep]
+    if hasattr(dataset, 'X_image') and dataset.X_image is not None:
+        dataset.X_image = dataset.X_image[index_to_keep]
+    if hasattr(dataset, 'X_text') and dataset.X_text is not None:
+        dataset.X_text = dataset.X_text[index_to_keep]
     if dataset.c is not None:
         dataset.c = dataset.c[index_to_keep]
     if dataset.y is not None:

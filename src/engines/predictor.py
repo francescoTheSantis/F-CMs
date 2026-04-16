@@ -1,6 +1,7 @@
 from typing import Any, Optional, Mapping, Type
 import pickle
 import itertools
+import numpy as np
 
 import torch
 from copy import deepcopy
@@ -262,6 +263,8 @@ class Predictor(pl.LightningModule):
 
     def log_loss(self, name, loss, **kwargs):
         """"""
+        if not torch.is_tensor(loss):
+            loss = torch.tensor(loss, dtype=torch.float32, device=self.device)
         self.log(
             name + "_loss",
             loss.detach(),
@@ -276,7 +279,13 @@ class Predictor(pl.LightningModule):
         """
         Unpack a batch into data and preprocessing dictionaries.
         """
-        return batch['x'], batch['c'], batch['y']
+        return batch['x'], batch['c'], batch['y'], batch.get('modality')
+
+    def _build_model_inputs(self, x, c, intervention_index=None, modality=None):
+        inputs = {'x': x, 'c': c, 'intervention_index': intervention_index}
+        if modality is not None:
+            inputs['modality'] = modality
+        return inputs
     
     def on_after_batch_transfer(self, batch, dataloader_idx):
         # add batch_size to batch
@@ -317,7 +326,7 @@ class Predictor(pl.LightningModule):
 
     def test_intervention(self, batch):
         if self.model.has_concepts:
-            x, c, y = self._unpack_batch(batch)
+            x, c, y, modality = self._unpack_batch(batch)
             # maybe add noise
             if self.test_interv_noise > 0:
                 x = x + torch.randn_like(x) * self.test_interv_noise
@@ -325,7 +334,7 @@ class Predictor(pl.LightningModule):
             # baseline task accuracy
             # do not intervene
             intervention_index = get_test_intervention_index(c.shape, [], device=c.device)
-            inputs = {'x':x, 'c':c, 'intervention_index':intervention_index}
+            inputs = self._build_model_inputs(x, c, intervention_index=intervention_index, modality=modality)
             # forward pass with intervention at test time
             y_output, c_output = self.forward(**inputs)
             y_hat, c_hat = self.model.filter_output_for_metric(y_output, c_output)
@@ -346,7 +355,7 @@ class Predictor(pl.LightningModule):
                 else:
                     # intervene on concept c_name_i
                     intervention_index = get_test_intervention_index(c.shape, i, device=c.device)
-                inputs = {'x':x, 'c':c, 'intervention_index':intervention_index}
+                inputs = self._build_model_inputs(x, c, intervention_index=intervention_index, modality=modality)
                 # forward pass with intervention at test time
                 y_output, c_output = self.forward(**inputs)
                 y_hat, c_hat = self.model.filter_output_for_metric(y_output, c_output)
@@ -375,7 +384,7 @@ class Predictor(pl.LightningModule):
                 intervention_index = torch.zeros(c.shape, dtype=c.dtype, device=c.device)
                 for idx in cumulative_indices:
                     intervention_index += get_test_intervention_index(c.shape, idx, device=c.device)
-                inputs = {'x':x, 'c':c, 'intervention_index':intervention_index}
+                inputs = self._build_model_inputs(x, c, intervention_index=intervention_index, modality=modality)
                 # forward pass with intervention at test time
                 y_output, c_output = self.forward(**inputs)
                 y_hat, c_hat = self.model.filter_output_for_metric(y_output, c_output)
@@ -430,10 +439,14 @@ class Predictor(pl.LightningModule):
                 for l in range(0, len(self.test_interv_policy)+1):
                     # get the nodes to intervene on
                     nodes = list(itertools.chain(*self.test_interv_policy[:l]))
-                    if client_id == len(self.c_names_ood)+1 or self.learning_modality in ["centralized", "localized"]:
+                    use_shared_level_outputs = (
+                        client_id == len(self.c_names_ood)+1
+                        or self.learning_modality in ["centralized", "localized"]
+                    )
+                    if use_shared_level_outputs:
                         # intervene on all the concepts of the level
                         intervention_index = get_test_intervention_index(c.shape, nodes, device=c.device)
-                        inputs = {'x':x, 'c':c, 'intervention_index':intervention_index}
+                        inputs = self._build_model_inputs(x, c, intervention_index=intervention_index, modality=modality)
                         y_output, c_output = self.forward(**inputs)
                         y_hat, c_hat = self.model.filter_output_for_metric(y_output, c_output)
                         # update metric after intervention:
@@ -451,8 +464,8 @@ class Predictor(pl.LightningModule):
                                 self.level_intervention_ood_annotations[client_id][l] ="empty"
                             intervention_index_id = get_test_intervention_index(c.shape, nodes_id, device=c.device)
                             intervention_index_ood = get_test_intervention_index(c.shape, nodes_ood, device=c.device)
-                            inputs_id = {'x':x, 'c':c, 'intervention_index':intervention_index_id}
-                            inputs_ood = {'x':x, 'c':c, 'intervention_index':intervention_index_ood}
+                            inputs_id = self._build_model_inputs(x, c, intervention_index=intervention_index_id, modality=modality)
+                            inputs_ood = self._build_model_inputs(x, c, intervention_index=intervention_index_ood, modality=modality)
                             y_output_id, c_output_id = self.forward(**inputs_id)
                             y_output_ood, c_output_ood = self.forward(**inputs_ood)
                             y_hat_id, c_hat_id = self.model.filter_output_for_metric(y_output_id, c_output_id)
@@ -463,13 +476,13 @@ class Predictor(pl.LightningModule):
                     # after interveening on a level of the graph, how well can we predict each child concept
                     childs = list(itertools.chain(*self.test_interv_policy[l:]))
                     for child_index in childs:
-                        if self.learning_modality not in ["centralized", "localized"]:
+                        if not use_shared_level_outputs:
                             if self.c_names_all[child_index] not in c_hat_id.keys():
                                 continue
                         elif self.learning_modality == "localized":
                             if self.c_names_all[child_index] not in c_hat.keys():
                                 continue
-                        if client_id == len(self.c_names_ood)+1 or self.learning_modality in ["centralized", "localized"]:
+                        if use_shared_level_outputs:
                             c_name = self.c_names_all[child_index]
                             self.test_intervention_level_c[f'level {l}/child {c_name}'].update(c_hat[c_name], c[:,child_index])
                         else:
@@ -493,7 +506,7 @@ class Predictor(pl.LightningModule):
     # NOT APPLICABLE NOW
     def test_intervention_fairness(self, batch):
         if self.model.has_concepts:
-            x, c, y = self._unpack_batch(batch)
+            x, c, y, modality = self._unpack_batch(batch)
 
             # get a concept pair i,j (node j has to be a bottleneck for node i to the task)
             i = self.c_names.index('Attractive')
@@ -502,10 +515,10 @@ class Predictor(pl.LightningModule):
             # compute the cace before the do-intervention on concept j
             # different do-interventions on concept i, effect on the task
             interv_index, interv_values = get_test_intervention_index(c.shape, i, values=1, device=c.device)
-            y_output, c_output = self.forward(**{'x':x, 'c':interv_values, 'intervention_index':interv_index})
+            y_output, c_output = self.forward(**self._build_model_inputs(x, interv_values, intervention_index=interv_index, modality=modality))
             y_hat_before_do_1, _ = self.model.filter_output_for_metric(y_output, c_output)
             interv_index, interv_values = get_test_intervention_index(c.shape, i, values=0, device=c.device)
-            y_output, c_output = self.forward(**{'x':x, 'c':interv_values, 'intervention_index':interv_index})
+            y_output, c_output = self.forward(**self._build_model_inputs(x, interv_values, intervention_index=interv_index, modality=modality))
             y_hat_before_do_0, _ = self.model.filter_output_for_metric(y_output, c_output)
             self.cace['before'].update(y_hat_before_do_1, y_hat_before_do_0)
 
@@ -518,10 +531,10 @@ class Predictor(pl.LightningModule):
             # compute the cace after the do-intervention on concept j
             # different do-interventions on concept i, effect on the task
             interv_index, interv_values = get_test_intervention_index(c.shape, [j,i], values=[1,1], device=c.device)
-            y_output, c_output = self.forward(**{'x':x, 'c':interv_values, 'intervention_index':interv_index})
+            y_output, c_output = self.forward(**self._build_model_inputs(x, interv_values, intervention_index=interv_index, modality=modality))
             y_hat_after_do_1, _ = self.model.filter_output_for_metric(y_output, c_output)
             interv_index, interv_values = get_test_intervention_index(c.shape, [j,i], values=[1,0], device=c.device)
-            y_output, c_output = self.forward(**{'x':x, 'c':interv_values, 'intervention_index':interv_index})
+            y_output, c_output = self.forward(**self._build_model_inputs(x, interv_values, intervention_index=interv_index, modality=modality))
             y_hat_after_do_0, _ = self.model.filter_output_for_metric(y_output, c_output)
             self.cace['after'].update(y_hat_after_do_1, y_hat_after_do_0)
 
@@ -544,9 +557,9 @@ class Predictor(pl.LightningModule):
             self.log_metrics(c_collection, batch_size=batch['batch_size'])
 
     def shared_step(self, batch, step):
-        x, c, y = self._unpack_batch(batch)
+        x, c, y, modality = self._unpack_batch(batch)
         intervention_index = self.get_intervention_index(c.shape, step=step)
-        inputs = {'x':x, 'c':c, 'intervention_index':intervention_index}
+        inputs = self._build_model_inputs(x, c, intervention_index=intervention_index, modality=modality)
         # model forward
         y_output, c_output = self.forward(**inputs)
         # Compute loss
@@ -621,8 +634,13 @@ class Predictor(pl.LightningModule):
         c_baseline = {}
         for k, metric in self.test_c_metrics.items():
             k = _remove_prefix(k, self.test_c_metrics.prefix)
-            c_baseline[k] = metric.compute().item()
-            print(f"Baseline concept accuracy for {k}: {c_baseline[k]}")
+            metric_value = metric.compute().item()
+            if np.isfinite(metric_value):
+                c_baseline[k] = metric_value
+                print(f"Baseline concept accuracy for {k}: {c_baseline[k]}")
+            else:
+                c_baseline[k] = np.nan
+                print(f"Baseline concept accuracy for {k}: unavailable (masked for all samples)")
         pickle.dump(c_baseline, open(f'results/c_accuracy.pkl', 'wb'))
 
         if self.model.has_concepts:
@@ -742,7 +760,7 @@ class Predictor(pl.LightningModule):
                 # print(f"Concept accuracy after cumulative intervention {key}: {c_int_cumulative[key]}")
             pickle.dump(c_int_cumulative, open(f'results/cumulative_interventions_on_c.pkl', 'wb'))
 
-            if self.model.name =="c2bm" or self.model.name=="cgm":
+            if self.model.name in ["c2bm", "c2bm_multi", "cgm", "cgm_multi"]:
                 predicted_concepts = self.model.predicted_concepts
             else:
                 predicted_concepts = self.c_names_all

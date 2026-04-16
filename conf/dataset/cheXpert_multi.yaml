@@ -1,0 +1,47 @@
+defaults:
+  - commons
+  - _self_
+
+name: cheXpert_multi
+loader:
+  _target_: src.data.datasets.cheXpert_multi.CheXpertMulti
+  ftune_size: 0.
+  active_modality: image
+  text_source: report
+
+hidden_size: 64
+batch_size: 64
+image_batch_size: 64
+text_batch_size: 4
+
+is_image_dataset: false
+reduce_fraction: Null
+onehot_to_concepts: false
+
+load_embeddings: false
+per_client_testset: true
+image_client_ratio: 0.5
+
+backbone: resnet18_cxr
+text_backbone: microsoft/BiomedVLP-CXR-BERT-specialized
+text_pooling: cls
+text_column: text_input
+text_max_length: 512
+generate_image_embeddings: true
+generate_text_embeddings: true
+
+label_descriptions:
+  Enlarged Cardiomediastinum: "Widening of the heart and mediastinum on chest X-ray, possibly indicating cardiac or mediastinal pathology."
+  Cardiomegaly: "Enlargement of the heart visible on imaging, suggesting underlying cardiac disease."
+  Lung Opacity: "Region of increased density in the lung on X-ray, which may indicate fluid, infection, or other abnormalities."
+  Lung Lesion: "Focal abnormality in lung tissue, potentially representing a mass, nodule, or other pathology."
+  Edema: "Fluid accumulation in the lungs, often related to heart failure or other systemic conditions."
+  Consolidation: "Lung tissue filled with liquid instead of air, commonly due to infection or inflammation."
+  Pneumonia: "Infection of the lungs causing inflammation and areas of consolidation visible on X-ray."
+  Atelectasis: "Partial or complete collapse of lung tissue leading to reduced air volume in affected regions."
+  Pneumothorax: "Air in the pleural space causing partial or complete lung collapse."
+  Pleural Effusion: "Fluid accumulation in the pleural space surrounding the lungs."
+  Pleural Other: "Other pleural abnormalities not classified as effusion or pneumothorax."
+  Fracture: "Break or discontinuity in a bone, detectable on imaging."
+  Support Devices: "Presence of medical devices such as tubes, catheters, or implants visible on X-ray."
+  No Finding: "No abnormality detected; chest X-ray appears normal."

@@ -906,6 +906,29 @@ def build_client_subgraph_ids_for_datasets(
     client_subgraph_ids.extend(extra_ids)
     return n_dataset_clients, client_subgraph_ids
 
+
+def build_balanced_client_modalities(
+    n_clients: int,
+    image_ratio: float = 0.5,
+    seed: int = 0,
+):
+    if not 0.0 <= image_ratio <= 1.0:
+        raise ValueError("image_ratio must be between 0 and 1.")
+    if n_clients <= 0:
+        raise ValueError("n_clients must be positive.")
+
+    if n_clients == 1:
+        return ["image" if image_ratio >= 0.5 else "text"]
+
+    n_image = int(round(n_clients * image_ratio))
+    n_image = max(1, min(n_clients - 1, n_image))
+    n_text = n_clients - n_image
+
+    client_modalities = ["image"] * n_image + ["text"] * n_text
+    rng = random.Random(seed)
+    rng.shuffle(client_modalities)
+    return client_modalities
+
 def generate_split(cfg, datasets, graph, y_index):
 
     n = cfg.learning.n_clients
@@ -913,6 +936,7 @@ def generate_split(cfg, datasets, graph, y_index):
     drift_add_nodes_ratio = cfg.learning.subgraphs.get('drift_add_nodes_ratio', 0.5)
     n_dataset_clients = n
     client_subgraph_ids = None
+    client_modalities = None
 
     if len(datasets)>1:
         # if cfg.learning.subgraphs.get('dict_subgraph_with_add_nodes', {}) != {}:
@@ -1005,6 +1029,24 @@ def generate_split(cfg, datasets, graph, y_index):
             f"extra {n_extra_clients}: {n_extra_add} with additional nodes)"
         )
 
+    supports_multimodal = (
+        len(datasets) == 1
+        and hasattr(datasets[0].data['train'], 'X_image')
+        and hasattr(datasets[0].data['train'], 'X_text')
+        and datasets[0].data['train'].X_image is not None
+        and datasets[0].data['train'].X_text is not None
+    )
+    if supports_multimodal:
+        image_ratio = cfg.dataset.get('image_client_ratio', 0.5)
+        client_modalities = build_balanced_client_modalities(
+            n_dataset_clients,
+            image_ratio=image_ratio,
+            seed=int(cfg.get('seed', 0)),
+        )
+        print("\nClient modality assignment:")
+        for i, modality in enumerate(client_modalities):
+            print(f"client {i + 1}: {modality}")
+
     print("\nClient concept coverage:")
     for i in range(n_dataset_clients):
         if client_subgraph_ids is None:
@@ -1020,11 +1062,14 @@ def generate_split(cfg, datasets, graph, y_index):
     path = os.path.join(root)
     shutil.rmtree(path, ignore_errors=True)
     os.makedirs(path, exist_ok=True)
-    split_and_save(cfg, datasets, graph, 'train', n_dataset_clients, subgraphs, subgraphs_task_excluded, root, client_subgraph_ids)
-    split_and_save(cfg, datasets, graph, 'val', n_dataset_clients, subgraphs, subgraphs_task_excluded, root, client_subgraph_ids)
-    split_and_save(cfg, datasets, graph, 'test', n_dataset_clients, subgraphs, subgraphs_task_excluded, root, client_subgraph_ids)
+    if client_modalities is not None:
+        with open(os.path.join(root, "client_modalities.pkl"), "wb") as f:
+            pickle.dump(client_modalities, f)
+    split_and_save(cfg, datasets, graph, 'train', n_dataset_clients, subgraphs, subgraphs_task_excluded, root, client_subgraph_ids, client_modalities)
+    split_and_save(cfg, datasets, graph, 'val', n_dataset_clients, subgraphs, subgraphs_task_excluded, root, client_subgraph_ids, client_modalities)
+    split_and_save(cfg, datasets, graph, 'test', n_dataset_clients, subgraphs, subgraphs_task_excluded, root, client_subgraph_ids, client_modalities)
     # Save the dataloader for the unique, real test-set (if not combined datasets)
-    if len(datasets) == 1:
+    if len(datasets) == 1 and not cfg.dataset.get('per_client_testset', False):
         test_dataloader = DataLoader(datasets[0].data['test'], batch_size=cfg.dataset.batch_size, collate_fn=static_graph_collate)
         root = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
         path = os.path.join(root, f"test.pkl")
@@ -1033,7 +1078,7 @@ def generate_split(cfg, datasets, graph, y_index):
 
     return subgraphs, subgraphs_concept_names, subgraphs_with_add_nodes, add_nodes_values, add_nodes_names
 
-def split_and_save(cfg, datasets, graph, set, n, subgraphs = None, subgraphs_task_excluded = None, root = None, client_subgraph_ids = None):
+def split_and_save(cfg, datasets, graph, set, n, subgraphs = None, subgraphs_task_excluded = None, root = None, client_subgraph_ids = None, client_modalities = None):
 
         if len(datasets)==1:
             dataset = datasets[0]
@@ -1070,6 +1115,18 @@ def split_and_save(cfg, datasets, graph, set, n, subgraphs = None, subgraphs_tas
             x_splits = [x[idx] for idx in split_indices]
             c_splits = [c[idx] for idx in split_indices]
             y_splits = [y[idx] for idx in split_indices]
+
+            multimodal_x = None
+            if (
+                hasattr(dataset.data[set], "X_image")
+                and hasattr(dataset.data[set], "X_text")
+                and dataset.data[set].X_image is not None
+                and dataset.data[set].X_text is not None
+            ):
+                multimodal_x = {
+                    "image": [dataset.data[set].X_image[idx] for idx in split_indices],
+                    "text": [dataset.data[set].X_text[idx] for idx in split_indices],
+                }
         
         if subgraphs is None:
             raise ValueError("`subgraphs` cannot be None.")
@@ -1090,8 +1147,12 @@ def split_and_save(cfg, datasets, graph, set, n, subgraphs = None, subgraphs_tas
                     masked_y_splits = -1 * torch.ones_like(y_splits[i])  # Mask y variable
                 else:
                     masked_y_splits = y_splits[i]
-                
-                x_i = x_splits[i]
+
+                client_modality = client_modalities[i] if client_modalities is not None else None
+                if multimodal_x is not None and client_modality is not None:
+                    x_i = multimodal_x[client_modality][i]
+                else:
+                    x_i = x_splits[i]
             else:
                 x_i = datasets[j].data[set].X
                 masked_c_splits = datasets[j].data[set].c
@@ -1101,9 +1162,10 @@ def split_and_save(cfg, datasets, graph, set, n, subgraphs = None, subgraphs_tas
                     masked_y_splits = -1 * torch.ones_like(datasets[j].data[set].y)  # Mask y variable
                 else:
                     masked_y_splits = datasets[j].data[set].y
+                client_modality = client_modalities[i] if client_modalities is not None else None
                 
             dataloader = DataLoader(
-                CustomDataset(x_i, masked_c_splits, masked_y_splits, graph),
+                CustomDataset(x_i, masked_c_splits, masked_y_splits, graph, modality=client_modality),
                 batch_size=cfg.dataset.batch_size,
                 collate_fn=static_graph_collate
             )
@@ -1146,22 +1208,26 @@ def apply_mask(tensor, keep):
     return masked_tensor
 
 class CustomDataset(Dataset):
-    def __init__(self, x, c, y, graph):
+    def __init__(self, x, c, y, graph, modality=None):
         self.x = x
         self.c = c
         self.y = y
         self.graph = graph
+        self.modality = modality
 
     def __len__(self):
         return len(self.x)
 
     def __getitem__(self, idx):
-        return {
+        item = {
             'x': self.x[idx],
             'c': self.c[idx],
             'y': self.y[idx],
-            'graph': self.graph
+            'graph': self.graph,
         }
+        if self.modality is not None:
+            item['modality'] = self.modality
+        return item
 
 from typing import Tuple, Any, Optional, Callable
 
