@@ -1,4 +1,3 @@
-from mistralai import Mistral
 import openai
 import os
 from env import OPENAI_API_KEY
@@ -12,9 +11,6 @@ class llm_client:
         
         if 'gpt' in self.LLM:     
             openai.api_key = OPENAI_API_KEY
-        elif 'mistral' in self.LLM or 'mixtral' in self.LLM:
-            api_key = os.environ.get("MISTRALAIKEY")
-            self.client = Mistral(api_key=api_key)
         else:                     
             raise ValueError(f"model ({self.LLM}) still not implemented")
                                   
@@ -29,16 +25,6 @@ class llm_client:
                 temperature=temperature
             )
             answer = response.choices[0].message.content
-        elif 'mistral' in self.LLM or 'mixtral' in self.LLM:
-            chat_response = self.client.chat.complete(
-                model = self.LLM,
-                messages = [
-                    {"role": "system", "content": "You are a helpful AI assistant."},
-                    {"role": "user", "content": question},
-                ],
-                temperature=temperature
-            )
-            answer = chat_response.choices[0].message.content
         else:
             raise ValueError("model still not implemented")
         return answer
