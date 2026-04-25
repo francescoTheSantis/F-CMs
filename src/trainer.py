@@ -163,11 +163,12 @@ class Trainer(_Trainer_):
         trainer_kwargs = {
             k: v
             for k, v in cfg.trainer.items()
-            if k not in ["monitor", "patience", "logger"]
+            if k not in ["monitor", "patience", "logger", "devices"]
         }
         super().__init__(
             callbacks=callbacks,
             accelerator=accelerator,
+            devices=devices,
             logger=logger,
             **trainer_kwargs,
         )
