@@ -220,10 +220,6 @@ class MMISTccRCC:
         train_df = df[df['Split'] == 'train'].drop(columns=['Split'])
         test_df = df[df['Split'] == 'test'].drop(columns=['Split'])
 
-        # Rename columns using MAPPING
-        train_df = train_df.rename(columns=MAPPING)
-        test_df = test_df.rename(columns=MAPPING)
-        
         # turn all variables to int
         for col in [x for x in train_df.columns if x != 'case_id']:
             train_df[col] = train_df[col].astype(int)
