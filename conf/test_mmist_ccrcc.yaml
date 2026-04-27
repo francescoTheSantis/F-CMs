@@ -36,8 +36,8 @@ dataset:
   # Set true after the first run has saved the preprocessed pickle.
   load_embeddings: false
   # Set true after the first run has saved the graph files.
-  load_graph: true
-  load_true_graph: true
+  load_graph: false
+  load_true_graph: false
 
   batch_size: 512
 

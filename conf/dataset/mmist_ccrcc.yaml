@@ -14,71 +14,24 @@ name: MMIST_ccRCC
 # ------------------------------------------------------------------
 loader:
   _target_: src.data.datasets.mmist_ccrcc.MMISTccRCC
-  # Initial active modality for all splits; overridden per client
-  # during the federated split (see image_client_ratio below).
   active_modality: image
-  # TODO: add any extra constructor arguments that MMISTccRCC.__init__
-  #       requires (e.g. text_source, ftune_size, …).
 
 # ------------------------------------------------------------------
 # Embedding / model sizes
 # ------------------------------------------------------------------
 hidden_size: 64
 batch_size: 64
-image_batch_size: 64
-text_batch_size: 4       # keep small — transformer forward passes are heavy
 
 # ------------------------------------------------------------------
 # Dataset behaviour flags
 # ------------------------------------------------------------------
-# False → not a plain image dataset; triggers multimodal preprocessing path
 is_image_dataset: false
 
 # Reduce to a fraction of the dataset (Null = use full dataset)
 reduce_fraction: Null
 
-# If true, each federated client gets its own test subset (required for
-# multimodal datasets where clients have different modalities).
-per_client_testset: true
-
-# Fraction of clients that are assigned the image modality;
-# the remaining (1 - image_client_ratio) are assigned the text modality.
-# Passed to generate_split.build_balanced_client_modalities().
-image_client_ratio: 0.5
-
-# ------------------------------------------------------------------
-# Embedding generation
-# ------------------------------------------------------------------
-# Whether to (re-)compute embeddings or load a pre-saved pickle.
+# Embeddings are precomputed in the .npz files — no generation needed
 load_embeddings: false
-
-# Image backbone — any value supported by _build_image_encoder() in
-# mmist_ccrcc.py: "resnet18", "resnet50", "densenet121"
-# TODO: switch to a pathology/radiology pretrained backbone if available.
-backbone: resnet50
-
-# HuggingFace model ID for the text encoder.
-# TODO: choose the most appropriate biomedical language model.
-text_backbone: microsoft/BiomedNLP-BiomedBERT-base-uncased-abstract-fulltext
-
-# How to pool the transformer's last hidden state: "cls" or "mean"
-text_pooling: cls
-
-# Column in the merged metadata CSV that contains the primary text input.
-# Must match the column produced by build_multimodal_metadata().
-text_column: text_input
-
-# Maximum number of tokens fed to the text encoder.
-text_max_length: 512
-
-# Set to false to skip the corresponding embedding generation step.
-generate_image_embeddings: true
-generate_text_embeddings: true
-
-# ------------------------------------------------------------------
-# One-hot concept encoding (set true only if needed)
-# ------------------------------------------------------------------
-onehot_to_concepts: false
 
 # Concept definitions (optional, used by LLM-based causal discovery)
 # Maps concept names to their definitions for better LLM understanding
