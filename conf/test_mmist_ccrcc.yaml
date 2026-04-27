@@ -1,0 +1,96 @@
+defaults:
+  - default
+  - override causal_discovery: ges
+  - override rag: Null
+  - _self_
+
+# ------------------------------------------------------------------
+# Federated client ID used when running a single client in isolation
+# (ignored during MULTIRUN sweeps)
+# ------------------------------------------------------------------
+client_id: 0
+
+# ------------------------------------------------------------------
+# Hydra MULTIRUN sweep
+# TODO: adjust seeds, models, and learning strategies as needed.
+# ------------------------------------------------------------------
+hydra:
+  mode: MULTIRUN
+  sweeper:
+    params:
+      seed: 1 #, 2, 3, 4, 5
+      dataset: MMIST_ccRCC
+      model: cem_multi #, c2bm_multi, cgm_multi
+      learning: centralized
+
+# ------------------------------------------------------------------
+# Model hyper-parameters
+# ------------------------------------------------------------------
+model:
+  concept_loss_weight: 0.3
+
+# ------------------------------------------------------------------
+# Dataset overrides
+# ------------------------------------------------------------------
+dataset:
+  # Set true after the first run has saved the preprocessed pickle.
+  load_embeddings: false
+  # Set true after the first run has saved the graph files.
+  load_graph: true
+  load_true_graph: true
+
+  batch_size: 512
+
+  # Fraction of clients assigned the image modality (rest get text).
+  image_client_ratio: 0.5
+
+  # Reduce each client's local dataset to a fraction (Null = no reduction).
+  per_client_reduce_fraction: Null
+
+# ------------------------------------------------------------------
+# Federated learning settings
+# TODO: tune n_clients, subgraph parameters, and drift settings.
+# ------------------------------------------------------------------
+learning:
+  n_clients: 10
+  subgraphs:
+    min_number_subgraphs: 2
+    max_number_subgraphs: 6
+    randomly_eliminate_task_from_subgraphs: true
+    dataset_client_multiplier: 2
+    drift_add_nodes_ratio: 0.5
+    dict_subgraph_with_add_nodes:
+      modality: random
+      number_add_nodes: 2          # TODO: adjust to the number of ccRCC concepts
+      number_subgraphs_add_nodes: 2
+    rnd_drift: 0                   # 0 = no drift; increase to simulate concept drift
+    aggregate_graph:
+      local_graphs: from_true_graph
+      perc_clients_alterations: 0.1
+      graph_alteration_prob: 0.1
+  settings:
+    local_epochs: 2
+    freezing: true
+    mia: false
+    sia: false
+    dra: false
+
+# ------------------------------------------------------------------
+# Engine / optimiser
+# ------------------------------------------------------------------
+engine:
+  intervention_prob: 0.8
+  test_interv_noise: 0.8
+  optim_kwargs:
+    lr: 0.001
+
+# ------------------------------------------------------------------
+# Trainer
+# ------------------------------------------------------------------
+trainer:
+  # logger: wandb
+  devices: [0]
+  max_epochs: 120
+  patience: 5
+
+notes: mmist_ccrcc_first_run
