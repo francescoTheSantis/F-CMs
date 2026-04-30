@@ -217,7 +217,7 @@ def _train_local_head(
         max_iter=max(50, int(max_iter)),
         solver="lbfgs",
         random_state=int(seed),
-        multi_class="auto",
+        # multi_class="auto",
     )
     clf.fit(x_labeled, y_labeled)
     return clf, n_labeled

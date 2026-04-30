@@ -14,8 +14,8 @@ hydra:
       dataset: alarm #, sachs, alarm
       # possible models are:
       # blackbox, blackbox_multi, cbm_linear, cbm_mlp, cem, cgm, c2bm
-      model: c2bm, blackbox_multi, cbm_mlp, cem, cbm_linear, cgm # c2bm, blackbox_multi, cbm_linear, cbm_mlp, cem, cgm
-      learning: local_federated
+      model: c2bm, blackbox_multi, cbm_mlp, cem, cgm #, blackbox_multi, cbm_mlp, cem, cbm_linear, cgm # c2bm, blackbox_multi, cbm_linear, cbm_mlp, cem, cgm
+      learning: local_federated, localized, centralized
 
 #combined_datasets:
 #  other_datasets: [fashionmnist]  # or [colormnist, fashionmnist]
@@ -25,7 +25,7 @@ model:
   concept_loss_weight: 0.8
 
 dataset:
-  load_embeddings: false
+  load_embeddings: true
   load_graph: false
   load_true_graph: true
   batch_size: 512
@@ -59,7 +59,7 @@ engine:
 
 trainer:
   # logger: wandb
-  devices: [1]
+  devices: [0]
   max_epochs: 200
   patience: 15
 

@@ -7,6 +7,10 @@ make_plots.py
 figs/
 test.yaml
 
+logs/
+.venv/
+env/
+
 *.pth
 *.png
 *.log

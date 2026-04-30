@@ -14,8 +14,8 @@ hydra:
       dataset: hailfinder 
       # possible models are:
       # blackbox, blackbox_multi, cbm_linear, cbm_mlp, cem, cgm, c2bm
-      model: cbm_linear, cgm # c2bm, blackbox_multi, cbm_linear, cbm_mlp, cem, cgm
-      learning: local_federated
+      model: c2bm, blackbox_multi, cbm_mlp, cem, cgm # c2bm, blackbox_multi, cbm_linear, cbm_mlp, cem, cgm
+      learning: local_federated, localized, centralized
 
 #combined_datasets:
 #  other_datasets: [fashionmnist]  # or [colormnist, fashionmnist]
@@ -59,8 +59,8 @@ engine:
 
 trainer:
   # logger: wandb
-  devices: [3]
-  max_epochs: 200
+  devices: [0]
+  max_epochs: 200 
   patience: 15
 
 rag:

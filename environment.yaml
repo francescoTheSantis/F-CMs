@@ -6,9 +6,9 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - python>=3.8
-  - pytorch:pytorch>=2.1
-  - torchvision>=0.17.1
+  - python
+  - pytorch:pytorch
+  - torchvision
   - networkx
   - lightning
   - cdt
@@ -18,7 +18,6 @@ dependencies:
   - hydra-core=1.3.*
   - numpy
   - pandas
-  - tqdm
   - scipy
   - scikit-learn
   - tqdm
@@ -29,7 +28,6 @@ dependencies:
   - pyg:pytorch-scatter
   - pyg:pytorch-sparse
   - pytorch:pytorch-cuda
-  - flwr
   - pip
   - pip:
     - wandb
@@ -51,7 +49,6 @@ dependencies:
     - beautifulsoup4
     - lxml
     - duckduckgo_search
-    - flwr
     - opacus
     - seaborn
     - SciencePlots

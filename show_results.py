@@ -21,54 +21,24 @@ args = parser.parse_args()
 
 # List the paths containing the sweeps' results
 paths = [
-    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-12/14-47-43_test_1", # round_drift 10
-    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-12/15-00-54_test_2", # round_drift 20
-    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-12/15-25-49_test_3", # round_drift 20
-    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-12/15-25-56_test_4" # round_drift 10
-    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-12/19-15-43_test_5"
-    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-12/19-17-14_test_6"
-    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-12/19-19-36_test_7"
-    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-12/19-26-02_test_8"
-    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-12/21-42-18_test_9"
-    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-12/21-44-35_test_10"
-    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-12/22-51-44_test_11"
-    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-12/22-51-49_test_12"
-    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-13/10-10-35_test_13" 
-    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-13/09-46-48_test_14"
-    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-13/12-52-02_test_15"
-    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-13/12-32-25_test_16"  
-    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-13/18-25-48_test_17"
-    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-13/18-22-18_test_18"
-    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-14/11-55-02_test_19"
-    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-14/12-19-12_test_20"
-    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-14/12-38-44_test_21"
-    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-14/12-39-02_test_22"
-    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-14/15-45-58_test_23"
-    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-01-14/15-47-01_test_24"
-    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-03-16/23-13-05_test_25_baselines",
-    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-03-16/23-13-19_test_26_baselines",
-    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-03-16/23-29-18_test_27_fcl_oursetting",
-    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-03-16/23-29-23_test_28_fcl_oursetting"
-    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-03-17/09-59-37",
-    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-03-17/10-00-10"
-    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-03-17/10-15-48",
-    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-03-17/10-15-51",
-    # "/home/dario/Projects/Federated_Learning/Federated-C2BM/outputs/multirun/2026-03-17/10-31-32_test_29_siim"
-    # "/Users/dariofenoglio/Desktop/Federated-C2BM/outputs/multirun/2026-04-13/11-31-06" 
-    # "/Users/dariofenoglio/Desktop/Federated-C2BM/outputs/multirun/2026-04-13/15-17-46",   
-    # "/Users/dariofenoglio/Desktop/Federated-C2BM/outputs/multirun/2026-04-13/15-52-11"
-    # "/Users/dariofenoglio/Desktop/Federated-C2BM/outputs/multirun/2026-04-14/13-02-02"
-    # "/Users/dariofenoglio/Desktop/Federated-C2BM/outputs/multirun/2026-04-14/13-04-27"
-    # "/Users/dariofenoglio/Desktop/Federated-C2BM/outputs/multirun/2026-04-14/14-28-35"
-    # "/Users/dariofenoglio/Desktop/Federated-C2BM/outputs/multirun/2026-04-14/15-04-56"
-    # "/Users/dariofenoglio/Desktop/Federated-C2BM/outputs/multirun/2026-04-14/15-04-27"
-    # "/Users/dariofenoglio/Desktop/Federated-C2BM/outputs/multirun/2026-04-14/17-08-12_stat_cbm",
-    #"/Users/dariofenoglio/Desktop/Federated-C2BM/outputs/multirun/2026-04-14/17-08-00_dyn_cbm",
-    # "/Users/dariofenoglio/Desktop/Federated-C2BM/outputs/multirun/2026-04-15/09-36-38_stat_black",
-    #"/Users/dariofenoglio/Desktop/Federated-C2BM/outputs/multirun/2026-04-15/09-37-16_dyn_black",
-    # "/Users/dariofenoglio/Desktop/Federated-C2BM/outputs/multirun/2026-04-15/10-52-14_stat",
-    #"/Users/dariofenoglio/Desktop/Federated-C2BM/outputs/multirun/2026-04-15/10-52-28_dyn",
-    "/home/admin/Federated-C2BM/outputs/multirun/2026-04-30/16-02-03"
+    # "outputs/multirun/2026-04-16/13-02-51_asia", #OK
+    # "outputs/multirun/2026-04-16/13-02-46_asia_s", #OK
+    # "outputs/multirun/2026-04-16/13-58-53_ins", #OK
+    # "outputs/multirun/2026-04-16/13-58-54_ins_s", #OK
+    # "outputs/multirun/2026-04-18/12-49-24_ha", #OK but skipped 1 cgm and 1 c2bm
+    # "outputs/multirun/2026-04-18/12-49-30_ha_s", #OK
+    # "outputs/multirun/2026-04-20/10-45-55_sachs", #OK
+    # "outputs/multirun/2026-04-20/10-46-16_sachs_s", #OK
+    # "outputs/multirun/2026-04-20/19-21-00_alarm", #OK
+    # "outputs/multirun/2026-04-20/19-21-16_alarm_s", #OK 
+    # "outputs/multirun/2026-04-21/11-11-20_siim", #OK but skipped seed 1 for all models/learning modes
+    # "outputs/multirun/2026-04-21/11-11-42_siim_s", #OK but skipped seed 1 for all models/learning modes
+    "outputs/multirun/2026-04-22/15-49-04_asia_bas", 
+    "outputs/multirun/2026-04-22/15-51-34_sachs_bas",
+    "outputs/multirun/2026-04-22/15-53-59_alarm_bas",
+    "outputs/multirun/2026-04-22/15-56-11_ins_bas",
+    "outputs/multirun/2026-04-22/15-59-30_hail_bas",
+    "outputs/multirun/2026-04-22/16-03-56_siim_bas",
 ]
 
 # folder to save processed results

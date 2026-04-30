@@ -14,8 +14,8 @@ hydra:
       dataset: sachs #, sachs, alarm
       # possible models are:
       # blackbox, blackbox_multi, cbm_linear, cbm_mlp, cem, cgm, c2bm
-      model: c2bm, blackbox_multi, cbm_mlp, cem, cbm_linear, cgm # c2bm, blackbox_multi, cbm_linear, cbm_mlp, cem, cgm
-      learning: local_federated
+      model: c2bm, blackbox_multi, cbm_mlp, cem, cgm #, blackbox_multi, cbm_mlp, cem, cbm_linear, cgm # c2bm, blackbox_multi, cbm_linear, cbm_mlp, cem, cgm
+      learning: local_federated, localized, centralized
 
 #combined_datasets:
 #  other_datasets: [fashionmnist]  # or [colormnist, fashionmnist]
@@ -45,7 +45,7 @@ learning:
      modality: at_least_one_parent_and_child
      number_add_nodes: 2
      number_subgraphs_add_nodes: 3
-   rnd_drift: 1000 # 0 if no drift
+   rnd_drift: 10 # 0 if no drift
    aggregate_graph:
      local_graphs: from_true_graph # from_true_graph / learned / none
      perc_clients_alterations: 0.1 # 1 per il test con dario e 2 clients
@@ -59,7 +59,7 @@ engine:
 
 trainer:
   # logger: wandb
-  devices: [1]
+  devices: [0]
   max_epochs: 150
   patience: 10
 

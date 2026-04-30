@@ -198,8 +198,18 @@ def _evaluate_graph_against_truth(pred_graph, true_graph, tag, key=None):
 
     aligned_pred = pred_graph.reindex(index=true_graph.index, columns=true_graph.columns, fill_value=0)
     aligned_true = true_graph.copy()
-    np.fill_diagonal(aligned_pred.values, 0)
-    np.fill_diagonal(aligned_true.values, 0)
+    # np.fill_diagonal(aligned_pred.values, 0)
+    # np.fill_diagonal(aligned_true.values, 0)
+    
+    aligned_pred = aligned_pred.copy(deep=True)
+    arr = aligned_pred.to_numpy(copy=True)
+    np.fill_diagonal(arr, 0)
+    aligned_pred.iloc[:, :] = arr
+    
+    alighed_true = aligned_true.copy(deep=True)
+    arr = alighed_true.to_numpy(copy=True)
+    np.fill_diagonal(arr, 0)
+    aligned_true.iloc[:, :] = arr
 
     cost, count = hamming_distance(aligned_pred, aligned_true)
     avg_cost = cost / count if count else 0.0

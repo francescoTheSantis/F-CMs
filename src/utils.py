@@ -706,6 +706,8 @@ def alterate_graph(graph: pd.DataFrame, prob: float) -> pd.DataFrame:
     # Work with a copy of the graph
     altered_graph = graph.copy()
     adj_matrix = altered_graph.values
+    if not adj_matrix.flags.writeable:
+        adj_matrix = np.array(adj_matrix, copy=True)
     n_nodes = len(graph)
     
     # Identify the task node (assumed to be the last node)

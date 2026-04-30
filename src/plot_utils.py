@@ -1012,7 +1012,7 @@ def plot_cumulative_single_c_on_y_OLD(
                 # Average over seeds
                 mean_cumulative = np.mean([cv for cv, _ in cumulative_values_per_seed], axis=0)
                 std_cumulative = np.std([cv for cv, _ in cumulative_values_per_seed], axis=0)
-                stderr_cumulative = 1.96 * std_cumulative / np.sqrt(len(cumulative_values_per_seed))
+                stderr_cumulative = std_cumulative / np.sqrt(len(cumulative_values_per_seed)) #1.96 *
                 
                 # Aggregate missing mask (if any seed is missing, mark as missing)
                 missing_mask = np.any([mm for _, mm in cumulative_values_per_seed], axis=0)
@@ -1305,7 +1305,7 @@ def plot_single_architecture_multi_modality_OLD(
                 if len(values_for_concept) > 0:
                     mean_cumulative.append(np.mean(values_for_concept))
                     std_cumulative.append(np.std(values_for_concept))
-                    stderr_cumulative.append(1.96 * np.std(values_for_concept) / np.sqrt(len(values_for_concept)))
+                    stderr_cumulative.append(np.std(values_for_concept) / np.sqrt(len(values_for_concept))) # 1.96 * 
                 else:
                     # No valid seeds for this concept - use 0
                     mean_cumulative.append(0)
@@ -1671,7 +1671,7 @@ def plot_cumulative_accuracy_multi_modality(
             label_array = np.array(label_avg_per_seed)
             mean_label = np.mean(label_array, axis=0)
             std_label = np.std(label_array, axis=0)
-            stderr_label = 1.96*std_label / np.sqrt(len(label_avg_per_seed)) #1.96 *
+            stderr_label = std_label / np.sqrt(len(label_avg_per_seed)) #1.96 *
 
             # Aggregate missing mask: a concept is missing if it's missing in ALL seeds
             if missing_masks_per_seed:
@@ -2084,7 +2084,7 @@ def plot_cumulative_accuracy_multi_model(
             label_array = np.array(label_avg_per_seed)
             mean_label = np.mean(label_array, axis=0)
             std_label = np.std(label_array, axis=0)
-            stderr_label = 1.96*std_label / np.sqrt(len(label_avg_per_seed)) #1.96 *
+            stderr_label = std_label / np.sqrt(len(label_avg_per_seed)) #1.96 *
 
             # Aggregate missing mask: a concept is missing if it's missing in ALL seeds
             if missing_masks_per_seed:
@@ -2551,7 +2551,7 @@ def compute_statistics(
     ).reset_index().fillna(0)
 
     # compute confidence intervals
-    task_stats['ci_task'] = 1.96 * task_stats['std_accuracy_task'] / np.sqrt(task_stats['total_occurrences']) # 1.96 *
+    task_stats['ci_task'] = task_stats['std_accuracy_task'] / np.sqrt(task_stats['total_occurrences']) # 1.96 *
 
     # Compute mean and std for balanced task accuracy
     if 'balanced_task_acc' in task_df.columns and task_df['balanced_task_acc'].notna().any():
@@ -2561,7 +2561,7 @@ def compute_statistics(
             std_balanced_task=('balanced_task_acc', 'std'),
             count_balanced_task=('balanced_task_acc', 'count'),
         ).reset_index().fillna(0)
-        balanced_task_stats['ci_balanced_task'] = 1.96 * balanced_task_stats['std_balanced_task'] / np.sqrt(balanced_task_stats['count_balanced_task'])
+        balanced_task_stats['ci_balanced_task'] = balanced_task_stats['std_balanced_task'] / np.sqrt(balanced_task_stats['count_balanced_task']) #1.96 * 
         task_stats = task_stats.merge(balanced_task_stats, on=['model', 'dataset', 'learning'], how='left')
     else:
         task_stats['avg_balanced_task'] = np.nan
@@ -2577,7 +2577,7 @@ def compute_statistics(
     ).reset_index().fillna(0)
 
     # compute confidence intervals
-    concept_stats['ci_concept'] = 1.96*concept_stats['std_accuracy_concept'] / np.sqrt(concept_stats['total_occurrences'])
+    concept_stats['ci_concept'] = concept_stats['std_accuracy_concept'] / np.sqrt(concept_stats['total_occurrences']) #1.96*
 
     # Aggregated concepts and task performance
     label_stats = concept_df.groupby(['model', 'dataset', 'learning']).agg(
@@ -2588,7 +2588,7 @@ def compute_statistics(
     ).reset_index().fillna(0)
 
     # compute confidence intervals
-    label_stats['ci_label'] = 1.96*label_stats['std_accuracy_label'] / np.sqrt(label_stats['total_occurrences']) # 1.96 *
+    label_stats['ci_label'] = label_stats['std_accuracy_label'] / np.sqrt(label_stats['total_occurrences']) # 1.96 *
 
     return task_stats, concept_stats, label_stats    
 
@@ -2819,7 +2819,7 @@ def compute_drift_statistics(performance):
                 std_coverage=('concept_coverage', 'std'),
                 total_occurrences=('concept_coverage', 'count')
             ).reset_index().fillna(0)
-            coverage_stats['ci_coverage'] = 1.96*coverage_stats['std_coverage'] / np.sqrt(coverage_stats['total_occurrences'])
+            coverage_stats['ci_coverage'] = coverage_stats['std_coverage'] / np.sqrt(coverage_stats['total_occurrences']) #1.96*
 
     if 'percent_params_changed' in performance.columns:
         params_df = performance[['model', 'dataset', 'learning', 'percent_params_changed']].dropna(subset=['percent_params_changed'])
@@ -2829,7 +2829,7 @@ def compute_drift_statistics(performance):
                 std_param_change=('percent_params_changed', 'std'),
                 total_occurrences=('percent_params_changed', 'count')
             ).reset_index().fillna(0)
-            param_change_stats['ci_param_change'] = 1.96* param_change_stats['std_param_change'] / np.sqrt(param_change_stats['total_occurrences'])
+            param_change_stats['ci_param_change'] = param_change_stats['std_param_change'] / np.sqrt(param_change_stats['total_occurrences']) #1.96* 
 
     return coverage_stats, param_change_stats
 
