@@ -42,17 +42,27 @@ from torch.utils.data import (
 from src.causal_discovery.causal_discovery_block import causal_discovery
 from src.completion.completion_block import complete_graph_with_llm
 
-def load_dataloaders(cfg: DictConfig, path: str, n_clients: int):
+def load_dataloaders(cfg: DictConfig, path: str, n_clients: int, predrift_clients: Optional[List[int]] = None) -> Tuple[List[DataLoader], List[DataLoader], List[DataLoader], List[Optional[int]]]:
     combined_dataset = OmegaConf.select(cfg, 'combined_datasets.other_datasets', default=None)
     per_client_testset = OmegaConf.select(cfg, 'dataset.per_client_testset', default=False)
     per_client_reduce_fraction = OmegaConf.select(cfg, 'dataset.per_client_reduce_fraction', default=None)
+    if per_client_reduce_fraction is not None:
+        raise NotImplementedError("perc_lient reduce fraction is not implemented yet. It requires checking for the \"static\" mode that postdrift clients data is reduced in the same way as predrift clients data to ensure that the drift is only in the data and not in the architecture (if the architecture changes, then we cannot guarantee that the model is the same in predrift and postdrift, which is a requirement for per_client_reduce_fraction to be a valid setting).")
     train_dataloaders = []
     val_dataloaders = []
     test_dataloaders = []
+    corresponding_predrift_clients = [None for _ in range(n_clients)]
 
     # if cfg.combined_datasets is None then there is a unique test_dataloader
     for client_id in range(1,n_clients+1):
         train_path, val_path, test_path = get_split_paths_fl(cfg, path, client_id)
+        if cfg.learning.subgraphs.drift_clients_aggregation == "change":
+            j = identify_subgraph(path, client_id)
+            path_0 = os.path.join(path, f"client_{client_id}_subgraph_{j}_clients_predrift.pkl")
+            if cfg.learning.subgraphs.rnd_drift > 1 and (client_id not in predrift_clients) and cfg.learning.subgraphs.drift_clients_aggregation == "change":
+                with open(path_0, 'rb') as f:
+                    predrift_client_with_same_subgraph = pickle.load(f)
+                corresponding_predrift_clients[client_id-1] = predrift_client_with_same_subgraph
         # if the file is not found, raise an error
         if not os.path.exists(train_path) or not os.path.exists(val_path) or not os.path.exists(test_path):
             raise FileNotFoundError(f"File {train_path} or {val_path} or {test_path} not found")
@@ -104,7 +114,7 @@ def load_dataloaders(cfg: DictConfig, path: str, n_clients: int):
                 )
                 test_dataloaders.append(test_dataloader)
 
-    return train_dataloaders, val_dataloaders, test_dataloaders
+    return train_dataloaders, val_dataloaders, test_dataloaders, corresponding_predrift_clients
 
 
 def _maybe_reduce_loader(template_loader, reduce_fraction, seed: int, client_id: int, split_name: str):
@@ -177,7 +187,7 @@ def set_parameters(engine, parameters):
     engine.model.load_state_dict(state_dict, strict=True)
 
 
-def set_old_parameters(engine, parameters, parameter_keys, verbose: bool = False):
+def set_old_parameters(engine, parameters, parameter_keys, drift_mode, verbose: bool = False):
     """
     Load only the parameters that are compatible with the current model.
     Useful when the architecture expands and new modules are introduced.
@@ -209,6 +219,10 @@ def set_old_parameters(engine, parameters, parameter_keys, verbose: bool = False
             old_tensor = old_tensor.to(new_state[k].dtype)
         new_state[k] = old_tensor
         loaded += 1
+
+    # check: if we are in static mode there should not be any missing or mismatched parameters because the architecture must be the same in predrift and postdrift (no changes in the architecture, just the data)
+    if (missing > 0 or mismatched > 0) and drift_mode=="static":
+        raise ValueError(f"Failed to load all parameters in static drift mode. There are new elements in the model: {missing} missing, {mismatched} shape mismatched.")
 
     engine.model.load_state_dict(new_state, strict=False)
     if verbose:
@@ -529,6 +543,37 @@ def maybe_update_config_with_graph_subgroup_clients(cfg_predrift, predrift_clien
 
     return cfg_predrift
 
+def update_config_for_static(cfg_postdrift, cfg_predrift):
+    """
+    Update the configuration for static mode, ensuring that the architecture remains the same
+    between predrift and postdrift configurations, only the data changes. 
+
+    Args:
+        cfg_postdrift: the configuration after the drift, which contains the original c_names_id and c_names_ood
+        cfg_predrift: the configuration before the drift, which will be updated to match the postdrift concept names
+
+    Returns:  
+        cfg_output: the updated configuration for predrift, with c_names_id and c_names_ood matching the postdrift configuration but the other settings (e.g., input size, graph) unchanged from the predrift configuration. 
+        This ensures that the model architecture is the same in predrift and postdrift, and only the data changes.
+
+    """
+    cfg_output = copy.deepcopy(cfg_predrift)
+    cfg_output.engine.c_names_id = cfg_postdrift.engine.c_names_id
+    cfg_output.engine.c_names_ood = cfg_postdrift.engine.c_names_ood
+
+    c_info_names = cfg_output.engine.model.c_info['names']
+    # check that all concepts in c_names_id are in c_info_names
+    for client_id, names in cfg_output.engine.c_names_id.items():
+        for name in names:
+            if name not in c_info_names:
+                raise ValueError(f"Client {client_id} in c_names_id has concept name '{name}' not found in c_info['names']")
+            
+    # select from cfg_postdrift.engine.c_names_ood only the concepts that are in c_info_names
+    for client_id, names in cfg_output.engine.c_names_ood.items():
+        filtered_names = [name for name in names if name in c_info_names]
+        cfg_output.engine.c_names_ood[client_id] = filtered_names
+
+    return cfg_output
 
 def filter_dataloaders_by_concepts(dataloaders, cfg_predrift, subgroup_clients, subgraphs_concept_names, all_concept_names, cache_path):
     """
@@ -1617,7 +1662,7 @@ def _clone_loader(template_loader, dataset, *, shuffle):
     )
 
 
-def dataprocess_auditing(train_dataloaders, n_clients, cfg):
+def dataprocess_auditing(train_dataloaders, n_clients, cfg, corresponding_predrift_clients):
     """
     Produces:
       • subsampled_train_loaders : list[DataLoader]
@@ -1630,51 +1675,58 @@ def dataprocess_auditing(train_dataloaders, n_clients, cfg):
 
     subsampled_train_loaders, canary_loaders, true_in_outs = [], [], []
     sia_datasets: List[_SIASampleDataset] = []
-
     for cid in range(n_clients):
-        base_loader  = train_dataloaders[cid]
-        base_dataset = base_loader.dataset
-        n_total      = len(base_dataset)
+        if corresponding_predrift_clients[cid] is None:
+            base_loader  = train_dataloaders[cid]
+            base_dataset = base_loader.dataset
+            n_total      = len(base_dataset)
 
-        # ---------- 1. split into canaries / non-canaries -------------------
-        n_canaries   = max(1, int(round(frac * n_total)))
-        n_non_can    = n_total - n_canaries
-        canaries_ds, non_canaries_ds = random_split(
-            base_dataset, [n_canaries, n_non_can]
-        )
+            # ---------- 1. split into canaries / non-canaries -------------------
+            n_canaries   = max(1, int(round(frac * n_total)))
+            n_non_can    = n_total - n_canaries
+            canaries_ds, non_canaries_ds = random_split(
+                base_dataset, [n_canaries, n_non_can]
+            )
 
-        if hasattr(base_dataset, "c"):
-            full_c = base_dataset.c
-            canaries_ds.c      = full_c[canaries_ds.indices]
-            non_canaries_ds.c  = full_c[non_canaries_ds.indices]
+            if hasattr(base_dataset, "c"):
+                full_c = base_dataset.c
+                canaries_ds.c      = full_c[canaries_ds.indices]
+                non_canaries_ds.c  = full_c[non_canaries_ds.indices]
 
-        # ---------- 2. subsample canaries "in" / "out" ----------------------
-        true_in_out = torch.rand(n_canaries) < 0.5
-        keep_idx    = true_in_out.nonzero(as_tuple=False).squeeze(1)
+            # ---------- 2. subsample canaries "in" / "out" ----------------------
+            true_in_out = torch.rand(n_canaries) < 0.5
+            keep_idx    = true_in_out.nonzero(as_tuple=False).squeeze(1)
 
-        canaries_in_ds = Subset(canaries_ds, keep_idx)
-        if hasattr(canaries_ds, "c"):
-            canaries_in_ds.c = canaries_ds.c[keep_idx]
+            canaries_in_ds = Subset(canaries_ds, keep_idx)
+            if hasattr(canaries_ds, "c"):
+                canaries_in_ds.c = canaries_ds.c[keep_idx]
 
-        # ---------- 3. build *training* dataset & loaders -------------------
-        combined_ds = ConcatDataset([non_canaries_ds, canaries_in_ds])
-        if hasattr(base_dataset, "c"):
-            combined_ds.c = torch.cat([non_canaries_ds.c, canaries_in_ds.c])
+            # ---------- 3. build *training* dataset & loaders -------------------
+            combined_ds = ConcatDataset([non_canaries_ds, canaries_in_ds])
+            if hasattr(base_dataset, "c"):
+                combined_ds.c = torch.cat([non_canaries_ds.c, canaries_in_ds.c])
 
-        subsampled_train_loaders.append(
-            _clone_loader(base_loader, combined_ds, shuffle=True)
-        )
-        canary_loaders.append(
-            _clone_loader(base_loader, canaries_ds, shuffle=False)
-        )
-        true_in_outs.append(true_in_out)
-        cfg.learning.settings.n_canaries = n_canaries
+            subsampled_train_loaders.append(
+                _clone_loader(base_loader, combined_ds, shuffle=True)
+            )
+            canary_loaders.append(
+                _clone_loader(base_loader, canaries_ds, shuffle=False)
+            )
+            true_in_outs.append(true_in_out)
+            cfg.learning.settings.n_canaries = n_canaries
 
-        # ---------- 4. build SIA samples for this client --------------------
-        if cfg.learning.settings.sia:
-            pool = non_canaries_ds.indices    # only non-canaries
-            sel  = random.sample(pool, min(sia_k, len(pool)))
-            sia_datasets.append(_SIASampleDataset(base_dataset, sel, cid))
+            # ---------- 4. build SIA samples for this client --------------------
+            if cfg.learning.settings.sia:
+                pool = non_canaries_ds.indices    # only non-canaries
+                sel  = random.sample(pool, min(sia_k, len(pool)))
+                sia_datasets.append(_SIASampleDataset(base_dataset, sel, cid))
+        else:
+            corr_predrift_client = corresponding_predrift_clients[cid]
+            subsampled_train_loaders.append(subsampled_train_loaders[corr_predrift_client])
+            canary_loaders.append(canary_loaders[corr_predrift_client])
+            true_in_outs.append(true_in_outs[corr_predrift_client])
+            if cfg.learning.settings.sia:
+                sia_datasets.append(sia_datasets[corr_predrift_client])
 
     # ---------- 5. concatenate SIA datasets from all clients ---------------
     if sia_datasets:
@@ -2568,7 +2620,7 @@ def plot_training_metrics(history: Dict[str, Any], save_dir: str = ".") -> None:
     plt.close('all')
     print(f"Training plots saved to {save_dir}/")
 
-def build_local_graphs(client_ids, cfg, train_dataloaders, y_name, graph = None):
+def build_local_graphs(client_ids, cfg, train_dataloaders, y_name,  corresponding_predrift_clients, graph = None,):
     
     global_graph = graph.copy() if graph is not None else None
     cfg_local = copy.deepcopy(cfg)
@@ -2577,66 +2629,73 @@ def build_local_graphs(client_ids, cfg, train_dataloaders, y_name, graph = None)
     graph_alteration_prob = cfg_local.learning.subgraphs.aggregate_graph.graph_alteration_prob
 
     # Determine which clients will have their graphs altered
-    n_clients = len(client_ids)
+    eligible_clients = [cid for cid in client_ids if corresponding_predrift_clients[cid - 1] is None]
+    #eligible_clients = client_ids  # consider all clients eligible for alteration
+    n_clients = len(eligible_clients)
     n_clients_to_alter = int(perc_alterations * n_clients)
-    clients_to_alter = set(random.sample(client_ids, n_clients_to_alter))
+    clients_to_alter = set(random.sample(eligible_clients, n_clients_to_alter))
 
     local_graphs = []
     local_weights = []
     for client_id in client_ids:
-        loader = train_dataloaders[client_id - 1]
-        node_names = cfg_local.engine.c_names_id[client_id]
-        node_names.append(y_name)
-        if modality == 'from_true_graph':
-            if global_graph is None:
-                raise ValueError("Graph must be provided when modality is 'from_true_graph'.")
-            local_graph = global_graph.loc[node_names, node_names]
-            # Only alter graph if this client is selected
-            if client_id in clients_to_alter:
-                local_graph = alterate_graph(local_graph, graph_alteration_prob)
-            local_graphs.append(local_graph)
+        if corresponding_predrift_clients[client_id -1 ] is None:
+            loader = train_dataloaders[client_id - 1]
+            node_names = cfg_local.engine.c_names_id[client_id]
+            node_names.append(y_name)
+            if modality == 'from_true_graph':
+                if global_graph is None:
+                    raise ValueError("Graph must be provided when modality is 'from_true_graph'.")
+                local_graph = global_graph.loc[node_names, node_names]
+                # Only alter graph if this client is selected
+                if client_id in clients_to_alter:
+                    local_graph = alterate_graph(local_graph, graph_alteration_prob)
+                local_graphs.append(local_graph)
+            else:
+                # select correct columns from train_dataloader
+                cfg_local = copy.deepcopy(cfg)
+                concepts_to_use = cfg_local.engine.c_names_id[client_id]
+                concepts_indices = [cfg_local.engine.model.c_name_index[c] for c in concepts_to_use]
+                dataloader = train_dataloaders[client_id - 1]
+                c_list, y_list = [], []
+                for batch in dataloader:
+                    c_list.append(batch["c"][:, concepts_indices])
+                    y_list.append(batch["y"])
+
+                c_data = torch.cat(c_list, dim=0).numpy()
+                y_data = torch.cat(y_list, dim=0).numpy()
+                
+                # Ensure y_data has correct shape
+                if y_data.ndim == 1:
+                    y_data = y_data.reshape(-1, 1)
+                
+                # Concatenate concepts and target
+                true_graph = None
+
+                # Create a dataset-like object with the correct structure for causal_discovery
+                class LocalDataset:
+                    def __init__(self, c_data, y_data, c_names, y_name):
+                        # Create a simple object to hold data
+                        class Data:
+                            pass
+                        self.data = {'train': Data()}
+                        self.data['train'].c = c_data
+                        self.data['train'].y = y_data
+                        self.c_info = {'names': c_names}
+                        self.y_info = {'names': [y_name]}
+                
+                local_dataset = LocalDataset(c_data, y_data, concepts_to_use, y_name)
+                
+                local_graph = causal_discovery(cfg, local_dataset, true_graph, save_file_name='predicted_graph_local_client_' + str(client_id))
+                local_graph = complete_graph_with_llm(cfg_local, local_graph, cfg_local.dataset.name)
+                local_graph, dataset = remove_problematic_edges(local_graph, train_dataloaders[client_id - 1].dataset)
+                local_graph = remove_cycles(local_graph, y_index=dataset.y_index)
+                local_graphs.append(local_graph)
+
+            local_weights.append(len(loader.dataset))
         else:
-            # select correct columns from train_dataloader
-            cfg_local = copy.deepcopy(cfg)
-            concepts_to_use = cfg_local.engine.c_names_id[client_id]
-            concepts_indices = [cfg_local.engine.model.c_name_index[c] for c in concepts_to_use]
-            dataloader = train_dataloaders[client_id - 1]
-            c_list, y_list = [], []
-            for batch in dataloader:
-                c_list.append(batch["c"][:, concepts_indices])
-                y_list.append(batch["y"])
-
-            c_data = torch.cat(c_list, dim=0).numpy()
-            y_data = torch.cat(y_list, dim=0).numpy()
-            
-            # Ensure y_data has correct shape
-            if y_data.ndim == 1:
-                y_data = y_data.reshape(-1, 1)
-            
-            # Concatenate concepts and target
-            true_graph = None
-
-            # Create a dataset-like object with the correct structure for causal_discovery
-            class LocalDataset:
-                def __init__(self, c_data, y_data, c_names, y_name):
-                    # Create a simple object to hold data
-                    class Data:
-                        pass
-                    self.data = {'train': Data()}
-                    self.data['train'].c = c_data
-                    self.data['train'].y = y_data
-                    self.c_info = {'names': c_names}
-                    self.y_info = {'names': [y_name]}
-            
-            local_dataset = LocalDataset(c_data, y_data, concepts_to_use, y_name)
-            
-            local_graph = causal_discovery(cfg, local_dataset, true_graph, save_file_name='predicted_graph_local_client_' + str(client_id))
-            local_graph = complete_graph_with_llm(cfg_local, local_graph, cfg_local.dataset.name)
-            local_graph, dataset = remove_problematic_edges(local_graph, train_dataloaders[client_id - 1].dataset)
-            local_graph = remove_cycles(local_graph, y_index=dataset.y_index)
-            local_graphs.append(local_graph)
-
-        local_weights.append(len(loader.dataset))
+            corr_predrift_client = corresponding_predrift_clients[client_id -1]
+            local_graphs.append(local_graphs[corr_predrift_client])
+            local_weights.append(local_weights[corr_predrift_client])
     return local_graphs, local_weights
 
 def _print_concept_availability(tag, loader, cfg, cid):

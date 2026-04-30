@@ -63,7 +63,7 @@ class Derm7ptDataset():
     def load_ground_truth_graph(self): 
         return None
     
-    def split(self):
+    def split(self, **kwargs):
         """ 
         Split the dataset into training, validation and test sets 
         """

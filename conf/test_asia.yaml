@@ -9,12 +9,12 @@ hydra:
   mode: MULTIRUN
   sweeper:
     params:
-      seed: 1, 2, 3, 4, 5
+      seed: 1 #, 2, 3 #, 4, 5
       # possible datsets are: asia, sachs, alarm, hailfinder, insurance, siim_pneumothorax
       dataset: asia #, sachs, alarm
       # possible models are:
       # blackbox, blackbox_multi, cbm_linear, cbm_mlp, cem, cgm, c2bm
-      model: c2bm, blackbox_multi, cbm_mlp, cem, cbm_linear, cgm # c2bm, blackbox_multi, cbm_linear, cbm_mlp, cem, cgm
+      model: c2bm #, blackbox_multi, cbm_mlp, cem, cbm_linear, cgm # c2bm, blackbox_multi, cbm_linear, cbm_mlp, cem, cgm
       learning: local_federated
 
 #combined_datasets:

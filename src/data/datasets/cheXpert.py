@@ -84,8 +84,8 @@ def clean_and_split_data(data_path, seed=42):
     full_df = full_df.reset_index(drop=True)
 
     # Filter frontal and AP/PA images
-    full_df = full_df[full_df["Frontal/Lateral"] == "Frontal"]
-    full_df = full_df.drop(columns=["Frontal/Lateral", "AP/PA"])
+    #full_df = full_df[full_df["Frontal/Lateral"] == "Frontal"]
+    #full_df = full_df.drop(columns=["Frontal/Lateral", "AP/PA"])
 
     # Discretize Age
     #full_df["Age"] = full_df["Age"].apply(lambda x: 0.0 if x < 30 else (1.0 if x < 60 else 2.0))
@@ -102,8 +102,8 @@ def clean_and_split_data(data_path, seed=42):
     full_df['subject_id'] = subject_ids
 
     # Droping duplicate patient recordings except for the last visit
-    full_df = full_df.drop_duplicates(subset=['subject_id'], keep='last')
-    full_df = full_df.sort_values(by=['subject_id']).reset_index(drop=True)
+    #full_df = full_df.drop_duplicates(subset=['subject_id'], keep='last')
+    #full_df = full_df.sort_values(by=['subject_id']).reset_index(drop=True)
     
     # Fill NaNs as absent, uncertain (-1) as present (U-Ones strategy from CheXpert paper)
     full_df[CONCEPT_NAMES] = full_df[CONCEPT_NAMES].fillna(0)
@@ -112,12 +112,26 @@ def clean_and_split_data(data_path, seed=42):
     full_df[TARGET_NAME] = np.where(full_df[TARGET_NAME] == 1, 0, 1)
 
     # Extract relative path
+    #check img_id are unique
     full_df["img_id"] = full_df["Path"].apply(lambda x: x.split("/", 1)[1] if "/" in x else x) # correct in this way it just keep the name without /train
     full_df = full_df.drop(columns=["Path"])  
+    assert full_df["img_id"].is_unique, "img_id should be unique after processing"
 
-    # # Balance: reduce minority to 1/3, then undersample majority to 1.5x minority
-    majority = full_df[full_df[TARGET_NAME] == 1]
-    minority = full_df[full_df[TARGET_NAME] == 0]
+    # Shuffle and split into train, val and test
+    full_df = full_df.sample(frac=1, random_state=seed).reset_index(drop=True)
+    split_idx = int(len(full_df) * (0.7))  # 70% train
+    val_idx = int(len(full_df) * (0.8))     # 10% val, 20% test
+    train_df = full_df.iloc[:split_idx]
+    val_df = full_df.iloc[split_idx:val_idx]
+    test_df = full_df.iloc[val_idx:]
+    #full_df.iloc[:split_idx][["img_id"]].to_csv(os.path.join(data_path, "custom_train.csv"), index=False)
+    #full_df.iloc[split_idx:val_idx][["img_id"]].to_csv(os.path.join(data_path, "custom_val.csv"), index=False)
+    #full_df.iloc[val_idx:][["img_id"]].to_csv(os.path.join(data_path, "custom_test.csv"), index=False)
+
+    # Preprocessing training data
+    # Balance: reduce minority to 1/3, then undersample majority to 1.5x minority
+    majority = train_df[train_df[TARGET_NAME] == 1]
+    minority = train_df[train_df[TARGET_NAME] == 0]
 
     # # Reduce minority class to 1/3
     # target_minority_size = int(len(minority) / 3)
@@ -133,8 +147,10 @@ def clean_and_split_data(data_path, seed=42):
     else:
          majority_sampled = majority
 
-    full_df_balanced = pd.concat([minority, majority_sampled], ignore_index=True)
-    print(f"[CheXpert] Total balanced: {len(full_df_balanced)}")
+    train_df_balanced = pd.concat([minority, majority_sampled], ignore_index=True)
+    train_df_balanced = train_df_balanced.sample(frac=1, random_state=seed).reset_index(drop=True)
+    print(f"[CheXpert] Total balanced: {len(train_df_balanced)}")
+
 
     # No balancing — use all data, handle imbalance via class weights in loss
     #full_df_all = full_df.copy()
@@ -143,16 +159,15 @@ def clean_and_split_data(data_path, seed=42):
     #n_total_task = n_pos_task + n_neg_task
     #print(f"[CheXpert] Using full dataset: {n_total_task} samples (target=1: {n_pos_task}, target=0: {n_neg_task})")
 
-    full_df_all = full_df_balanced.copy()
-    # Shuffle and split into train, val and test
-    full_df_all = full_df_all.sample(frac=1, random_state=seed).reset_index(drop=True)
-    split_idx = int(len(full_df_all) * (0.7))  # 70% train
-    val_idx = int(len(full_df_all) * (0.8))     # 10% val, 20% test
-    full_df_all.iloc[:split_idx][["img_id"]].to_csv(os.path.join(data_path, "custom_train.csv"), index=False)
-    full_df_all.iloc[split_idx:val_idx][["img_id"]].to_csv(os.path.join(data_path, "custom_val.csv"), index=False)
-    full_df_all.iloc[val_idx:][["img_id"]].to_csv(os.path.join(data_path, "custom_test.csv"), index=False)
+    # Combine balanced training set with original val and test sets
+    full_df_all = pd.concat([train_df_balanced, val_df, test_df], ignore_index=True)
     
+
+    #save files
     full_df_all.to_csv(os.path.join(data_path, "cheXpert_merged.csv"), index=False)
+    train_df_balanced[["img_id"]].to_csv(os.path.join(data_path, "custom_train.csv"), index=False)
+    val_df[["img_id"]].to_csv(os.path.join(data_path, "custom_val.csv"), index=False)
+    test_df[["img_id"]].to_csv(os.path.join(data_path, "custom_test.csv"), index=False)
 
     # Compute task class weights (balanced: n_samples / (2 * n_class_samples))
     #import torch

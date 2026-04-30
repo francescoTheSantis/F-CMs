@@ -8,6 +8,7 @@ import os
 import warnings
 import hydra # type: ignore
 import pickle
+from copy import deepcopy
 import networkx as nx
 from torch.utils.data import DataLoader
 from src.causal_discovery.causal_discovery_block import causal_discovery
@@ -49,6 +50,7 @@ from src.utils import (
     build_local_graphs,
     maybe_update_config_with_graph_subgroup_clients,
     _print_concept_availability,
+    update_config_for_static
 )
 
 from src.dra import (
@@ -396,7 +398,7 @@ def main(cfg: DictConfig) -> None:
     #graph, dataset = remove_problematic_edges(graph, dataset)
     y_index = graph.columns.get_loc(datasets[0].y_info['names'][0])
     maybe_plot_graph(graph, 'graph')
-    if cfg.dataset.name in ["siim_pneumothorax", "skincon", "cheXpert"] and cfg.learning.mode == "localized":
+    if cfg.dataset.name in ["siim_pneumothorax", "skincon", "cheXpert", "cheXpert_multi"] and cfg.learning.mode == "localized":
             true_graph = graph
 
       # it is ok also for multimodal because c_info and y_info contain all the variables of the datasets
@@ -607,6 +609,7 @@ def main(cfg: DictConfig) -> None:
                 
     elif cfg.learning.mode == 'local_federated':
         
+        
         # hyperparameters   
         n_rounds = cfg.learning.settings.n_rounds 
         n_clients = cfg.learning.n_clients 
@@ -614,6 +617,12 @@ def main(cfg: DictConfig) -> None:
         cfg.trainer.max_epochs = cfg.learning.settings.local_epochs
         cfg.trainer.patience = 0
         # use_concepts = True # whether to use concept information in the MIA attacks
+        if cfg.learning.subgraphs.rnd_drift > 1:
+            predrift_clients = list(range(1, n_clients + 1))         
+        else:
+            predrift_clients = None
+            
+
         
         num_threads = cfg.learning.settings.num_threads
         print(f"\033[93mLocal Federated training with {n_clients} clients\033[0m")
@@ -623,12 +632,12 @@ def main(cfg: DictConfig) -> None:
         # seed_everything(cfg.seed)
         
         # read client data
-        train_dataloaders, val_dataloaders, test_dataloaders = load_dataloaders(cfg, path, n_clients * cfg.learning.subgraphs.get('dataset_client_multiplier', 1))
+        train_dataloaders, val_dataloaders, test_dataloaders, corresponding_predrift_clients = load_dataloaders(cfg, path, n_clients * cfg.learning.subgraphs.get('dataset_client_multiplier', 1), predrift_clients)
         task_name = datasets[0].y_info["names"][0]
         _print_task_label_distribution(train_dataloaders, task_name, "train", per_client=True)
         _print_task_label_distribution(val_dataloaders, task_name, "val", per_client=False)
         _print_task_label_distribution(test_dataloaders, task_name, "test", per_client=False)
-        train_dataloaders, canary_loaders, true_in_outs, sia_loader = dataprocess_auditing(train_dataloaders, n_clients * cfg.learning.subgraphs.get('dataset_client_multiplier', 1), cfg) # NOTE: for the moment we are reducing the training data size
+        train_dataloaders, canary_loaders, true_in_outs, sia_loader = dataprocess_auditing(train_dataloaders, n_clients * cfg.learning.subgraphs.get('dataset_client_multiplier', 1), cfg, corresponding_predrift_clients) # NOTE: for the moment we are reducing the training data size
         _print_task_label_distribution(train_dataloaders, task_name, "train after auditing", per_client=True)
         print("\033[94mNumber of samples per client:\033[0m")
         for client_idx, train_loader in enumerate(train_dataloaders, start=1):
@@ -656,9 +665,11 @@ def main(cfg: DictConfig) -> None:
 
         # determine clients for possible predrift and postdrift phases
         if cfg.learning.subgraphs.rnd_drift > 1:
-            predrift_clients = list(range(1, n_clients + 1))
-            postdrift_clients = list(range(n_clients + 1, min(2 * n_clients, n_dataset_clients) + 1))
-
+            
+            if cfg.learning.subgraphs.drift_clients_aggregation =="add":
+                postdrift_clients =  list(range(1, min(2 * n_clients, n_dataset_clients) + 1))
+            else:
+                postdrift_clients = list(range(n_clients + 1, min(2 * n_clients, n_dataset_clients) + 1)) 
             # check postdrift clients have subgraphs that cover all the subgraphs
             postdrift_subgraphs = set()
             for cid in postdrift_clients:
@@ -674,11 +685,14 @@ def main(cfg: DictConfig) -> None:
 
             if postdrift_subgraphs != all_subgraphs:
                 raise ValueError("Post-drift clients do not cover all subgraphs. Adjust post-drift clients to include all subgraphs.")
-
+            
         else:
-            predrift_clients = None
             postdrift_clients = list(range(1, n_clients + 1))
             
+        if predrift_clients is None or cfg.learning.subgraphs.drift_clients_aggregation =="add":
+            all_clients = postdrift_clients
+        else:
+            all_clients = predrift_clients + postdrift_clients
 
         # determine node order
         node_order = datasets[0].c_info["names"] + datasets[0].y_info["names"]
@@ -707,15 +721,13 @@ def main(cfg: DictConfig) -> None:
         if use_graph_agg:
             
             # build local graphs for all clients
-            if predrift_clients is None:
-                all_clients = postdrift_clients
-            else:
-                all_clients = predrift_clients + postdrift_clients
+
 
             local_graphs, local_weights = build_local_graphs(all_clients, 
                                                              cfg, 
                                                              train_dataloaders, 
                                                              datasets[0].y_info["names"][0], 
+                                                             corresponding_predrift_clients,
                                                              graph)
 
             # aggregate graphs for pre-drift and post-drift clients
@@ -742,13 +754,17 @@ def main(cfg: DictConfig) -> None:
 
             # postdrift
             t_agg_postdrift = time.time()
-            graph_postdrift, _ = aggregate_graph_proposals(
-                client_selection = postdrift_clients,
-                local_graphs=local_graphs,
-                weights=local_weights,
-                config_input=cfg_postdrift,
-                task_node=datasets[0].y_info["names"][0]
-            )
+            if cfg.learning.subgraphs.drift_mode == "static":
+                graph_postdrift = graph_predrift.copy() if graph_predrift is not None else None
+            else:
+                graph_postdrift, _ = aggregate_graph_proposals(
+                    client_selection = postdrift_clients,
+                    local_graphs=local_graphs,
+                    weights=local_weights,
+                    config_input=cfg_postdrift,
+                    task_node=datasets[0].y_info["names"][0]
+                )
+                
             t_agg_postdrift = time.time() - t_agg_postdrift
             print(f"\033[94m[Timing] aggregate_graph_proposals (postdrift): {t_agg_postdrift:.3f}s\033[0m")
             if cfg.learning.subgraphs.rnd_drift <= n_rounds:
@@ -772,6 +788,7 @@ def main(cfg: DictConfig) -> None:
             # take in consideration that the intervention policy is already constructed relative to the graph_predrift with the node indices referred to it
             interv_policy_predrift_constructed = True
             # Note: intervention policy postidrft remains the one on the true graph to guarantee consistency among the models            
+            
             cfg = maybe_update_config_with_graph(cfg, graph_postdrift, interv_policy)
         
         else:
@@ -785,15 +802,24 @@ def main(cfg: DictConfig) -> None:
 
         # update config predrift with the graph and intervention policy updated based on predrift clients
         cfg_predrift = maybe_update_config_with_graph_subgroup_clients(cfg_predrift, predrift_clients, graph_predrift,interv_policy_predrift,  interv_policy_predrift_constructed, datasets)
+        cfg_postdrift = cfg
+
+        if cfg.learning.subgraphs.drift_mode == "static":
+            # we do not have to update the architecture
+            cfg_postdrift = update_config_for_static(cfg_postdrift, cfg_predrift)
         
         # stop code now
         # sys.exit(0)
 
-        # Filter dataloaders for predrift clients
+        # Filter dataloaders for predrift clients but keep a copy of the original dataloaders for: drift_mode = "dynamic" and drift_clients_aggregation = "add"
+        train_dataloaders_long = deepcopy(train_dataloaders)
+        val_dataloaders_long = deepcopy(val_dataloaders)
+        test_dataloaders_long = deepcopy(test_dataloaders)
+
         train_dataloaders = filter_dataloaders_by_concepts(
             train_dataloaders, 
             cfg_predrift,
-            predrift_clients,
+            all_clients if (cfg.learning.subgraphs.drift_mode == "static" and cfg.learning.subgraphs.rnd_drift <= n_rounds) else predrift_clients,
             subgraphs_concept_names,
             datasets[0].c_info['names'],
             path
@@ -802,18 +828,18 @@ def main(cfg: DictConfig) -> None:
         val_dataloaders = filter_dataloaders_by_concepts(
             val_dataloaders, 
             cfg_predrift,
-            predrift_clients,
+            all_clients if (cfg.learning.subgraphs.drift_mode == "static" and cfg.learning.subgraphs.rnd_drift <= n_rounds) else predrift_clients,
             subgraphs_concept_names,
             datasets[0].c_info['names'],
             path
         )
 
         # if there is just the pre-drift phase, also filter test dataloaders
-        if cfg.learning.subgraphs.rnd_drift > n_rounds:
+        if cfg.learning.subgraphs.rnd_drift > n_rounds or cfg.learning.subgraphs.drift_mode == "static":
             test_dataloaders = filter_dataloaders_by_concepts(
                 test_dataloaders, 
                 cfg_predrift,
-                predrift_clients,
+                all_clients if (cfg.learning.subgraphs.drift_mode == "static" and cfg.learning.subgraphs.rnd_drift <= n_rounds) else predrift_clients,
                 subgraphs_concept_names,
                 datasets[0].c_info['names'],
                 path
@@ -862,7 +888,14 @@ def main(cfg: DictConfig) -> None:
                 if rnd == cfg.learning.subgraphs.rnd_drift:
                     print("\033[93mDrift occurred: switching to new client data distributions\033[0m")
                 if cfg.learning.subgraphs.rnd_drift>1:
-                    start_n_client = n_clients
+                    if cfg.learning.subgraphs.drift_clients_aggregation =="add":
+                        start_n_client = 0
+                        if cfg.learning.subgraphs.drift_mode != "static":
+                            train_dataloaders = train_dataloaders_long
+                            val_dataloaders = val_dataloaders_long
+                            test_dataloaders = test_dataloaders_long
+                    else:
+                        start_n_client = n_clients
                 else:
                     start_n_client = 0
                 cfg_round = cfg_postdrift
@@ -908,6 +941,7 @@ def main(cfg: DictConfig) -> None:
                         local_engine,
                         global_params,
                         global_param_keys,
+                        drift_mode =cfg.learning.subgraphs.drift_mode,
                         verbose=(cid == start_n_client),
                     )
                     t_set_params = time.time() - t_set_params
@@ -1178,7 +1212,7 @@ def main(cfg: DictConfig) -> None:
         ind_min_loss = np.argmin(history["loss_val_avg"])
         # best_round = history["round"][ind_min_loss]
         print(f"\033[92mBest round: {best_round} with loss {history['loss_val_avg'][ind_min_loss]:.4f}\033[0m")
-        cfg_eval = cfg_predrift if best_round < cfg.learning.subgraphs.rnd_drift else cfg
+        cfg_eval = cfg_predrift if best_round < cfg.learning.subgraphs.rnd_drift else cfg_postdrift
         local_engine = instantiate(cfg_eval.engine)
         local_engine.model.load_state_dict(torch.load(f"checkpoints/model_round_{best_round}.pth", weights_only=False, map_location="cpu"))
 

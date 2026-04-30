@@ -93,8 +93,8 @@ def plot_cumulative_accuracy_grid_multi_modality(
     
     # Define styles for learning methods (matching reference image: solid lines, no markers)
     learning_styles = {
-        'local_federated_drift': {'color': METHOD_PALETTE[0], 'linestyle': '-', 'linewidth': 1.5, 'name': 'F-CM'},
-        'local_federated_no_drift': {'color': METHOD_PALETTE[1], 'linestyle': '-', 'linewidth': 1.5, 'name': 'S-F-CM'},
+        'local_federated_dynamic': {'color': METHOD_PALETTE[0], 'linestyle': '-', 'linewidth': 1.5, 'name': 'F-CM'},
+        'local_federated_static': {'color': METHOD_PALETTE[1], 'linestyle': '-', 'linewidth': 1.5, 'name': 'S-F-CM'},
         'centralized': {'color': METHOD_PALETTE[2], 'linestyle': '-', 'linewidth': 1.5, 'name': 'Centralized'},
         'localized': {'color': METHOD_PALETTE[3], 'linestyle': '-', 'linewidth': 1.5, 'name': 'Localized'},
     }
@@ -1012,7 +1012,7 @@ def plot_cumulative_single_c_on_y_OLD(
                 # Average over seeds
                 mean_cumulative = np.mean([cv for cv, _ in cumulative_values_per_seed], axis=0)
                 std_cumulative = np.std([cv for cv, _ in cumulative_values_per_seed], axis=0)
-                stderr_cumulative = 1.96 * std_cumulative / np.sqrt(len(cumulative_values_per_seed))
+                stderr_cumulative = std_cumulative / np.sqrt(len(cumulative_values_per_seed)) # *1.96
                 
                 # Aggregate missing mask (if any seed is missing, mark as missing)
                 missing_mask = np.any([mm for _, mm in cumulative_values_per_seed], axis=0)
@@ -1190,7 +1190,11 @@ def plot_single_architecture_multi_modality_OLD(
     input_filtered['learning_label'] = input_filtered.apply(create_learning_label, axis=1)
     
     # Keep rnd_drift column in the filtered data
-    columns_to_keep = ['seed', 'dataset', 'model', 'learning', 'learning_label', 'rnd_drift', 'n_rounds', 'single_c_interventions_on_y', 'graph', 'true_graph']
+    columns_to_keep = [
+        'seed', 'dataset', 'model', 'learning', 'learning_label',
+        'rnd_drift', 'n_rounds', 'drift_mode', 'drift_clients_aggregation',
+        'single_c_interventions_on_y', 'graph', 'true_graph'
+    ]
     input_filtered = input_filtered[[col for col in columns_to_keep if col in input_filtered.columns]]
     input_filtered = input_filtered.dropna(subset=['single_c_interventions_on_y', 'graph'])
     input_filtered['single_c_interventions_on_y'] = input_filtered['single_c_interventions_on_y'].apply(delta_single_c_interventions_on_y)
@@ -1305,7 +1309,7 @@ def plot_single_architecture_multi_modality_OLD(
                 if len(values_for_concept) > 0:
                     mean_cumulative.append(np.mean(values_for_concept))
                     std_cumulative.append(np.std(values_for_concept))
-                    stderr_cumulative.append(1.96 * np.std(values_for_concept) / np.sqrt(len(values_for_concept)))
+                    stderr_cumulative.append(np.std(values_for_concept) / np.sqrt(len(values_for_concept))) # *1.96
                 else:
                     # No valid seeds for this concept - use 0
                     mean_cumulative.append(0)
@@ -1448,14 +1452,16 @@ def plot_cumulative_accuracy_multi_modality(
     # Create learning label
     def create_learning_label(row):
         # Distinguish local_federated by rnd_drift
-        if row['learning'] == 'local_federated':
-            rnd_drift = float(row['rnd_drift']) if row['rnd_drift'] is not None else 0
-            n_rounds = float(row['n_rounds']) if row['n_rounds'] is not None else float('inf')
+        if 'local_federated' in row['learning']:
+            drift_mode = row['drift_mode'] if 'drift_mode' in row and row['drift_mode'] is not None else None
             
-            if rnd_drift == 0 or rnd_drift > n_rounds:
-                return 'local_federated_no_drift'
+            if drift_mode=="static":
+                if row['rnd_drift']> row['n_rounds']:
+                    return 'local_federated_static' # to change if it is needed
+                else:
+                    return 'local_federated_static'
             else:
-                return 'local_federated_drift'
+                return 'local_federated_dynamic'
 
         # Check for multiple localized clients
         localized_clients = [col for col in input_filtered['learning'].unique() if col.startswith('localized_')]
@@ -1472,7 +1478,7 @@ def plot_cumulative_accuracy_multi_modality(
     # Keep relevant columns
     required_columns = ['seed', 'dataset', 'model', 'learning', 'learning_label', 
                        'cumulative_task_interventions', 'cumulative_concept_interventions', 'graph', 'concept_acc', 'task_acc', 'predicted_concepts']
-    optional_columns = ['rnd_drift', 'n_rounds']
+    optional_columns = ['rnd_drift', 'n_rounds', 'drift_mode', 'drift_clients_aggregation']
     columns_to_keep = [col for col in required_columns + optional_columns if col in input_filtered.columns]
     
     input_filtered = input_filtered[columns_to_keep]
@@ -1492,16 +1498,16 @@ def plot_cumulative_accuracy_multi_modality(
     # Define colors for different learning methods
     learning_colors = {
         'centralized': '#2ca02c',
-        'local_federated_drift': '#1f77b4',
-        'local_federated_no_drift': '#ff7f0e',
+        'local_federated_dynamic': '#1f77b4',
+        'local_federated_static': '#ff7f0e',
         'localized': '#d62728',
     }
     
     # Define display names for learning methods
     learning_display_names = {
         'centralized': 'Centralized',
-        'local_federated_drift': 'F-CMs',
-        'local_federated_no_drift': 'Federated (no drift)',
+        'local_federated_dynamic': 'F-CMs',
+        'local_federated_static': 'S-F-CMs',
         'localized': 'Localized',
     }
 
@@ -1671,7 +1677,7 @@ def plot_cumulative_accuracy_multi_modality(
             label_array = np.array(label_avg_per_seed)
             mean_label = np.mean(label_array, axis=0)
             std_label = np.std(label_array, axis=0)
-            stderr_label = 1.96*std_label / np.sqrt(len(label_avg_per_seed)) #1.96 *
+            stderr_label = std_label / np.sqrt(len(label_avg_per_seed)) #1.96 *
 
             # Aggregate missing mask: a concept is missing if it's missing in ALL seeds
             if missing_masks_per_seed:
@@ -1875,7 +1881,7 @@ def plot_cumulative_accuracy_multi_model(
     # Keep relevant columns
     required_columns = ['seed', 'dataset', 'model', 'learning', 'learning_label', 
                        'cumulative_task_interventions', 'cumulative_concept_interventions', 'graph', 'concept_acc', 'task_acc', 'predicted_concepts']
-    optional_columns = ['rnd_drift', 'n_rounds']
+    optional_columns = ['rnd_drift', 'n_rounds', 'drift_mode', 'drift_clients_aggregation']
     columns_to_keep = [col for col in required_columns + optional_columns if col in input_filtered.columns]
     
     input_filtered = input_filtered[columns_to_keep]
@@ -2084,7 +2090,7 @@ def plot_cumulative_accuracy_multi_model(
             label_array = np.array(label_avg_per_seed)
             mean_label = np.mean(label_array, axis=0)
             std_label = np.std(label_array, axis=0)
-            stderr_label = 1.96*std_label / np.sqrt(len(label_avg_per_seed)) #1.96 *
+            stderr_label = std_label / np.sqrt(len(label_avg_per_seed)) #1.96 *
 
             # Aggregate missing mask: a concept is missing if it's missing in ALL seeds
             if missing_masks_per_seed:
@@ -2551,7 +2557,7 @@ def compute_statistics(
     ).reset_index().fillna(0)
 
     # compute confidence intervals
-    task_stats['ci_task'] = 1.96 * task_stats['std_accuracy_task'] / np.sqrt(task_stats['total_occurrences']) # 1.96 *
+    task_stats['ci_task'] = task_stats['std_accuracy_task'] / np.sqrt(task_stats['total_occurrences']) # 1.96 *
 
     # Compute mean and std for balanced task accuracy
     if 'balanced_task_acc' in task_df.columns and task_df['balanced_task_acc'].notna().any():
@@ -2561,7 +2567,7 @@ def compute_statistics(
             std_balanced_task=('balanced_task_acc', 'std'),
             count_balanced_task=('balanced_task_acc', 'count'),
         ).reset_index().fillna(0)
-        balanced_task_stats['ci_balanced_task'] = 1.96 * balanced_task_stats['std_balanced_task'] / np.sqrt(balanced_task_stats['count_balanced_task'])
+        balanced_task_stats['ci_balanced_task'] = balanced_task_stats['std_balanced_task'] / np.sqrt(balanced_task_stats['count_balanced_task']) #*1.96
         task_stats = task_stats.merge(balanced_task_stats, on=['model', 'dataset', 'learning'], how='left')
     else:
         task_stats['avg_balanced_task'] = np.nan
@@ -2577,7 +2583,7 @@ def compute_statistics(
     ).reset_index().fillna(0)
 
     # compute confidence intervals
-    concept_stats['ci_concept'] = 1.96*concept_stats['std_accuracy_concept'] / np.sqrt(concept_stats['total_occurrences'])
+    concept_stats['ci_concept'] = concept_stats['std_accuracy_concept'] / np.sqrt(concept_stats['total_occurrences']) #*1.96
 
     # Aggregated concepts and task performance
     label_stats = concept_df.groupby(['model', 'dataset', 'learning']).agg(
@@ -2588,7 +2594,7 @@ def compute_statistics(
     ).reset_index().fillna(0)
 
     # compute confidence intervals
-    label_stats['ci_label'] = 1.96*label_stats['std_accuracy_label'] / np.sqrt(label_stats['total_occurrences']) # 1.96 *
+    label_stats['ci_label'] = label_stats['std_accuracy_label'] / np.sqrt(label_stats['total_occurrences']) # 1.96 *
 
     return task_stats, concept_stats, label_stats    
 
@@ -2819,7 +2825,7 @@ def compute_drift_statistics(performance):
                 std_coverage=('concept_coverage', 'std'),
                 total_occurrences=('concept_coverage', 'count')
             ).reset_index().fillna(0)
-            coverage_stats['ci_coverage'] = 1.96*coverage_stats['std_coverage'] / np.sqrt(coverage_stats['total_occurrences'])
+            coverage_stats['ci_coverage'] = coverage_stats['std_coverage'] / np.sqrt(coverage_stats['total_occurrences']) #*1.96
 
     if 'percent_params_changed' in performance.columns:
         params_df = performance[['model', 'dataset', 'learning', 'percent_params_changed']].dropna(subset=['percent_params_changed'])
@@ -2829,7 +2835,7 @@ def compute_drift_statistics(performance):
                 std_param_change=('percent_params_changed', 'std'),
                 total_occurrences=('percent_params_changed', 'count')
             ).reset_index().fillna(0)
-            param_change_stats['ci_param_change'] = 1.96* param_change_stats['std_param_change'] / np.sqrt(param_change_stats['total_occurrences'])
+            param_change_stats['ci_param_change'] = param_change_stats['std_param_change'] / np.sqrt(param_change_stats['total_occurrences']) #*1.96
 
     return coverage_stats, param_change_stats
 
@@ -3260,7 +3266,7 @@ def load_exps(exps_path, n_clients=5, args=None):
                 if 'localized' in training_modality:
                     training_modality_full = training_modality + '_' + str(conf['client_id'])
                 elif "federated" in training_modality or "local_federated" in training_modality:
-                    training_modality_full = training_modality + f'_rnddrift{rnd_drift}_nrounds{n_rounds}'
+                    training_modality_full = training_modality + f'_rnddrift{rnd_drift}_nrounds{n_rounds}'+f"drift_mode{conf['learning'].get('subgraphs', {}).get('drift_mode', 'None')}" + f"agg{conf['learning'].get('subgraphs', {}).get('drift_clients_aggregation', 'None')}"
                 #key = dataset + '_' + str(seed) + '_' + training_modality_full
                 key = dataset + '' + str(seed) + '' + training_modality_full +'_' + model
                 if key not in valid_concepts.keys():
@@ -3313,6 +3319,17 @@ def load_exps(exps_path, n_clients=5, args=None):
                 except (KeyError, TypeError):
                     d['rnd_drift'] = 0
 
+                # Extract drift metadata for plotting/debugging.
+                try:
+                    d['drift_mode'] = conf['learning'].get('subgraphs', {}).get('drift_mode', None)
+                except (KeyError, TypeError, AttributeError):
+                    d['drift_mode'] = None
+
+                try:
+                    d['drift_clients_aggregation'] = conf['learning'].get('subgraphs', {}).get('drift_clients_aggregation', None)
+                except (KeyError, TypeError, AttributeError):
+                    d['drift_clients_aggregation'] = None
+
                 # Extract n_rounds information (corresponds to max_epochs)
                 try:
                     if 'max_epochs' in conf['trainer']:
@@ -3328,7 +3345,7 @@ def load_exps(exps_path, n_clients=5, args=None):
                 if 'localized' in training_modality:
                     training_modality_full = training_modality + '_' + str(conf['client_id'])
                 elif "federated" in training_modality or "local_federated" in training_modality:
-                    training_modality_full = training_modality + f'_rnddrift{d["rnd_drift"]}_nrounds{d["n_rounds"]}'
+                    training_modality_full = training_modality + f'_rnddrift{d["rnd_drift"]}_nrounds{d["n_rounds"]}'+f"drift_mode{d['drift_mode']}" + f"agg{d['drift_clients_aggregation']}"
                 #key = d['dataset'] + '_' + str(d['seed']) + '_' + training_modality_full
                 key = d['dataset'] + '' + str(d['seed']) + '' + training_modality_full +'_' + d['model']
 

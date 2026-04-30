@@ -856,6 +856,9 @@ def build_client_subgraph_ids(
     client_subgraph_ids = []
     client_subgraph_ids.extend(cycle_ids(no_add_ids, n_train_clients))
 
+    # save unique client_subgraph_ids
+    predrift_clients_distr = set(client_subgraph_ids[:n_train_clients])
+
     if n_extra_add > 0 and not add_ids:
         print("Warning: drift_add_nodes_ratio requested, but no subgraphs with additional nodes were generated.")
         n_extra_no_add = n_extra_clients
@@ -863,10 +866,18 @@ def build_client_subgraph_ids(
 
     if n_extra_add > 0:
         client_subgraph_ids.extend(cycle_ids(add_ids, n_extra_add))
+
     if n_extra_no_add > 0:
         client_subgraph_ids.extend(cycle_ids(no_add_ids, n_extra_no_add))
+    
+    # save unique client_subgraph_ids after adding extra clients
+    postdrift_clients_distr = set(client_subgraph_ids[n_train_clients:])
 
-    return n_dataset_clients, client_subgraph_ids
+    # check if there are elements of predrift that are not in postdrift
+    if not predrift_clients_distr.issubset(postdrift_clients_distr):
+        raise ValueError("Attention: Some subgraph ids from pre-drift clients are missing in post-drift clients.")
+
+    return n_dataset_clients, client_subgraph_ids, n_train_clients, n_extra_add
 
 def build_client_subgraph_ids_for_datasets(
     n_train_clients,
@@ -919,7 +930,7 @@ def build_balanced_client_modalities(
 
     if n_clients == 1:
         return ["image" if image_ratio >= 0.5 else "text"]
-
+    
     n_image = int(round(n_clients * image_ratio))
     n_image = max(1, min(n_clients - 1, n_image))
     n_text = n_clients - n_image
@@ -928,6 +939,31 @@ def build_balanced_client_modalities(
     rng = random.Random(seed)
     rng.shuffle(client_modalities)
     return client_modalities
+
+
+def apply_static_filter(subgraphs, subgraphs_concept_names, client_subgraph_ids, n_train_clients, graph, subgraphs_task_excluded):
+    possible_concepts = set()
+    for i in range(n_train_clients):
+        subgraph_id = client_subgraph_ids[i]
+        possible_concepts.update(subgraphs[f'subgraph_{subgraph_id + 1}'])
+
+    subgraphs_idx_post_drift = set(client_subgraph_ids[n_train_clients:])
+
+    for i in subgraphs_idx_post_drift:
+        subgraph_id = i
+        subgraph_concepts = set(subgraphs[f'subgraph_{subgraph_id + 1}'])
+        filtered_concepts = subgraph_concepts.intersection(possible_concepts)
+        subgraphs[f'subgraph_{subgraph_id + 1}'] = list(sorted(filtered_concepts))
+        subgraphs_concept_names[f'subgraph_{subgraph_id + 1}'] = [graph.columns[idx] for idx in range(len(graph.columns)) if idx in filtered_concepts]
+
+    # if all the subgraphs of n_train_clients are in subgraphs_task_excluded, then I would also exclude the task from post-drift subgraphs
+    if all((client_subgraph_ids[i] + 1) in subgraphs_task_excluded for i in range(n_train_clients)):
+        # add id of subgraphs_idx_post_drift to subgraphs_task_excluded
+        subgraphs_task_excluded.extend([i + 1 for i in subgraphs_idx_post_drift])
+        subgraphs_task_excluded = list(set(subgraphs_task_excluded))
+
+    return subgraphs, subgraphs_concept_names
+
 
 def generate_split(cfg, datasets, graph, y_index):
 
@@ -995,6 +1031,8 @@ def generate_split(cfg, datasets, graph, y_index):
                                                                          dict_subgraph_with_add_nodes=cfg.learning.subgraphs.get('dict_subgraph_with_add_nodes', {})
                                     )
         
+
+        
         # eliminate y_index from each subgraph but save from which I eliminated it
         indices_subgraphs_reaching_task = []
         for key in subgraphs.keys():
@@ -1013,20 +1051,20 @@ def generate_split(cfg, datasets, graph, y_index):
     #    subgraphs_task_excluded = None
 
     if len(datasets) == 1 and dataset_client_multiplier != 1:
-        n_dataset_clients, client_subgraph_ids = build_client_subgraph_ids(
+        n_dataset_clients, client_subgraph_ids, n_predrift, n_postdrift_add = build_client_subgraph_ids(
             n_train_clients=n,
             subgraphs_with_add_nodes=subgraphs_with_add_nodes,
             dataset_client_multiplier=dataset_client_multiplier,
             drift_add_nodes_ratio=drift_add_nodes_ratio,
         )
 
-        n_extra_clients = n_dataset_clients - n
+        n_extra_clients = n_postdrift_add #n_dataset_clients - n
         n_extra_add = sum(
             1 for idx in client_subgraph_ids[n:] if subgraphs_with_add_nodes[idx]
         )
         print(
-            f"Dataset clients: {n_dataset_clients} (base {n} without additional nodes, "
-            f"extra {n_extra_clients}: {n_extra_add} with additional nodes)"
+            f"Dataset clients: {n_dataset_clients} (predrift: {n} without additional nodes, "
+            f"postdrift: {int(n/2)} without additional nodes + {n_extra_clients} with additional nodes)"
         )
 
     supports_multimodal = (
@@ -1041,11 +1079,14 @@ def generate_split(cfg, datasets, graph, y_index):
         client_modalities = build_balanced_client_modalities(
             n_dataset_clients,
             image_ratio=image_ratio,
-            seed=int(cfg.get('seed', 0)),
+            seed=int(cfg.get('seed', 0))
         )
         print("\nClient modality assignment:")
         for i, modality in enumerate(client_modalities):
             print(f"client {i + 1}: {modality}")
+
+    if cfg.learning.mode=="local_federated" and cfg.learning.subgraphs.drift_mode=="static":
+        subgraphs, subgraphs_concept_names = apply_static_filter(subgraphs, subgraphs_concept_names, client_subgraph_ids, n_train_clients=n, graph=graph, subgraphs_task_excluded = subgraphs_task_excluded)
 
     print("\nClient concept coverage:")
     for i in range(n_dataset_clients):
@@ -1065,9 +1106,9 @@ def generate_split(cfg, datasets, graph, y_index):
     if client_modalities is not None:
         with open(os.path.join(root, "client_modalities.pkl"), "wb") as f:
             pickle.dump(client_modalities, f)
-    split_and_save(cfg, datasets, graph, 'train', n_dataset_clients, subgraphs, subgraphs_task_excluded, root, client_subgraph_ids, client_modalities)
-    split_and_save(cfg, datasets, graph, 'val', n_dataset_clients, subgraphs, subgraphs_task_excluded, root, client_subgraph_ids, client_modalities)
-    split_and_save(cfg, datasets, graph, 'test', n_dataset_clients, subgraphs, subgraphs_task_excluded, root, client_subgraph_ids, client_modalities)
+    split_and_save(cfg, datasets, graph, 'train', n_dataset_clients, n_predrift, n_postdrift_add, subgraphs, subgraphs_task_excluded, subgraphs_with_add_nodes, root, client_subgraph_ids, client_modalities)
+    split_and_save(cfg, datasets, graph, 'val', n_dataset_clients, n_predrift, n_postdrift_add, subgraphs, subgraphs_task_excluded, subgraphs_with_add_nodes, root, client_subgraph_ids, client_modalities)
+    split_and_save(cfg, datasets, graph, 'test', n_dataset_clients, n_predrift, n_postdrift_add, subgraphs, subgraphs_task_excluded, subgraphs_with_add_nodes, root, client_subgraph_ids, client_modalities)
     # Save the dataloader for the unique, real test-set (if not combined datasets)
     if len(datasets) == 1 and not cfg.dataset.get('per_client_testset', False):
         test_dataloader = DataLoader(datasets[0].data['test'], batch_size=cfg.dataset.batch_size, collate_fn=static_graph_collate)
@@ -1078,7 +1119,8 @@ def generate_split(cfg, datasets, graph, y_index):
 
     return subgraphs, subgraphs_concept_names, subgraphs_with_add_nodes, add_nodes_values, add_nodes_names
 
-def split_and_save(cfg, datasets, graph, set, n, subgraphs = None, subgraphs_task_excluded = None, root = None, client_subgraph_ids = None, client_modalities = None):
+def split_and_save(cfg, datasets, graph, set, n, n_predrift, n_postdrift_add, subgraphs = None, subgraphs_task_excluded = None, subgraphs_with_add_nodes = None, root = None, client_subgraph_ids = None, client_modalities = None):
+
 
         if len(datasets)==1:
             dataset = datasets[0]
@@ -1105,29 +1147,146 @@ def split_and_save(cfg, datasets, graph, set, n, subgraphs = None, subgraphs_tas
             # Generate indices for splitting
             indices = torch.arange(x.size(0))
 
-            # Calculate split sizes for uneven splits
-            split_sizes = [(x.size(0) + i) // n for i in range(n)] 
+            if cfg.learning.subgraphs.get('drift_clients_aggregation', 'change') == 'add':
+                # Calculate split sizes for uneven splits
+                split_sizes = [(x.size(0) + i) // n for i in range(n)] 
 
-            # Split indices into uneven parts
-            split_indices = torch.split(indices, split_sizes)
+                # Split indices into uneven parts
+                split_indices = torch.split(indices, split_sizes)
 
-            # Split tensors using the indices
-            x_splits = [x[idx] for idx in split_indices]
-            c_splits = [c[idx] for idx in split_indices]
-            y_splits = [y[idx] for idx in split_indices]
+                # Split tensors using the indices
+                x_splits = [x[idx] for idx in split_indices]
+                c_splits = [c[idx] for idx in split_indices]
+                y_splits = [y[idx] for idx in split_indices]
 
-            multimodal_x = None
-            if (
-                hasattr(dataset.data[set], "X_image")
-                and hasattr(dataset.data[set], "X_text")
-                and dataset.data[set].X_image is not None
-                and dataset.data[set].X_text is not None
-            ):
-                multimodal_x = {
-                    "image": [dataset.data[set].X_image[idx] for idx in split_indices],
-                    "text": [dataset.data[set].X_text[idx] for idx in split_indices],
-                }
+                multimodal_x = None
+                if (
+                    hasattr(dataset.data[set], "X_image")
+                    and hasattr(dataset.data[set], "X_text")
+                    and dataset.data[set].X_image is not None
+                    and dataset.data[set].X_text is not None
+                ):
+                    multimodal_x = {
+                        "image": [dataset.data[set].X_image[idx] for idx in split_indices],
+                        "text": [dataset.data[set].X_text[idx] for idx in split_indices],
+                    }
         
+                        
+            else:
+                # divide for the numbers of clients predrift + clients postdrift that changed
+                split_sizes = [(x.size(0) + i) // (n_predrift + n_postdrift_add) for i in range(n_predrift + n_postdrift_add)] 
+                #split_sizes = [(x.size(0) + i) // n for i in range(n)]
+                # Split indices into uneven parts
+                split_indices = torch.split(indices, split_sizes)
+
+                # Split tensors using the indices
+                x_splits = []
+                c_splits = []
+                y_splits = []
+                clients_predrift_used = []  # To track which predrift clients have been used for postdrift assignment
+                multimodal_x = None
+                swapped_clients = []  # To track clients that have been swapped to maintain modality balance
+                                  
+                for i in range(n):
+                    
+                    # print(f"Saving dataloader for {set} set, client {i+1}, subgraph {j+1} at {path}")
+                    # For predrift clients, assign data as usual.
+                    if i < n_predrift:
+                        x_splits.append(x[split_indices[i]])
+                        c_splits.append(c[split_indices[i]])
+                        y_splits.append(y[split_indices[i]])
+                        if (
+                            hasattr(dataset.data[set], "X_image")
+                            and hasattr(dataset.data[set], "X_text")
+                            and dataset.data[set].X_image is not None
+                            and dataset.data[set].X_text is not None
+                        ):
+                            if multimodal_x is None:
+                                multimodal_x = {"image": [], "text": []}
+                            multimodal_x["image"].append(dataset.data[set].X_image[split_indices[i]])
+                            multimodal_x["text"].append(dataset.data[set].X_text[split_indices[i]])
+                    else:
+                        
+                        #  For postdrift clients, if they do not change subgraph, assign them the same data of a predrift client with the same subgraph, otherwise assign them the data of the corresponding split
+                        if client_subgraph_ids is None:
+                            j = i % len(subgraphs)
+                        else:
+                            j = client_subgraph_ids[i]
+
+                        path_0 = os.path.join(root, f"client_{i+1}_subgraph_{j+1}_clients_predrift.pkl")
+
+                        if set == "train":
+                            
+                            predrift_client_with_same_subgraph = min(
+                                (i for i, v in enumerate(client_subgraph_ids) if v == j and i not in clients_predrift_used and i < n_predrift),
+                                default=None
+                            )
+
+                            with open(path_0, 'wb') as f:
+                                # save "None" in the file if predrift_client_with_same_subgraph is None
+                                if predrift_client_with_same_subgraph is None:
+                                    pickle.dump(None, f)
+                                else:
+                                    pickle.dump(predrift_client_with_same_subgraph, f)
+                            clients_predrift_used.append(predrift_client_with_same_subgraph)
+                        else:
+                            with open(path_0, 'rb') as f:
+                                predrift_client_with_same_subgraph = pickle.load(f)
+
+                        if predrift_client_with_same_subgraph is not None:
+
+                            x_splits.append(x[split_indices[predrift_client_with_same_subgraph]])
+                            c_splits.append(c[split_indices[predrift_client_with_same_subgraph]])
+                            y_splits.append(y[split_indices[predrift_client_with_same_subgraph]]) 
+                            if (
+                                hasattr(dataset.data[set], "X_image")
+                                and hasattr(dataset.data[set], "X_text")
+                                and dataset.data[set].X_image is not None
+                                and dataset.data[set].X_text is not None
+                            ):
+                                if set == "train":
+                                    old_modality = client_modalities[i] if client_modalities is not None else None
+                                    client_modalities[i] = client_modalities[predrift_client_with_same_subgraph]
+
+                                    if old_modality is not None and old_modality != client_modalities[i]:
+                                        print(f"Warning: Client {i+1} modality changed from '{old_modality}' to '{client_modalities[i]}' to match predrift client {predrift_client_with_same_subgraph+1}.")
+                                        remaining_clients = n - i
+                                        eligible_clients = [idx for idx in range(n) if ((idx >= n_predrift and idx<i) or (idx < n_predrift and idx>=remaining_clients)) and (client_modalities[idx] == client_modalities[i])]
+                                        # eliminate from eligible_clients the ones that have been already swapped
+                                        eligible_clients = [idx for idx in eligible_clients if idx not in swapped_clients]
+                                        if eligible_clients:
+                                            swap_client = random.choice(eligible_clients)
+                                            old_modality_swap_client = client_modalities[swap_client]
+                                            swapped_clients.append(swap_client)
+                                            client_modalities[swap_client] = old_modality
+                                            print(f"Swapped modality of client {swap_client+1} from '{old_modality_swap_client}' to '{client_modalities[swap_client]}' to maintain balance.")
+                                
+                                assert client_modalities[i] == client_modalities[predrift_client_with_same_subgraph], f"Client {i+1} modality '{client_modalities[i]}' does not match predrift client {predrift_client_with_same_subgraph+1} modality '{client_modalities[predrift_client_with_same_subgraph]}'."
+                                if multimodal_x is None:
+                                    multimodal_x = {"image": [], "text": []}
+                                multimodal_x["image"].append(dataset.data[set].X_image[split_indices[predrift_client_with_same_subgraph]])
+                                multimodal_x["text"].append(dataset.data[set].X_text[split_indices[predrift_client_with_same_subgraph]]) 
+                        else:  
+                            if not subgraphs_with_add_nodes[j]:
+                                raise ValueError("There is a new postdrift distribution without additional nodes")  
+                            else:
+                                x_splits.append(x[split_indices[i]])
+                                c_splits.append(c[split_indices[i]])
+                                y_splits.append(y[split_indices[i]])
+
+                                if (
+                                    hasattr(dataset.data[set], "X_image")
+                                    and hasattr(dataset.data[set], "X_text")
+                                    and dataset.data[set].X_image is not None
+                                    and dataset.data[set].X_text is not None
+                                ):
+                                    if multimodal_x is None:
+                                        multimodal_x = {"image": [], "text": []}
+                                    multimodal_x["image"].append(dataset.data[set].X_image[split_indices[i]])
+                                    multimodal_x["text"].append(dataset.data[set].X_text[split_indices[i]])
+
+
+
         if subgraphs is None:
             raise ValueError("`subgraphs` cannot be None.")
 
@@ -1231,10 +1390,12 @@ def split_and_save(cfg, datasets, graph, set, n, subgraphs = None, subgraphs_tas
 
             # Store the dataloader in the 
             path = os.path.join(root, f"{set}set_{i+1}_subgraph_{j+1}.pkl") # Start to count from 1
-            # print(f"Saving dataloader for {set} set, client {i+1}, subgraph {j+1} at {path}")
+            
             with open(path, 'wb') as f:
                 pickle.dump(dataloader, f)
 
+
+    
 def get_subgraph_dict(cfg):
     if cfg.dataset.name == 'asia':
         subgraphs = {

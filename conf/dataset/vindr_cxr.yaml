@@ -1,0 +1,18 @@
+defaults:
+  - commons
+  - _self_
+
+name: vindr_cxr
+loader:
+    _target_: src.data.datasets.VinDr_CXR.VinDrCXRDataset
+    modality: image
+    val_size: 0.1
+    ftune_size: 0.      # 0.3
+    ftune_val_size: 0.  # 0.1
+
+batch_size: 64
+
+is_image_dataset: yes
+reduce_fraction: Null
+
+load_embeddings: true

@@ -11,12 +11,12 @@ hydra:
     params:
       seed: 1,2,3 #,2,3 #, 2, 3 #, 4, 5
       # possible datsets are: asia, sachs, alarm, hailfinder, insurance, siim_pneumothorax
-      dataset: asia, siim_pneumothorax #, sachs, alarm
+      dataset: asia #, sachs, alarm
       # possible models are:
       # blackbox, blackbox_multi, cbm_linear, cbm_mlp, cem, cgm, c2bm
       model: c2bm, cem #, blackbox_multi, cbm_mlp, cem, cbm_linear, cgm # c2bm, blackbox_multi, cbm_linear, cbm_mlp, cem, cgm
       learning: local_federated
-      learning.swapping_factor: 0.3,0.6,0.9
+      learning.swapping_factor: 0.3,0.6,0.9,1.0
 
 #combined_datasets:
 #  other_datasets: [fashionmnist]  # or [colormnist, fashionmnist]

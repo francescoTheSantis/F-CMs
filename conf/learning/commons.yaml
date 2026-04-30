@@ -1,5 +1,8 @@
 n_clients: 10
 annotation_assumption: 'task_included'
+swapping_clients: 0.0  # fraction of clients whose concept values get swapped
+swapping_concepts: 0.0  # fraction of concepts to swap per affected client
+swapping_factor: 0.0   # fraction of values to swap per concept (e.g. 0.3 = 30%)
 subgraphs:
   modality: 'connected_nodes'
   concept_in_common: false
