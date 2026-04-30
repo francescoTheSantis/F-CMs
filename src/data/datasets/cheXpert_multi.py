@@ -81,6 +81,7 @@ TEXT_SOURCE_OPTIONS = {
 transResize = 224
 
 
+
 def _balance_task_classes(
     df: pd.DataFrame,
     target_name: str = TARGET_NAME,
@@ -127,6 +128,77 @@ def _balance_task_classes(
         "rows_removed": int(len(df) - len(balanced_df)),
     }
 
+def _balance_task_classes_by_patient(df, target_name=TARGET_NAME, seed=42):
+    patient_labels = (
+        df.groupby("patient_id")[target_name]
+        .max()
+        .reset_index()
+    )
+
+    patient_counts_before = {
+        int(label): int(count)
+        for label, count in patient_labels[target_name].value_counts().sort_index().items()
+    }
+    image_counts_before = {
+        int(label): int(count)
+        for label, count in df[target_name].value_counts().sort_index().items()
+    }
+    if len(patient_counts_before) < 2:
+        return df.reset_index(drop=True), {
+            "applied": False,
+            "reason": "single_class_only",
+            "patient_counts_before": patient_counts_before,
+            "patient_counts_after": patient_counts_before,
+            "image_counts_before": image_counts_before,
+            "image_counts_after": image_counts_before,
+        }
+
+    min_patient_count = min(patient_counts_before.values())
+
+    sampled_patients = (
+        patient_labels
+        .groupby(target_name, group_keys=False)
+        .apply(lambda x: x.sample(n=min_patient_count, random_state=seed))
+        .reset_index(drop=True)
+    )
+
+    patient_balanced_df = df[df["patient_id"].isin(sampled_patients["patient_id"])]
+    image_counts_after_patient_balance = {
+        int(label): int(count)
+        for label, count in patient_balanced_df[target_name].value_counts().sort_index().items()
+    }
+    min_image_count = min(image_counts_after_patient_balance.values())
+
+    balanced_df = (
+        patient_balanced_df
+        .groupby(target_name, group_keys=False)
+        .apply(lambda x: x.sample(n=min_image_count, random_state=seed))
+        .sample(frac=1, random_state=seed)
+        .reset_index(drop=True)
+    )
+
+    patient_counts_after = {
+        int(label): int(count)
+        for label, count in sampled_patients[target_name].value_counts().sort_index().items()
+    }
+    image_counts_after = {
+        int(label): int(count)
+        for label, count in balanced_df[target_name].value_counts().sort_index().items()
+    }
+
+    return balanced_df, {
+        "applied": True,
+        "unit": "patient_then_image",
+        "patient_counts_before": patient_counts_before,
+        "patient_counts_after": patient_counts_after,
+        "image_counts_before": image_counts_before,
+        "image_counts_after_patient_balance": image_counts_after_patient_balance,
+        "image_counts_after": image_counts_after,
+        "patients_removed": int(patient_labels["patient_id"].nunique() - sampled_patients["patient_id"].nunique()),
+        "rows_removed": int(len(df) - len(balanced_df)),
+    }
+
+
 
 def _require_torchvision() -> None:
     if transforms is None or tv_models is None:
@@ -140,8 +212,8 @@ test_transform = None
 if transforms is not None:
     train_transform = transforms.Compose(
         [
-            transforms.RandomAffine(degrees=(0, 5), translate=(0.05, 0.05), shear=5),
-            transforms.RandomHorizontalFlip(),
+            #transforms.RandomAffine(degrees=(0, 5), translate=(0.05, 0.05), shear=5),
+            #transforms.RandomHorizontalFlip(),
             transforms.Resize(transResize),
             transforms.ToTensor(),
         ]
@@ -245,6 +317,13 @@ def _validate_required_files(raw_root: Path) -> None:
         if expected_type == "file" and not path.is_file():
             missing.append(name)
         elif expected_type == "dir" and not path.is_dir():
+            # if there is the same directory with a .zip extension, consider it as present and unzip it
+            zip_path = raw_root / f"{name}.zip"
+            if zip_path.is_file():
+                # voglio che mi crei una cartella che si chiama come name e che ci metta dentro i file che ci sono dentro il zip, se c'è già una cartella con quel nome allora mi deve sovrascrivere i file al suo interno
+                #shutil.rmtree(raw_root / name, ignore_errors=True)
+                shutil.unpack_archive(str(zip_path), str(raw_root / name))
+                continue
             missing.append(name)
 
     if missing:
@@ -334,7 +413,7 @@ def build_multimodal_metadata(
     merged_df[CONCEPT_NAMES] = merged_df[CONCEPT_NAMES].replace(-1, 0)
     merged_df[TARGET_NAME] = np.where(merged_df[TARGET_NAME] == 1, 0, 1)
     merged_df["sample_id"] = merged_df["img_id"]
-    merged_df, balancing_stats = _balance_task_classes(merged_df, target_name=TARGET_NAME, seed=seed)
+    #merged_df, balancing_stats = _balance_task_classes(merged_df, target_name=TARGET_NAME, seed=seed)
 
     merged_df.to_csv(metadata_path, index=False)
 
@@ -347,9 +426,10 @@ def build_multimodal_metadata(
         "unique_studies": int(merged_df[["patient_id", "study_id"]].drop_duplicates().shape[0]),
         "multi_view_studies": int(merged_df.groupby(["patient_id", "study_id"]).size().gt(1).sum()),
         "chexbert_columns": [column for column in merged_df.columns if column.startswith("chexbert_")],
-        "radgraph_status": "validated_only_not_merged_yet",
-        "task_balancing": balancing_stats,
+        "radgraph_status": "validated_only_not_merged_yet"
+    #    "task_balancing": None,
     }
+    
     with open(stats_path, "w") as handle:
         json.dump(stats, handle, indent=2)
 
@@ -361,31 +441,103 @@ def create_patient_splits(
     processed_root: Path = PROCESSED_MULTIMODAL_DIR,
     seed: int = 42,
 ) -> Dict[str, Path]:
+    
+    stats_path = processed_root / STATS_FILENAME
     processed_root.mkdir(parents=True, exist_ok=True)
+    
     df = pd.read_csv(metadata_path)
-    unique_patients = df["patient_id"].dropna().unique()
+    
+
+    # stratified split
+
+    #unique_patients = df["patient_id"].dropna().unique()
+    #train_patients, temp_patients = train_test_split(
+    #    unique_patients, test_size=0.30, random_state=seed, shuffle=True
+    #)
+    #val_patients, test_patients = train_test_split(
+    #    temp_patients, test_size=2 / 3, random_state=seed, shuffle=True
+    #)
+    patient_labels = (
+        df.groupby("patient_id")[TARGET_NAME]
+        .max()
+        .reset_index()
+    )
 
     train_patients, temp_patients = train_test_split(
-        unique_patients, test_size=0.30, random_state=seed, shuffle=True
-    )
-    val_patients, test_patients = train_test_split(
-        temp_patients, test_size=2 / 3, random_state=seed, shuffle=True
+        patient_labels["patient_id"],
+        test_size=0.30,
+        random_state=seed,
+        shuffle=True,
+        stratify=patient_labels[TARGET_NAME],
     )
 
-    split_map = {
-        "train": set(train_patients),
-        "val": set(val_patients),
-        "test": set(test_patients),
-    }
+    temp_labels = patient_labels[
+        patient_labels["patient_id"].isin(temp_patients)
+    ]
+
+    val_patients, test_patients = train_test_split(
+        temp_labels["patient_id"],
+        test_size=2 / 3,
+        random_state=seed,
+        shuffle=True,
+        stratify=temp_labels[TARGET_NAME],
+    )
+
+    # split dataframes based on patient splits
+    train_df = df[df["patient_id"].isin(train_patients)].copy()
+    val_df = df[df["patient_id"].isin(val_patients)].copy()
+    test_df = df[df["patient_id"].isin(test_patients)].copy()
+
+
+    # balance ONLY training set
+    train_df_balanced, train_balancing_stats = _balance_task_classes_by_patient(
+        train_df,
+        target_name=TARGET_NAME,
+        seed=seed,
+    )
+
+    #save the splits
+
+    #re-built the dataframe 
+    new_df = pd.concat(
+        [train_df_balanced, val_df, test_df],
+        ignore_index=True,
+    )
+
+    print(
+        f"Train (balanced): {len(train_df_balanced)} | "
+        f"Val: {len(val_df)} | Test: {len(test_df)} | "
+        f"Total: {len(new_df)}"
+    )
+
+    #split_map = {
+    #    "train": set(train_patients),
+    #    "val": set(val_patients),
+    #    "test": set(test_patients),
+    #}
+
     split_files = {
         "train": processed_root / TRAIN_SPLIT_FILENAME,
         "val": processed_root / VAL_SPLIT_FILENAME,
         "test": processed_root / TEST_SPLIT_FILENAME,
     }
 
-    for split_name, patients in split_map.items():
-        split_df = df[df["patient_id"].isin(patients)][["sample_id"]].copy()
-        split_df.to_csv(split_files[split_name], index=False)
+    train_df_balanced['sample_id'].to_csv(split_files["train"], index=False)
+    val_df['sample_id'].to_csv(split_files["val"], index=False)
+    test_df['sample_id'].to_csv(split_files["test"], index=False)
+
+    # overwrite metadata
+    new_df.to_csv(metadata_path, index=False)
+
+    # update stats with balancing info
+    with open(stats_path, "r") as handle:
+        stats = json.load(handle)
+    stats["task_balancing"] = {
+        "train_balancing": train_balancing_stats,
+    }
+    with open(stats_path, "w") as handle:
+        json.dump(stats, handle, indent=2)
+
 
     return split_files
 
@@ -574,17 +726,16 @@ class CheXpertMulti:
         self.active_modality = active_modality
         self.text_source = text_source
 
-        self.c_info = {
-            "names": CONCEPT_NAMES,
-            "cardinality": [2, 3] + [2] * (len(CONCEPT_NAMES) - 2),
-        }
+        self.c_info = {'names': CONCEPT_NAMES, 
+        'cardinality':  [2] * len(CONCEPT_NAMES)}
+
         self.y_info = {"names": [TARGET_NAME], "cardinality": [2]}
         self.modalities = ["image", "text"]
         self.data = {}
 
         RAW_CHEXPERT_DIR.mkdir(parents=True, exist_ok=True)
         PROCESSED_MULTIMODAL_DIR.mkdir(parents=True, exist_ok=True)
-        download_base_data(RAW_CHEXPERT_DIR)
+        download_base_data(RAW_CHEXPERT_DIR) # check if raw data is present
         _validate_required_files(RAW_CHEXPERT_DIR)
 
     def load_ground_truth_graph(self):
