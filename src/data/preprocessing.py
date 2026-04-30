@@ -435,6 +435,9 @@ def preprocess_dataset(dataset_cfg, _dataset, device, backbone ='resnet18', seed
         dataset.data['val'].update_lists()
         dataset.data['test'].update_lists()
 
+    elif dataset_name == 'MMIST_ccRCC':
+        # No preprocessing needed for this dataset. We load pre processed embeddings.
+        pass
     else:
         raise ValueError(f"Preprocessing is missing for dataset: {dataset_cfg.get('name')}")
     

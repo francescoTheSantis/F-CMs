@@ -1,0 +1,61 @@
+defaults:
+  - commons
+  - _self_
+
+# ------------------------------------------------------------------
+# Dataset identity
+# ------------------------------------------------------------------
+# NOTE: this name must match the elif branch added to
+#       src/data/preprocessing.py  →  preprocess_dataset()
+name: MMIST_ccRCC
+
+# ------------------------------------------------------------------
+# Dataset loader (instantiated by Hydra)
+# ------------------------------------------------------------------
+loader:
+  _target_: src.data.datasets.mmist_ccrcc.MMISTccRCC
+  active_modality: image
+
+# ------------------------------------------------------------------
+# Embedding / model sizes
+# ------------------------------------------------------------------
+hidden_size: 64
+batch_size: 64
+
+# ------------------------------------------------------------------
+# Dataset behaviour flags
+# ------------------------------------------------------------------
+is_image_dataset: false
+
+# Reduce to a fraction of the dataset (Null = use full dataset)
+reduce_fraction: Null
+
+# Embeddings are precomputed in the .npz files — no generation needed
+load_embeddings: false
+
+# Concept definitions (optional, used by LLM-based causal discovery)
+# Maps concept names to their definitions for better LLM understanding
+concept_definitions: {
+  # Clinical variables
+  # Description based on: https://arxiv.org/pdf/2405.01658v1
+  T: "Extent of the primary tumor",
+  N: "Extent of spread to the regional lymph nodes",
+  M: "Presence of distant metastasis based on clinical data",
+  Mp: "Assessment of distant metastasis based on pathological data",
+  ajcc_tumor_stage: "Overall AJCC tumor stage",
+  tumor_grade: "Tumor grading as assessed by the pathologist",
+  age: "Patient age",
+  gender: "Patient sex",
+  race: "Patient race",
+  cancer_history: "Whether the patient has a prior cancer history",
+  vital_status_12: "Whether the patient was alive or deceased at 12 months post-diagnosis",
+
+  # Genomic variables
+  # Description based on: https://medlineplus.gov/genetics/gene/vhl/
+  VHL: "Tumor suppressor gene encoding the VHL protein, which targets HIF-2α for degradation to regulate cell division, angiogenesis, and red blood cell production. Loss-of-function mutations lead to uncontrolled HIF accumulation, driving abnormal cell proliferation",
+  # Description based on: https://en.wikipedia.org/wiki/PBRM1
+  PBRM1: "PBRM1 (Polybromo 1) encodes the BAF180 protein, a component of the SWI/SNF-B chromatin-remodeling complex that helps regulate gene expression.",
+  # Description based on: https://medlineplus.gov/genetics/gene/ttn/
+  TTN: "Gene encoding titin, a large structural protein essential for sarcomere integrity in skeletal and cardiac muscle. It provides flexibility and stability by interacting with actin and myosin, though its functional role in ccRCC remains under investigation.",
+}
+
