@@ -9,6 +9,7 @@ test.yaml
 
 logs/
 .venv/
+env/
 
 *.pth
 *.png
