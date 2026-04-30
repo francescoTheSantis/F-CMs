@@ -1,6 +1,9 @@
 classification_acc:
   _target_: "src.metrics.ClassificationAccuracy"
 
+balanced_classification_acc:
+  _target_: "src.metrics.BalancedClassificationAccuracy"
+
 # fairness metrics
 cace:
   _target_: "src.metrics.ConceptCausalEffect"

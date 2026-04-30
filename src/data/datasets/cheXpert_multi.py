@@ -477,7 +477,7 @@ def create_patient_splits(
 
     val_patients, test_patients = train_test_split(
         temp_labels["patient_id"],
-        test_size=2 / 3,
+        test_size= 1/2,
         random_state=seed,
         shuffle=True,
         stratify=temp_labels[TARGET_NAME],
@@ -489,9 +489,16 @@ def create_patient_splits(
     test_df = df[df["patient_id"].isin(test_patients)].copy()
 
 
-    # balance ONLY training set
+    # balance training set
     train_df_balanced, train_balancing_stats = _balance_task_classes_by_patient(
         train_df,
+        target_name=TARGET_NAME,
+        seed=seed,
+    )
+
+    # balance val set
+    val_df_balanced, val_balancing_stats = _balance_task_classes_by_patient(
+        val_df,
         target_name=TARGET_NAME,
         seed=seed,
     )
@@ -500,13 +507,13 @@ def create_patient_splits(
 
     #re-built the dataframe 
     new_df = pd.concat(
-        [train_df_balanced, val_df, test_df],
+        [train_df_balanced, val_df_balanced, test_df],
         ignore_index=True,
     )
 
     print(
         f"Train (balanced): {len(train_df_balanced)} | "
-        f"Val: {len(val_df)} | Test: {len(test_df)} | "
+        f"Val (balanced): {len(val_df_balanced)} | Test: {len(test_df)} | "
         f"Total: {len(new_df)}"
     )
 
@@ -523,7 +530,7 @@ def create_patient_splits(
     }
 
     train_df_balanced['sample_id'].to_csv(split_files["train"], index=False)
-    val_df['sample_id'].to_csv(split_files["val"], index=False)
+    val_df_balanced['sample_id'].to_csv(split_files["val"], index=False)
     test_df['sample_id'].to_csv(split_files["test"], index=False)
 
     # overwrite metadata
@@ -534,6 +541,7 @@ def create_patient_splits(
         stats = json.load(handle)
     stats["task_balancing"] = {
         "train_balancing": train_balancing_stats,
+        "val_balancing": val_balancing_stats,
     }
     with open(stats_path, "w") as handle:
         json.dump(stats, handle, indent=2)

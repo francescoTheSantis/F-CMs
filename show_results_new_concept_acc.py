@@ -185,6 +185,10 @@ tabular_task_and_concept_accuracy(**kwargs_tables)
 kwargs_tables['label'] = 'labels'
 tabular_task_and_concept_accuracy(**kwargs_tables)
 
+# balanced task accuracy
+kwargs_tables['label'] = 'balanced_task'
+tabular_task_and_concept_accuracy(**kwargs_tables)
+
 # Concept coverage and parameter change tables
 coverage_stats, param_change_stats = compute_drift_statistics(performance)
 tabular_drift_metrics(
