@@ -14,8 +14,8 @@ hydra:
       dataset: siim_pneumothorax 
       # possible models are:
       # blackbox, blackbox_multi, cbm_linear, cbm_mlp, cem, cgm, c2bm
-      model: c2bm, blackbox_multi, cbm_mlp, cem, cbm_linear, cgm # c2bm, blackbox_multi, cbm_linear, cbm_mlp, cem, cgm
-      learning: local_federated
+      model: c2bm, blackbox_multi, cbm_mlp, cem, cgm # c2bm, blackbox_multi, cbm_linear, cbm_mlp, cem, cgm
+      learning: local_federated, localized, centralized
 
 #combined_datasets:
 #  other_datasets: [fashionmnist]  # or [colormnist, fashionmnist]
@@ -59,7 +59,7 @@ engine:
 
 trainer:
   # logger: wandb
-  devices: [1]
+  devices: [0]
   max_epochs: 200
   patience: 10
 
