@@ -257,7 +257,7 @@ def _print_task_label_distribution(
 
 
 
-@hydra.main(config_path="conf", config_name="test_mmist_ccrcc", version_base="1.3")
+@hydra.main(config_path="conf", config_name="test", version_base="1.3")
 def main(cfg: DictConfig) -> None:
     # various preliminaries, it set the seed for reproducibility
     torch.set_num_threads(cfg.get("num_threads", 1))

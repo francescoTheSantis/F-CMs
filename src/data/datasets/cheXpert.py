@@ -4,6 +4,7 @@ from torchvision.transforms import Compose
 from torch.utils.data import Dataset
 import os
 import pandas as pd
+import re
 import numpy as np
 from tqdm import tqdm
 import requests
@@ -39,12 +40,57 @@ CONCEPT_NAMES = ['Enlarged Cardiomediastinum',
                 'Fracture',
                 'Support Devices']
 
+def _normalize_rel_path(path: str) -> str:
+    path = str(path)
+    return re.sub(r"^CheXpert-v1\.0-small/", "", path)
+
+def _balance_task_classes_by_patient(df, target_name=TARGET_NAME, seed=42):
+    patient_labels = (
+        df.groupby("patient_id")[target_name]
+        .max()
+        .reset_index()
+    )
+
+    patient_counts = {
+        int(label): int(count)
+        for label, count in patient_labels[target_name].value_counts().sort_index().items()
+    }
+
+    if len(patient_counts) < 2:
+        return df.reset_index(drop=True)
+
+    min_patient_count = min(patient_counts.values())
+
+    sampled_patients = (
+        patient_labels
+        .groupby(target_name, group_keys=False)
+        .apply(lambda x: x.sample(n=min_patient_count, random_state=seed))
+        .reset_index(drop=True)
+    )
+
+    patient_balanced_df = df[df["patient_id"].isin(sampled_patients["patient_id"])]
+    image_counts = {
+        int(label): int(count)
+        for label, count in patient_balanced_df[target_name].value_counts().sort_index().items()
+    }
+    min_image_count = min(image_counts.values())
+
+    balanced_df = (
+        patient_balanced_df
+        .groupby(target_name, group_keys=False)
+        .apply(lambda x: x.sample(n=min_image_count, random_state=seed))
+        .sample(frac=1, random_state=seed)
+        .reset_index(drop=True)
+    )
+
+    return balanced_df
+
 #---- Transformations ----
 transResize = 224
 
 train_transform = transforms.Compose([
-    transforms.RandomAffine(degrees=(0, 5), translate=(0.05, 0.05), shear=5),
-    transforms.RandomHorizontalFlip(),
+    #transforms.RandomAffine(degrees=(0, 5), translate=(0.05, 0.05), shear=5),
+    #transforms.RandomHorizontalFlip(),
     transforms.Resize(transResize),
     transforms.ToTensor()
     #transforms.Normalize(mean=[0.485, 0.456, 0.406],
@@ -83,103 +129,66 @@ def clean_and_split_data(data_path, seed=42):
     full_df = pd.concat([train_df, val_df], ignore_index=True)
     full_df = full_df.reset_index(drop=True)
 
-    # Filter frontal and AP/PA images
-    full_df = full_df[full_df["Frontal/Lateral"] == "Frontal"]
-    full_df = full_df.drop(columns=["Frontal/Lateral", "AP/PA"])
+    # Extract patient_id from path
+    full_df["image_path_rel"] = full_df["Path"].map(_normalize_rel_path)
+    full_df["patient_id"] = full_df["image_path_rel"].str.extract(r"(patient\d+)")
 
-    # Discretize Age
-    #full_df["Age"] = full_df["Age"].apply(lambda x: 0.0 if x < 30 else (1.0 if x < 60 else 2.0))
-
-    # Map Sex
-    #full_df['Sex'] = full_df['Sex'].map({'Male': 0, 'Female': 1}) 
-
-    # Eliminate duplicates
-    subject_ids = []
-    for index, row in full_df.iterrows():
-        path_parts = row['Path'].split("/")
-        patient_part = next(part for part in path_parts if "patient" in part)
-        subject_ids.append(patient_part[len("patient"):])
-    full_df['subject_id'] = subject_ids
-
-    # Droping duplicate patient recordings except for the last visit
-    full_df = full_df.drop_duplicates(subset=['subject_id'], keep='last')
-    full_df = full_df.sort_values(by=['subject_id']).reset_index(drop=True)
-    
     # Fill NaNs as absent, uncertain (-1) as present (U-Ones strategy from CheXpert paper)
     full_df[CONCEPT_NAMES] = full_df[CONCEPT_NAMES].fillna(0)
-    full_df[CONCEPT_NAMES] = full_df[CONCEPT_NAMES].replace(-1, 1)
-    # if full_df[TERGET_NAME] is 0 replace it with 1, otherwise put 0
+    full_df[CONCEPT_NAMES] = full_df[CONCEPT_NAMES].replace(-1, 0)
     full_df[TARGET_NAME] = np.where(full_df[TARGET_NAME] == 1, 0, 1)
 
     # Extract relative path
-    full_df["img_id"] = full_df["Path"].apply(lambda x: x.split("/", 1)[1] if "/" in x else x) # correct in this way it just keep the name without /train
-    full_df = full_df.drop(columns=["Path"])  
+    full_df["img_id"] = full_df["Path"].apply(lambda x: x.split("/", 1)[1] if "/" in x else x)
+    full_df = full_df.drop(columns=["Path"])
 
-    # # Balance: reduce minority to 1/3, then undersample majority to 1.5x minority
-    majority = full_df[full_df[TARGET_NAME] == 1]
-    minority = full_df[full_df[TARGET_NAME] == 0]
+    # --- Patient-level stratified split (70% train, 10% val, 20% test) ---
+    patient_labels = (
+        full_df.groupby("patient_id")[TARGET_NAME]
+        .max()
+        .reset_index()
+    )
 
-    # # Reduce minority class to 1/3
-    # target_minority_size = int(len(minority) / 3)
-    # minority = minority.sample(n=target_minority_size, random_state=42)
-    # print(f"[CheXpert] Minority reduced: {len(full_df[full_df[TARGET_NAME] == 0])}->{len(minority)}")
+    train_patients, temp_patients = train_test_split(
+        patient_labels["patient_id"],
+        test_size=0.30,
+        random_state=seed,
+        shuffle=True,
+        stratify=patient_labels[TARGET_NAME],
+    )
 
-    # # Reduce majority class to 1.5x minority, with stratified sampling
-    target_majority_size = min(len(majority), int(len(minority)))
+    temp_labels = patient_labels[patient_labels["patient_id"].isin(temp_patients)]
 
-    if target_majority_size < len(majority):
-         majority_sampled = majority.sample(n=target_majority_size, random_state=42)
-         print(f"[CheXpert] Majority reduced: {len(majority)}->{len(majority_sampled)}")
-    else:
-         majority_sampled = majority
+    val_patients, test_patients = train_test_split(
+        temp_labels["patient_id"],
+        test_size=1 / 2,
+        random_state=seed,
+        shuffle=True,
+        stratify=temp_labels[TARGET_NAME],
+    )
 
-    full_df_balanced = pd.concat([minority, majority_sampled], ignore_index=True)
-    print(f"[CheXpert] Total balanced: {len(full_df_balanced)}")
+    train_df_split = full_df[full_df["patient_id"].isin(train_patients)].copy()
+    val_df_split = full_df[full_df["patient_id"].isin(val_patients)].copy()
+    test_df_split = full_df[full_df["patient_id"].isin(test_patients)].copy()
 
-    # No balancing — use all data, handle imbalance via class weights in loss
-    #full_df_all = full_df.copy()
-    #n_pos_task = (full_df_all[TARGET_NAME] == 1).sum()
-    #n_neg_task = (full_df_all[TARGET_NAME] == 0).sum()
-    #n_total_task = n_pos_task + n_neg_task
-    #print(f"[CheXpert] Using full dataset: {n_total_task} samples (target=1: {n_pos_task}, target=0: {n_neg_task})")
+    # --- Balance train and val by patient, leave test natural ---
+    train_df_balanced = _balance_task_classes_by_patient(train_df_split, seed=seed)
+    val_df_balanced = _balance_task_classes_by_patient(val_df_split, seed=seed)
 
-    full_df_all = full_df_balanced.copy()
-    # Shuffle and split into train, val and test
-    full_df_all = full_df_all.sample(frac=1, random_state=seed).reset_index(drop=True)
-    split_idx = int(len(full_df_all) * (0.7))  # 70% train
-    val_idx = int(len(full_df_all) * (0.8))     # 10% val, 20% test
-    full_df_all.iloc[:split_idx][["img_id"]].to_csv(os.path.join(data_path, "custom_train.csv"), index=False)
-    full_df_all.iloc[split_idx:val_idx][["img_id"]].to_csv(os.path.join(data_path, "custom_val.csv"), index=False)
-    full_df_all.iloc[val_idx:][["img_id"]].to_csv(os.path.join(data_path, "custom_test.csv"), index=False)
-    
-    full_df_all.to_csv(os.path.join(data_path, "cheXpert_merged.csv"), index=False)
+    print(
+        f"[CheXpert] Train (balanced): {len(train_df_balanced)} | "
+        f"Val (balanced): {len(val_df_balanced)} | Test: {len(test_df_split)}"
+    )
 
-    # Compute task class weights (balanced: n_samples / (2 * n_class_samples))
-    #import torch
-    #train_df = full_df_all.iloc[:split_idx]
-    #n_pos_train = (train_df[TARGET_NAME] == 1).sum()
-    #n_neg_train = (train_df[TARGET_NAME] == 0).sum()
-    #n_total_train = n_pos_train + n_neg_train
-    #w_neg = n_total_train / (2.0 * n_neg_train)
-    #w_pos = n_total_train / (2.0 * n_pos_train)
-    #class_weights = torch.tensor([w_neg, w_pos], dtype=torch.float32)
-    #print(f"[CheXpert] Task weights: neg={w_neg:.2f} ({n_neg_train}), pos={w_pos:.2f} ({n_pos_train})")
+    # Save merged metadata and split indices
+    new_df = pd.concat([train_df_balanced, val_df_balanced, test_df_split], ignore_index=True)
+    new_df.to_csv(os.path.join(data_path, "cheXpert_merged.csv"), index=False)
 
-    # Compute per-concept class weights
-    #concept_class_weights = {}
-    #for c_name in CONCEPT_NAMES:
-    #    vals = train_df[c_name].values
-    #    n_pos = (vals == 1).sum()
-    #    n_neg = (vals == 0).sum()
-    #    n_total = n_pos + n_neg
-    #    if n_pos > 0 and n_neg > 0:
-    #        c_w_neg = n_total / (2.0 * n_neg)
-    #        c_w_pos = n_total / (2.0 * n_pos)
-    #        concept_class_weights[c_name] = torch.tensor([c_w_neg, c_w_pos], dtype=torch.float32)
-    #        print(f"[CheXpert] Concept weight {c_name}: neg={c_w_neg:.2f}, pos={c_w_pos:.2f} (pos_rate={n_pos/n_total*100:.1f}%)")
-    class_weights = None
-    concept_class_weights = None
-    return class_weights, concept_class_weights
+    train_df_balanced[["img_id"]].to_csv(os.path.join(data_path, "custom_train.csv"), index=False)
+    val_df_balanced[["img_id"]].to_csv(os.path.join(data_path, "custom_val.csv"), index=False)
+    test_df_split[["img_id"]].to_csv(os.path.join(data_path, "custom_test.csv"), index=False)
+
+    return None, None
 
 class CheXpert():
     """
