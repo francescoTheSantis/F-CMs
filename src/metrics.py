@@ -25,21 +25,29 @@ class BalancedClassificationAccuracy(Metric):
             preds = preds.mean(dim=-1)
         preds = preds.argmax(dim=-1)
         target = target.flatten().long()
+
+        valid_mask = target != -1
+        if valid_mask.sum() == 0:
+            return
+
+        preds = preds[valid_mask]
+        target = target[valid_mask]
         _check_same_shape(preds, target)
+        
         for cls in range(self.num_classes):
             mask = target == cls
             self.correct_per_class[cls] += preds[mask].eq(cls).sum()
             self.total_per_class[cls] += mask.sum()
 
     def compute(self):
-        recalls = []
-        for cls in range(self.num_classes):
-            if self.total_per_class[cls] > 0:
-                recalls.append(self.correct_per_class[cls].float()
-                               / self.total_per_class[cls])
-        if len(recalls) == 0:
-            return torch.tensor(0.0)
-        return torch.stack(recalls).mean()
+            eps = 1e-8
+            recalls = []
+
+            for cls in range(self.num_classes):
+                recall = self.correct_per_class[cls].float() / (self.total_per_class[cls] + eps)
+                recalls.append(recall)
+
+            return torch.stack(recalls).mean()
 
 
 class ClassificationAccuracy(Metric):

@@ -63,11 +63,12 @@ paths = [
     # "/Users/dariofenoglio/Desktop/Federated-C2BM/outputs/multirun/2026-04-14/15-04-56"
     # "/Users/dariofenoglio/Desktop/Federated-C2BM/outputs/multirun/2026-04-14/15-04-27"
     # "/Users/dariofenoglio/Desktop/Federated-C2BM/outputs/multirun/2026-04-14/17-08-12_stat_cbm",
-    "/Users/dariofenoglio/Desktop/Federated-C2BM/outputs/multirun/2026-04-14/17-08-00_dyn_cbm",
+    #"/Users/dariofenoglio/Desktop/Federated-C2BM/outputs/multirun/2026-04-14/17-08-00_dyn_cbm",
     # "/Users/dariofenoglio/Desktop/Federated-C2BM/outputs/multirun/2026-04-15/09-36-38_stat_black",
-    "/Users/dariofenoglio/Desktop/Federated-C2BM/outputs/multirun/2026-04-15/09-37-16_dyn_black",
+    #"/Users/dariofenoglio/Desktop/Federated-C2BM/outputs/multirun/2026-04-15/09-37-16_dyn_black",
     # "/Users/dariofenoglio/Desktop/Federated-C2BM/outputs/multirun/2026-04-15/10-52-14_stat",
-    "/Users/dariofenoglio/Desktop/Federated-C2BM/outputs/multirun/2026-04-15/10-52-28_dyn",
+    #"/Users/dariofenoglio/Desktop/Federated-C2BM/outputs/multirun/2026-04-15/10-52-28_dyn",
+    "/home/admin/Federated-C2BM/outputs/multirun/2026-04-30/16-02-03"
 ]
 
 # folder to save processed results
@@ -162,6 +163,10 @@ tabular_task_and_concept_accuracy(**kwargs_tables)
 
 # labels
 kwargs_tables['label'] = 'labels'
+tabular_task_and_concept_accuracy(**kwargs_tables)
+
+# balanced task accuracy
+kwargs_tables['label'] = 'balanced_task'
 tabular_task_and_concept_accuracy(**kwargs_tables)
 
 # Concept coverage and parameter change tables

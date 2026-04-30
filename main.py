@@ -81,6 +81,7 @@ warnings.filterwarnings("ignore", message="When grouping with a length-1 list-li
 
 TEST_RESULT_FILENAMES = [
     "y_accuracy.pkl",
+    "y_balanced_accuracy.pkl",
     "c_accuracy.pkl",
     "single_c_interventions_on_y.pkl",
     "single_OODc_interventions_on_y.pkl",
@@ -163,6 +164,8 @@ def _aggregate_and_save_test_artifacts(result_dir: str, per_loader_artifacts, pe
     aggregated_summary = {}
     if "y_accuracy.pkl" in aggregated and isinstance(aggregated["y_accuracy.pkl"], dict):
         aggregated_summary["test/y/y_accuracy"] = aggregated["y_accuracy.pkl"].get("_baseline", np.nan)
+    if "y_balanced_accuracy.pkl" in aggregated and isinstance(aggregated["y_balanced_accuracy.pkl"], dict):
+        aggregated_summary["test/y/balanced_y_accuracy"] = aggregated["y_balanced_accuracy.pkl"].get("_baseline", np.nan)
     if "c_accuracy.pkl" in aggregated and isinstance(aggregated["c_accuracy.pkl"], dict):
         for concept_name, value in aggregated["c_accuracy.pkl"].items():
             aggregated_summary[f"test/c/{concept_name}"] = value
