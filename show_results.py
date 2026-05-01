@@ -33,12 +33,25 @@ paths = [
     # "outputs/multirun/2026-04-20/19-21-16_alarm_s", #OK 
     # "outputs/multirun/2026-04-21/11-11-20_siim", #OK but skipped seed 1 for all models/learning modes
     # "outputs/multirun/2026-04-21/11-11-42_siim_s", #OK but skipped seed 1 for all models/learning modes
-    "outputs/multirun/2026-04-22/15-49-04_asia_bas", 
-    "outputs/multirun/2026-04-22/15-51-34_sachs_bas",
-    "outputs/multirun/2026-04-22/15-53-59_alarm_bas",
-    "outputs/multirun/2026-04-22/15-56-11_ins_bas",
-    "outputs/multirun/2026-04-22/15-59-30_hail_bas",
-    "outputs/multirun/2026-04-22/16-03-56_siim_bas",
+    # "outputs/multirun/2026-04-22/15-49-04_asia_bas", 
+    # "outputs/multirun/2026-04-22/15-51-34_sachs_bas",
+    # "outputs/multirun/2026-04-22/15-53-59_alarm_bas",
+    # "outputs/multirun/2026-04-22/15-56-11_ins_bas",
+    # "outputs/multirun/2026-04-22/15-59-30_hail_bas",
+    # "outputs/multirun/2026-04-22/16-03-56_siim_bas",
+    #
+    # - balanced training and val and unbalanced (original) test
+    # "outputs/multirun/2026-04-30/22-37-56_v1_all",
+    # "outputs/multirun/2026-04-30/22-38-19_v1_static",
+    # "outputs/multirun/2026-04-30/23-49-02_v2_all", # benino
+    # "outputs/multirun/2026-05-01/06-40-22_v2_static",
+    # "outputs/multirun/2026-04-30/23-49-25_v3_all",
+    # "outputs/multirun/2026-05-01/06-40-45_v3_static",
+    # "outputs/multirun/2026-05-01/03-28-00_v4_all",
+    "outputs/multirun/2026-05-01/10-16-39_v4_static",
+    # "outputs/multirun/2026-05-01/03-28-22_v5_all",
+    # "outputs/multirun/2026-05-01/10-17-02_v5_static",
+    
 ]
 
 # folder to save processed results

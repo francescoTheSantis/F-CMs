@@ -1,13 +1,14 @@
 #!/bin/bash
-#SBATCH --job-name=fcms_siim  # Job name
-# #SBATCH --gres=gpu:1g:1             # Request 1 MIG slice (24 GB VRAM)
-#SBATCH --gres=gpu:rtx_a6000:1
+#SBATCH --job-name=fcms_chexpert_multi_v1  # Job name
+#SBATCH --gres=gpu:1g:1             # Request 1 MIG slice (24 GB VRAM)
+# #SBATCH --gres=gpu:rtx_a6000:1
 #SBATCH --cpus-per-task=6          # CPUs for data loading
                                     # RAM is auto-assigned from GPU VRAM
-#SBATCH --time=30:00:00             # Max runtime (HH:MM:SS)
+#SBATCH --time=40:00:00             # Max runtime (HH:MM:SS)
 #SBATCH --output=logs/%j_%x.out     # Output: logs/<jobid>_<jobname>.out
 #SBATCH --error=logs/%j_%x.err      # Errors: logs/<jobid>_<jobname>.err
 #SBATCH --container-image=mamba
+#SBATCH --partition blas
 #
 # PyTorch single-GPU training template
 # Available containers: pip, mamba, uv, pixi
@@ -27,7 +28,7 @@ echo "Start time: $(date)"
 echo "================"
 
 # Activate your project's virtual environment (created inside the container — see user guide)
-cd ~/Federated-C2BM
+cd /home/fenogd/Federated-C2BM
 source .venv/bin/activate
 export PATH=~/graphviz-env/bin:$PATH
 
@@ -38,11 +39,20 @@ export PATH=~/graphviz-env/bin:$PATH
 export PYTHONUNBUFFERED=1
 
 # Run training
-echo "=== Start SIIM (all) ==="
-python main.py --config-name=test_siim &
+cd /home/fenogd/Federated-C2BM_ari/Federated-C2BM/
+echo "=== Start CheXpert Multi (all_v4) ==="
+python main.py --config-name=test_chexpert_multi_v4 &
 sleep 30
-echo "=== Start SIIM (static) ==="
-python main.py --config-name=test_siim_static &
+echo "=== Start CheXpert Multi (all_v5) ==="
+python main.py --config-name=test_chexpert_multi_v5 &
+
+wait  # Wait for all background processes to finish
+
+echo "=== Start CheXpert Multi (static_v4) ==="
+python main.py --config-name=test_chexpert_multi_s_v4 &
+sleep 30
+echo "=== Start CheXpert Multi (static_v5) ==="
+python main.py --config-name=test_chexpert_multi_s_v5 & 
 
 wait  # Wait for all background processes to finish
 

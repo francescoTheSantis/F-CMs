@@ -15,7 +15,7 @@ hydra:
       # possible models are:
       # blackbox, blackbox_multi, cbm_linear, cbm_mlp, cem, cgm, c2bm
       model: c2bm, blackbox_multi, cbm_mlp, cem, cgm # c2bm, blackbox_multi, cbm_linear, cbm_mlp, cem, cgm
-      learning: local_federated, localized, centralize #FedCBM, FCL #
+      learning: local_federated, localized, centralized #FedCBM, FCL #
 
 #combined_datasets:
 #  other_datasets: [fashionmnist]  # or [colormnist, fashionmnist]

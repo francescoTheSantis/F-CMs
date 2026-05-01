@@ -563,7 +563,7 @@ def _build_image_encoder(backbone: str, device: str) -> nn.Module:
             torch.load(
                 weights_path,
                 map_location="cpu",
-                weights_only=True,
+                weights_only=False,
             )
         )
         n_features = input_encoder_res.fc.in_features

@@ -349,7 +349,9 @@ def add_additional_nodes_to_subgraph(graph, subgraph, add_nodes_values, randomiz
     
     return extended_subgraph
 
-def get_subgraphs(graph, y_index, min_number_subgraphs = 3, max_number_subgraphs = 10, modality = 'random_nodes', randomly_eliminate_task_from_subgraphs = True, dict_subgraph_with_add_nodes = {}):
+# def get_subgraphs(graph, y_index, min_number_subgraphs = 3, max_number_subgraphs = 10, modality = 'random_nodes', randomly_eliminate_task_from_subgraphs = True, dict_subgraph_with_add_nodes = {}):
+def get_subgraphs(graph, y_index, min_number_subgraphs = 3, max_number_subgraphs = 10, modality = 'random_nodes', randomly_eliminate_task_from_subgraphs = True, dict_subgraph_with_add_nodes = {}, task_elimination_prob = 0.5):
+
     """
     This function generates n_subgraphs from the original graph.
 
@@ -374,9 +376,14 @@ def get_subgraphs(graph, y_index, min_number_subgraphs = 3, max_number_subgraphs
         subgraphs_with_add_nodes: List of boolean indicating which subgraphs contain additional nodes
     """
     from src.utils import get_roots, get_task_graph
-
+    
     if min_number_subgraphs > max_number_subgraphs:
         raise ValueError("min_number_subgraphs must be less than or equal to max_number_subgraphs.")
+
+    if randomly_eliminate_task_from_subgraphs:
+        task_elimination_prob = float(task_elimination_prob)
+        if task_elimination_prob < 0 or task_elimination_prob > 1:
+            raise ValueError("task_elimination_prob must be between 0 and 1.")
 
     ### INITIALIZATION ###
     torch_graph = torch.tensor(graph.values)
@@ -751,7 +758,8 @@ def get_subgraphs(graph, y_index, min_number_subgraphs = 3, max_number_subgraphs
                             break
                 
                 # Only remove if it doesn't eliminate any parent-child pair and randomly decide
-                if can_remove and random.random() < 0.5:
+                # if can_remove and random.random() < 0.5:
+                if can_remove and random.random() < task_elimination_prob:
                     subgraphs[f'subgraph_{i+1}'].remove(y_index)
                     subgraphs_concept_names[f'subgraph_{i+1}'].remove(graph.columns[y_index])
 
@@ -992,7 +1000,9 @@ def generate_split(cfg, datasets, graph, y_index):
                                                                          #concept_in_common=cfg.learning.subgraphs.concept_in_common,
                                                                          #task_in_common=cfg.learning.subgraphs.task_in_common,
                                                                          randomly_eliminate_task_from_subgraphs=cfg.learning.subgraphs.get('randomly_eliminate_task_from_subgraphs', True),
-                                                                         dict_subgraph_with_add_nodes=cfg.learning.subgraphs.get('dict_subgraph_with_add_nodes', {})
+                                                                         dict_subgraph_with_add_nodes=cfg.learning.subgraphs.get('dict_subgraph_with_add_nodes', {}),
+                                                                         task_elimination_prob=cfg.learning.subgraphs.get('task_elimination_prob', 0.5)
+
                                     )
         
         # eliminate y_index from each subgraph but save from which I eliminated it

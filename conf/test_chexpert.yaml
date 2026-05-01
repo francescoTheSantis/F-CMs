@@ -10,13 +10,13 @@ hydra:
   mode: MULTIRUN
   sweeper:
     params:
-      seed: 1,2,3,5 #,4,5 #,4,5
+      seed: 1, 2, 3, 5 #,4,5 #,4,5
       # possible datsets are: asia, sachs, alarm, hailfinder, insurance
-      dataset: cheXpert
+      dataset: cheXpert_multi
       # possible models are:
       # blackbox, blackbox_multi, cbm_linear, cbm_mlp, cem, cgm, c2bm
-      model: blackbox_multi, cbm_mlp, cgm #blackbox_multi, cbm_mlp, cem, cgm, c2bm # c2bm, blackbox_multi, cbm_linear, cbm_mlp, cem, cgm
-      learning: centralized, localized, local_federated
+      model: blackbox_multi #, cbm_mlp, cgm #blackbox_multi, cbm_mlp, cem, cgm, c2bm # c2bm, blackbox_multi, cbm_linear, cbm_mlp, cem, cgm
+      learning: local_federated # centralized, localized, local_federated
 
 #combined_datasets:
 #  other_datasets: [fashionmnist]  # or [colormnist, fashionmnist]
@@ -26,7 +26,7 @@ model:
   concept_loss_weight: 0.5
 
 dataset:
-  load_embeddings: true
+  load_embeddings: false
   load_graph: true
   load_true_graph: false
   batch_size: 512
@@ -61,7 +61,7 @@ engine:
 trainer:
   # logger: wandb
   devices: [0]
-  max_epochs: 200
+  max_epochs: 2 #200
   patience: 10
 
 rag:
