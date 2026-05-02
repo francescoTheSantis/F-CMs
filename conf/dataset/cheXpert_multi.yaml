@@ -9,6 +9,7 @@ loader:
   active_modality: image
   text_source: report
 
+all_balanced: false
 hidden_size: 64
 batch_size: 64
 image_batch_size: 64

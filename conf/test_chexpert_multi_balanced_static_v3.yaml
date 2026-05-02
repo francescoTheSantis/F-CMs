@@ -1,0 +1,67 @@
+defaults:
+  - default
+  - override causal_discovery: ges
+  - override rag: Null
+  - _self_
+
+client_id: 3
+
+hydra:
+  mode: MULTIRUN
+  sweeper:
+    params:
+      seed: 1, 2, 3, 4, 5
+      dataset: cheXpert_multi
+      model: cem_multi, c2bm_multi, cgm_multi, cbm_mlp_multi, blackbox_multi_multi
+      learning: local_federated #, localized, centralized
+
+model:
+  concept_loss_weight: 0.8
+
+dataset:
+  load_embeddings: true
+  load_graph: true
+  load_true_graph: true
+  batch_size: 512
+  image_client_ratio: 0.5
+  per_client_reduce_fraction: Null # set a fraction to reduce it
+  all_balanced: true
+
+learning:
+  n_clients: 10
+  subgraphs:
+    min_number_subgraphs: 2
+    max_number_subgraphs: 6
+    randomly_eliminate_task_from_subgraphs: true
+    task_elimination_prob: 0.8
+    dataset_client_multiplier: 2
+    drift_add_nodes_ratio: 0.5
+    dict_subgraph_with_add_nodes:
+      modality: random
+      number_add_nodes: 2
+      number_subgraphs_add_nodes: 1
+    rnd_drift: 1000 # 0 if no drift
+    aggregate_graph:
+      local_graphs: from_true_graph
+      perc_clients_alterations: 0.1
+      graph_alteration_prob: 0.1
+  settings:
+    local_epochs: 2
+    freezing: true
+    mia: false
+    sia: false
+    dra: false
+
+engine:
+  intervention_prob: 0.8
+  test_interv_noise: 0.8   # for bndatasets only
+  optim_kwargs:
+    lr: 0.001
+
+trainer:
+  # logger: wandb
+  devices: [0]
+  max_epochs: 120
+  patience: 5
+
+notes: chexpert_multi_runs

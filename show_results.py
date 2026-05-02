@@ -46,11 +46,23 @@ paths = [
     # "outputs/multirun/2026-04-30/23-49-02_v2_all", # benino
     # "outputs/multirun/2026-05-01/06-40-22_v2_static",
     # "outputs/multirun/2026-04-30/23-49-25_v3_all",
-    # "outputs/multirun/2026-05-01/06-40-45_v3_static",
+    "outputs/multirun/2026-05-01/06-40-45_v3_static",
     # "outputs/multirun/2026-05-01/03-28-00_v4_all",
-    "outputs/multirun/2026-05-01/10-16-39_v4_static",
+    # "outputs/multirun/2026-05-01/10-16-39_v4_static",
     # "outputs/multirun/2026-05-01/03-28-22_v5_all",
     # "outputs/multirun/2026-05-01/10-17-02_v5_static",
+    # balanced
+    # "outputs/multirun/2026-05-01/17-25-31_balanced_all", #no
+    # "outputs/multirun/2026-05-01/17-25-54_balanced_static" #no
+    # balanced + label drop
+    # "outputs/multirun/2026-05-02/00-15-57_balanced_08_v2", #no
+    # "outputs/multirun/2026-05-02/07-02-09_balanced_08_v2_s", #no
+    # "outputs/multirun/2026-05-02/00-16-20_balanced_08_v3", #ok
+    # "outputs/multirun/2026-05-02/07-02-32__balanced_08_v3_s" #ok
+    # "outputs/multirun/2026-05-02/09-02-22_balanced_08_v4", #ok
+    # "outputs/multirun/2026-05-02/09-02-47_balanced_08_v4_s", #ok
+    
+    
     
 ]
 
