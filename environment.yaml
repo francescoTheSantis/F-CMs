@@ -1,4 +1,4 @@
-name: fed_cbm
+name: fcms
 channels:
   - pyg
   - pytorch
@@ -52,3 +52,4 @@ dependencies:
     - opacus
     - seaborn
     - SciencePlots
+    - torchxrayvision
