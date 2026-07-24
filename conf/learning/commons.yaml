@@ -1,5 +1,10 @@
 n_clients: 10
 annotation_assumption: 'task_included'
+concept_annotation_perturbation:
+  mode: none       # none | missing | noise
+  probability: 0.0
+  seed_offset: 17041
+  ignore_index: -1
 subgraphs:
   modality: 'connected_nodes'
   concept_in_common: false

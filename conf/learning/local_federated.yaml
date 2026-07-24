@@ -9,6 +9,7 @@ settings:
   local_epochs: 2
   num_threads: 1
   freezing: true
+  module_wise_aggregation: true
   patience: ${trainer.patience}
 
   mia: False

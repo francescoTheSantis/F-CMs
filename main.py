@@ -35,6 +35,7 @@ from src.utils import (
     update_config_from_data_subgroup_clients,
     aggregate_graph_proposals,
     aggregate, 
+    aggregate_modulewise,
     aggregate_multimodal,
     get_parameters, 
     set_parameters, 
@@ -838,7 +839,7 @@ def main(cfg: DictConfig) -> None:
         t_start_training = time.time()
         for rnd in range(1, n_rounds + 1):
             print(f"\033[92m\n--> ROUND {rnd}/{n_rounds}\033[0m")
-            client_params: List[Tuple[List[torch.Tensor], int]] = []
+            client_params = []
             val_losses, val_accs, sizes = [], [], []
             
             # ------------------------------------------------------------
@@ -892,6 +893,10 @@ def main(cfg: DictConfig) -> None:
             # local training (sequentially)
             # ------------------------------------------------------------
             print(f"\033[93mLocal training on {n_clients} clients\033[0m") 
+            use_modulewise_aggregation = bool(
+                cfg.learning.settings.get("module_wise_aggregation", True)
+            )
+            aggregation_reference_params = None
             for n, cid in enumerate(range(start_n_client, start_n_client + n_clients)):
                 # clone global params → local model
                 update_config_from_client(cfg_round, datasets, cid)
@@ -902,20 +907,26 @@ def main(cfg: DictConfig) -> None:
                     local_engine.model.concept_class_weights = datasets[0].concept_class_weights
                 # first training
                 if rnd == cfg.learning.subgraphs.rnd_drift:
-                    # load new architecture and update only those parameters that were present before
-                    t_set_params = time.time()
-                    set_old_parameters(
-                        local_engine,
-                        global_params,
-                        global_param_keys,
-                        verbose=(cid == start_n_client),
-                    )
-                    t_set_params = time.time() - t_set_params
-                    if cid == start_n_client:
+                    if aggregation_reference_params is None:
+                        # Initialize the expanded architecture once, then
+                        # broadcast that exact state to every client.
+                        t_set_params = time.time()
+                        set_old_parameters(
+                            local_engine,
+                            global_params,
+                            global_param_keys,
+                            verbose=True,
+                        )
+                        t_set_params = time.time() - t_set_params
+                        aggregation_reference_params = get_parameters(local_engine)
                         print(f"\033[94m[Timing] Postdrift set_old_parameters (client {cid}): {t_set_params:.3f}s\033[0m")
                         timing_metrics["postdrift_set_old_parameters"] = t_set_params
+                    else:
+                        set_parameters(local_engine, aggregation_reference_params)
                 else:
                     set_parameters(local_engine, global_params)
+                    if aggregation_reference_params is None:
+                        aggregation_reference_params = get_parameters(local_engine)
                     
                 local_engine.model.to(cfg.device)
 
@@ -947,19 +958,29 @@ def main(cfg: DictConfig) -> None:
                 local_engine.model.to(cfg.device) # put back to device
                 n_samples = len(train_dataloaders[cid].dataset)
                 client_modality = getattr(train_dataloaders[cid].dataset, "modality", None)
-                                    
+                if use_modulewise_aggregation:
+                    client_params.append(
+                        {
+                            "parameters": get_parameters(local_engine),
+                            "num_examples": n_samples,
+                            "trainable_keys": {
+                                name
+                                for name, parameter in local_engine.model.named_parameters()
+                                if parameter.requires_grad
+                            },
+                            "modality": client_modality,
+                        }
+                    )
+                elif hasattr(local_engine.model, "modality_encoders"):
+                    client_params.append((get_parameters(local_engine), n_samples, client_modality))
+                else:
+                    client_params.append((get_parameters(local_engine), n_samples))
+
                 # # local validation
                 # if val_dataloaders[cid] is not None:
                 #     avg_loss = compute_validation_loss(local_engine.model, val_dataloaders[cid], cfg)
                 #     history["loss_val_client"][n].append(avg_loss)
     
-                # collect weights for aggregation
-                if hasattr(local_engine.model, "modality_encoders"):
-                    client_params.append((get_parameters(local_engine), n_samples, client_modality))
-                else:
-                    client_params.append((get_parameters(local_engine), n_samples))
-
-            
             # # ------------------------------------------------------------
             # # Privacy Attack: MIA
             # # ------------------------------------------------------------
@@ -1056,7 +1077,16 @@ def main(cfg: DictConfig) -> None:
             # ------------------------------------------------------------
             print(f"\033[93mAggregating local models\033[0m")
             current_param_keys = list(local_engine.model.state_dict().keys())
-            if client_params and len(client_params[0]) == 3:
+            if use_modulewise_aggregation:
+                global_params = aggregate_modulewise(
+                    client_params,
+                    current_param_keys,
+                    reference_parameters=aggregation_reference_params,
+                    parameter_names={
+                        name for name, _ in local_engine.model.named_parameters()
+                    },
+                )
+            elif client_params and len(client_params[0]) == 3:
                 global_params = aggregate_multimodal(
                     client_params,
                     current_param_keys,
@@ -1103,7 +1133,7 @@ def main(cfg: DictConfig) -> None:
             check_improvements = False
             if cfg.learning.subgraphs.rnd_drift > n_rounds:
                 check_improvements = True
-            elif rnd > cfg.learning.subgraphs.rnd_drift:
+            elif rnd >= cfg.learning.subgraphs.rnd_drift:
                 check_improvements = True
 
             if check_improvements:
@@ -1187,6 +1217,13 @@ def main(cfg: DictConfig) -> None:
         per_loader_test_weights = []
         for testid in range(len(test_dataloaders)):
             test_dataloader = test_dataloaders[testid]
+            evaluation_seed_offset = cfg.get("evaluation_seed_offset", None)
+            if evaluation_seed_offset is not None:
+                # Keep stochastic intervention noise paired across conditions,
+                # independent of how many RNG draws training consumed.
+                seed_everything(
+                    int(cfg.seed) + int(evaluation_seed_offset) + testid * 10_007
+                )
             trainer.test(local_engine, test_dataloader)
             per_loader_test_artifacts.append(_collect_test_artifacts("results"))
             per_loader_test_weights.append(len(test_dataloader.dataset))

@@ -11,6 +11,13 @@ import random
 import shutil
 import random
 import math
+import json
+
+from src.data.concept_perturbation import (
+    ConceptPerturbationSpec,
+    concept_perturbation_seed,
+    perturb_concept_annotations,
+)
 
 def dfs_forward(torch_graph, start_node, end_node, visited=None, randomize=True, nodes_not_allowed = []):
     """
@@ -1137,6 +1144,10 @@ def split_and_save(cfg, datasets, graph, set, n, subgraphs = None, subgraphs_tas
         swapping_factor = cfg.learning.get('swapping_factor', 0.0)
         # Per-concept mapping: concept_idx -> set of client indices that will swap it
         swap_concept_clients = {}
+        perturbation_spec = ConceptPerturbationSpec.from_config(
+            cfg.learning.get("concept_annotation_perturbation", None)
+        )
+        perturbation_reports = []
 
         if swapping_clients > 0 and swapping_concepts > 0 and set == 'train':
             # 1) Collect all available (non-masked) concept indices across all subgraphs
@@ -1223,6 +1234,37 @@ def split_and_save(cfg, datasets, graph, set, n, subgraphs = None, subgraphs_tas
                                 masked_c_splits[valid, col] = new_vals
                     print(f"[Swap] Client {i+1}: swapped concepts {concepts_to_swap_here}, factor {swapping_factor}")
 
+            # Sample-level perturbations are deliberately applied after the
+            # client-level concept mask, and to the training split only.
+            if set == "train":
+                perturbation_seed = concept_perturbation_seed(
+                    experiment_seed=int(cfg.get("seed", 0)),
+                    client_id=i + 1,
+                    seed_offset=perturbation_spec.seed_offset,
+                )
+                masked_c_splits, perturbation_report = perturb_concept_annotations(
+                    masked_c_splits,
+                    cardinalities=datasets[0].c_info["cardinality"],
+                    spec=perturbation_spec,
+                    seed=perturbation_seed,
+                )
+                perturbation_report["client_id"] = i + 1
+                perturbation_report["subgraph_id"] = j + 1
+                for concept_report, concept_name in zip(
+                    perturbation_report["per_concept"],
+                    datasets[0].c_info["names"],
+                ):
+                    concept_report["concept_name"] = concept_name
+                perturbation_reports.append(perturbation_report)
+                if perturbation_spec.mode != "none":
+                    print(
+                        f"[Concept perturbation] client {i + 1}: "
+                        f"{perturbation_spec.mode} "
+                        f"{perturbation_report['perturbed']}/"
+                        f"{perturbation_report['eligible']} available annotations "
+                        f"({perturbation_report['realized_probability']:.3f})"
+                    )
+
             dataloader = DataLoader(
                 CustomDataset(x_i, masked_c_splits, masked_y_splits, graph, modality=client_modality),
                 batch_size=cfg.dataset.batch_size,
@@ -1234,6 +1276,29 @@ def split_and_save(cfg, datasets, graph, set, n, subgraphs = None, subgraphs_tas
             # print(f"Saving dataloader for {set} set, client {i+1}, subgraph {j+1} at {path}")
             with open(path, 'wb') as f:
                 pickle.dump(dataloader, f)
+
+        if set == "train":
+            eligible = sum(report["eligible"] for report in perturbation_reports)
+            perturbed = sum(report["perturbed"] for report in perturbation_reports)
+            summary = {
+                "split": "train",
+                "mode": perturbation_spec.mode,
+                "requested_probability": perturbation_spec.probability,
+                "eligible": eligible,
+                "perturbed": perturbed,
+                "realized_probability": perturbed / eligible if eligible else 0.0,
+                "experiment_seed": int(cfg.get("seed", 0)),
+                "ignore_index": perturbation_spec.ignore_index,
+                "validation_and_test_unchanged": True,
+                "clients": perturbation_reports,
+            }
+            results_dir = os.path.join(os.getcwd(), "results")
+            os.makedirs(results_dir, exist_ok=True)
+            with open(
+                os.path.join(results_dir, "concept_annotation_perturbation.json"),
+                "w",
+            ) as handle:
+                json.dump(summary, handle, indent=2)
 
 def get_subgraph_dict(cfg):
     if cfg.dataset.name == 'asia':

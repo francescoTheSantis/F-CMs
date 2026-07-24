@@ -142,6 +142,51 @@ python main.py --config-name test_chexpert_multi
 
 Before launching a sweep, check the selected GPUs, seeds, datasets, models, and `dataset.load_embeddings` flag in the corresponding config file.
 
+### Concept-label noise sensitivity (rebuttal)
+
+The controlled rebuttal experiment perturbs only the available training concept
+annotations; task labels, client partitions, graph structures, validation data,
+and test data are unchanged for a paired dataset/model/seed run. It evaluates
+missing annotations and uniformly incorrect labels at rates 0.1, 0.3, 0.6, and
+0.9 on ASIA and ALARM using CEM and C2BM.
+
+Run or resume the complete grid below. Existing cached dataset seeds are reused;
+if a selected ASIA/ALARM seed is absent, its first run preprocesses and caches
+it automatically:
+
+```bash
+conda activate fcms
+python scripts/concept_noise_rebuttal.py run
+```
+
+The default is the paper-matched 180-run grid (two datasets, two models, nine
+conditions, five seeds). For a shorter rebuttal-time first stage, run the
+moderate-noise conditions with three paired seeds:
+
+```bash
+python scripts/concept_noise_rebuttal.py run \
+  --seeds 1 2 3 \
+  --rates 0.1 0.3
+```
+
+The runner is resumable: completed runs are skipped unless `--rerun` is given.
+The 0.6 and 0.9 stress tests or seeds 4–5 can therefore be added later into the
+same output directory without repeating finished clean references.
+To rebuild the tables from existing runs without retraining:
+
+```bash
+python scripts/concept_noise_rebuttal.py summarize \
+  --output-dir rebuttal_results/concept_noise
+```
+
+The output directory contains per-seed and mean±standard-error CSV summaries,
+paste-ready missing/noise Markdown tables, numerical clean-reference deltas, a
+coverage table, paired dataset/graph fingerprint checks, perturbation-rate
+audits, and `rebuttal_draft.md`. Table cells are `task accuracy / clean-test
+concept accuracy / intervention-trajectory label accuracy`. The run logs and
+per-client perturbation manifests make it possible to verify the realized
+corruption rate and that only training annotations were changed.
+
 ## Outputs
 
 Hydra writes each run under:

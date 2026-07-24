@@ -38,13 +38,8 @@ export PATH=~/graphviz-env/bin:$PATH
 export PYTHONUNBUFFERED=1
 
 # Run training
-echo "=== Start SIIM (all) ==="
-python main.py --config-name=test_siim &
-sleep 30
-echo "=== Start SIIM (static) ==="
-python main.py --config-name=test_siim_static &
-
-wait  # Wait for all background processes to finish
+cd ~/rebutal-neurips-2026/f-cms/F-CMs-v3/F-CMs
+python scripts/concept_noise_rebuttal.py run
 
 echo "=== Job Finished ==="
 echo "End time: $(date)"

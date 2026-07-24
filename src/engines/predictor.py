@@ -26,6 +26,7 @@ class Predictor(pl.LightningModule):
                 #c_names: Optional[list] = None,
                 test_interv_policy: Optional[str] = None,
                 test_interv_noise: Optional[float] = 0.,
+                intervention_eval_mode: str = "full",
                 c_name_index: Optional[Mapping[str, int]] = None,
                 c_names_id: Optional[Mapping[str, str]] = None,
                 c_names_ood: Optional[Mapping[str, str]] = None,
@@ -51,6 +52,12 @@ class Predictor(pl.LightningModule):
         # store the intervention policy
         self.test_interv_policy = test_interv_policy
         self.test_interv_noise = test_interv_noise  
+        if intervention_eval_mode not in {"full", "cumulative"}:
+            raise ValueError(
+                "intervention_eval_mode must be either 'full' or 'cumulative', "
+                f"got {intervention_eval_mode!r}."
+            )
+        self.intervention_eval_mode = intervention_eval_mode
 
         #self.c_names = c_names
         self.n_concepts = len(c_names_all)
@@ -334,12 +341,48 @@ class Predictor(pl.LightningModule):
     #            nodes.remove(node)
     #    return nodes
 
+    def _update_cumulative_intervention_metrics(self, x, c, y, modality):
+        """Evaluate the cumulative trajectory used by the rebuttal summary."""
+        cumulative_indices = []
+        number_of_interventions = 0
+        for c_name in self.centralized_topological_order:
+            number_of_interventions += 1
+            if c_name in self.model.virtual_roots:
+                continue
+            if c_name in self.c_name_index:
+                cumulative_indices.append(self.c_name_index[c_name])
+            intervention_index = torch.zeros(c.shape, dtype=c.dtype, device=c.device)
+            for idx in cumulative_indices:
+                intervention_index += get_test_intervention_index(c.shape, idx, device=c.device)
+            inputs = self._build_model_inputs(
+                x, c, intervention_index=intervention_index, modality=modality
+            )
+            y_output, c_output = self.forward(**inputs)
+            y_hat, c_hat = self.model.filter_output_for_metric(y_output, c_output)
+            prefix = f"{number_of_interventions}_{c_name}"
+            self.test_intervention_cumulative_y[prefix].update(y_hat, y)
+            for c_name_j in self.centralized_topological_order:
+                if c_name_j not in self.c_name_index:
+                    continue
+                if c_name_j in self.model.virtual_roots:
+                    continue
+                if c_name_j not in c_hat:
+                    continue
+                index_in_c = self.c_name_index[c_name_j]
+                self.test_intervention_cumulative_c[f"{prefix}/{c_name_j}"].update(
+                    c_hat[c_name_j], c[:, index_in_c]
+                )
+
     def test_intervention(self, batch):
         if self.model.has_concepts:
             x, c, y, modality = self._unpack_batch(batch)
             # maybe add noise
             if self.test_interv_noise > 0:
                 x = x + torch.randn_like(x) * self.test_interv_noise
+
+            if self.intervention_eval_mode == "cumulative":
+                self._update_cumulative_intervention_metrics(x, c, y, modality)
+                return
 
             # baseline task accuracy
             # do not intervene
@@ -638,6 +681,46 @@ class Predictor(pl.LightningModule):
         #    self.test_intervention_fairness(batch)
         return test_loss
 
+    def _save_cumulative_intervention_artifacts(self):
+        y_int_cumulative = {}
+        for k, metric in self.test_intervention_cumulative_y.items():
+            key = _remove_prefix(k, self.test_intervention_cumulative_y.prefix)
+            y_int_cumulative[key] = metric.compute().item()
+        pickle.dump(
+            y_int_cumulative,
+            open("results/cumulative_interventions_on_y.pkl", "wb"),
+        )
+
+        c_int_cumulative = {}
+        for k, metric in self.test_intervention_cumulative_c.items():
+            key = _remove_prefix(k, self.test_intervention_cumulative_c.prefix)
+            c_int_cumulative[key] = metric.compute().item()
+        pickle.dump(
+            c_int_cumulative,
+            open("results/cumulative_interventions_on_c.pkl", "wb"),
+        )
+
+    def _save_graph_metadata(self):
+        if self.model.name in ["c2bm", "c2bm_multi", "cgm", "cgm_multi"]:
+            predicted_concepts = self.model.predicted_concepts
+        else:
+            predicted_concepts = self.c_names_all
+
+        try:
+            with open("graph.pkl", "rb") as f:
+                graph_data = pickle.load(f)
+        except FileNotFoundError:
+            graph_data = {}
+
+        graph_data.update({
+            "concepts": self.c_names_all,
+            "predicted_concepts": predicted_concepts,
+            "policy": self.test_interv_policy,
+            "centralized_topological_order": self.centralized_topological_order,
+            "learning_modality": self.learning_modality,
+        })
+        pickle.dump(graph_data, open("graph.pkl", "wb"))
+
     def on_test_epoch_end(self): #***reset metrics???
         # baseline task accuracy
         y_baseline = self.test_y_metrics['y_accuracy'].compute().item()
@@ -666,6 +749,11 @@ class Predictor(pl.LightningModule):
         pickle.dump(c_baseline, open(f'results/c_accuracy.pkl', 'wb'))
 
         if self.model.has_concepts:
+            if self.intervention_eval_mode == "cumulative":
+                self._save_cumulative_intervention_artifacts()
+                self._save_graph_metadata()
+                return
+
             # task accuracy after invervention on each individual concept
             y_int = {}
             for k, metric in self.test_intervention_single_y.items():

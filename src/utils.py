@@ -167,6 +167,67 @@ def aggregate(results: List[Tuple[NDArrays, int]]) -> NDArrays:
     return weights_prime
 
 
+def aggregate_modulewise(
+    results,
+    parameter_keys,
+    reference_parameters,
+    parameter_names,
+    modality_encoder_root="modality_encoders",
+):
+    """Aggregate each trainable module only across clients that updated it.
+
+    Each result is a dictionary containing ``parameters``, ``num_examples``,
+    ``trainable_keys``, and optionally ``modality``.  Non-parameter state
+    (e.g. buffers) is averaged across all clients.  If no client updated a
+    parameter, its previous global value is retained.
+    """
+
+    if not results:
+        raise ValueError("No client results were provided for aggregation.")
+    if len(parameter_keys) != len(reference_parameters):
+        raise ValueError("parameter_keys and reference_parameters must have equal length.")
+
+    parameter_names = set(parameter_names)
+    modality_prefix = modality_encoder_root + "."
+    aggregated = []
+
+    for parameter_idx, parameter_key in enumerate(parameter_keys):
+        eligible_results = results
+        if parameter_key in parameter_names:
+            eligible_results = [
+                result
+                for result in eligible_results
+                if parameter_key in result["trainable_keys"]
+            ]
+
+        if parameter_key.startswith(modality_prefix):
+            modality = parameter_key[len(modality_prefix):].split(".", 1)[0]
+            eligible_results = [
+                result
+                for result in eligible_results
+                if result.get("modality") == modality
+            ]
+
+        if not eligible_results:
+            aggregated.append(reference_parameters[parameter_idx])
+            continue
+
+        total_examples = sum(
+            int(result["num_examples"]) for result in eligible_results
+        )
+        if total_examples <= 0:
+            aggregated.append(reference_parameters[parameter_idx])
+            continue
+
+        weighted_values = [
+            result["parameters"][parameter_idx] * int(result["num_examples"])
+            for result in eligible_results
+        ]
+        aggregated.append(reduce(np.add, weighted_values) / total_examples)
+
+    return aggregated
+
+
 def get_parameters(engine):
     return [val.cpu().numpy() for _, val in engine.model.state_dict().items()]
 
@@ -1370,15 +1431,23 @@ def maybe_freeze_parameters(train_dataloader,  y_to_freeze, model, learning, fre
     Returns:
         None
     """
-    # voglio applicare filtering collate a train_dataloader
-    new_dataloader = copy.deepcopy(train_dataloader)
-    batch = next(iter(new_dataloader))
-    c = batch['c'] if 'c' in batch else None
+    # Prefer the full dataset so a module is frozen only when the concept is
+    # unavailable for the entire client, not merely absent from one batch.
+    c = getattr(train_dataloader.dataset, "c", None)
+    if c is None:
+        batch = next(iter(train_dataloader))
+        c = batch.get("c")
 
 
     if (learning == "local_federated" or learning=="federated") and freezing:
 
-        c_indices_to_freeze = torch.where(c[0] == -1)[0].tolist()
+        if c is None:
+            raise ValueError("Concept labels are required for module-wise freezing.")
+
+        # Looking at c[0] incorrectly freezes otherwise supervised modules
+        # when the first sample has a missing annotation.
+        unavailable = (c == -1).all(dim=0) | torch.isnan(c).all(dim=0)
+        c_indices_to_freeze = torch.where(unavailable)[0].tolist()
         if y_to_freeze:
             y_index = len(model.c_info['names'])  # assuming y is after all concepts
             c_indices_to_freeze.append(int(y_index))

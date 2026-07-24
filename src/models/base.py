@@ -81,18 +81,19 @@ class BaseModel(nn.Module, ABC):
         """
         Check for label absence and update intervention index accordingly.
         """
-        # If the concept label is -1, it means the client has no access to the concept label.
-        # For this reason the rand int cannot be applied.
+        # If a concept label is -1 (or NaN for a virtual root), that particular
+        # sample cannot be intervened on during training.  This must be checked
+        # sample-wise: sample-level missing annotations can coexist with valid
+        # labels for the same concept in the rest of the batch.
         if c is not None and intervention_index is not None:
-            for i, name in enumerate(list(self.c_name_index.keys())):
-                # first, check if the name is a task variable
+            for name in self.c_name_index:
                 if name in self.y_info['names']:
                     continue
-                # Check if concept annotations are available
-                if not (c[:,self.c_name_index[name]].long()!=-1).sum()==0:
+                concept_idx = self.c_name_index[name]
+                if concept_idx >= c.shape[1] or concept_idx >= intervention_index.shape[1]:
                     continue
-                else:
-                    intervention_index[:,i] = torch.zeros_like(intervention_index[:,i], dtype=torch.int64)
+                unavailable = c[:, concept_idx].eq(-1) | torch.isnan(c[:, concept_idx])
+                intervention_index[unavailable, concept_idx] = 0
         return intervention_index
     
     def filter_output_for_loss(self, 

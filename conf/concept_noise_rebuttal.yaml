@@ -1,0 +1,67 @@
+defaults:
+  - default
+  - override dataset: asia
+  - override model: c2bm
+  - override learning: local_federated
+  - _self_
+
+# Controlled rebuttal experiment: only training concept annotations vary.
+hydra:
+  mode: RUN
+
+seed: 1
+notes: concept_annotation_sensitivity
+evaluation_seed_offset: 83017
+
+model:
+  concept_loss_weight: 0.8
+
+dataset:
+  load_embeddings: true
+  load_graph: false
+  load_true_graph: true
+  batch_size: 512
+  autoencoder:
+    noise: 0.5
+
+learning:
+  concept_annotation_perturbation:
+    mode: none
+    probability: 0.0
+    seed_offset: 17041
+    ignore_index: -1
+  subgraphs:
+    min_number_subgraphs: 2
+    max_number_subgraphs: 6
+    randomly_eliminate_task_from_subgraphs: true
+    dataset_client_multiplier: 2
+    drift_add_nodes_ratio: 0.5
+    dict_subgraph_with_add_nodes:
+      modality: at_least_one_parent_and_child
+      number_add_nodes: 2
+      number_subgraphs_add_nodes: 1
+    rnd_drift: 10
+    aggregate_graph:
+      local_graphs: from_true_graph
+      perc_clients_alterations: 0.1
+      graph_alteration_prob: 0.1
+  settings:
+    module_wise_aggregation: true
+    mia: false
+    sia: false
+    dra: false
+
+engine:
+  intervention_prob: 0.8
+  # Match the Bayesian-network intervention protocol used in the paper.
+  test_interv_noise: 0.8
+  # The rebuttal needs the clean baseline and cumulative intervention trajectory,
+  # not the much larger individual/level intervention sweep.
+  intervention_eval_mode: cumulative
+  optim_kwargs:
+    lr: 0.01
+
+trainer:
+  devices: [0]
+  max_epochs: 120
+  patience: 10
