@@ -1370,9 +1370,10 @@ def maybe_freeze_parameters(train_dataloader,  y_to_freeze, model, learning, fre
     Returns:
         None
     """
-    # voglio applicare filtering collate a train_dataloader
-    new_dataloader = copy.deepcopy(train_dataloader)
-    batch = next(iter(new_dataloader))
+    # Only inspect one batch to recover the client's fixed supervision pattern.
+    # Deep-copying the full dataloader duplicated large cached datasets (notably
+    # CheXpert) even though this function never mutates the loader or batch.
+    batch = next(iter(train_dataloader))
     c = batch['c'] if 'c' in batch else None
 
 

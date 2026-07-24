@@ -23,3 +23,15 @@ settings:
 
   dra: False
   dra_samples_per_loader: 30
+
+  # Read-only empirical diagnostic for Assumption (S3). When enabled, every
+  # measured round makes a full pass over each active client's training data at
+  # the broadcast model before local optimization.
+  gradient_alignment:
+    enabled: false
+    every_n_rounds: 1
+    rounds: null
+    max_batches: null
+    include_module_metrics: true
+    eps: 1.0e-12
+    output_dir: results

@@ -9,9 +9,6 @@ from tqdm import tqdm
 import requests
 from typing import Union
 from torch_geometric.utils import to_dense_adj
-from imblearn.under_sampling import RandomUnderSampler
-from imblearn.over_sampling import SMOTE
-
 from src.data.utils import split_dataset
 from sklearn.model_selection import train_test_split
 from urllib.parse import urlparse

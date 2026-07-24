@@ -1,0 +1,84 @@
+defaults:
+  - default
+  - override dataset: cheXpert
+  - override model: cbm_mlp
+  - override learning: local_federated
+  - override causal_discovery: ges
+  - _self_
+
+# Dedicated static run for the empirical Assumption (S3) diagnostic.
+hydra:
+  mode: MULTIRUN
+  sweeper:
+    params:
+      seed: 1,2,3,4,5
+
+dataset:
+  # Build the reduced embedding cache for each seed on first use. After those
+  # files exist this can be switched to true for repeat runs.
+  load_embeddings: false
+  load_graph: false
+  load_true_graph: false
+  # A bipartite CBM does not require causal discovery. This deterministic graph
+  # is used only to construct heterogeneous client supervision subsets.
+  fixed_bipartite_graph: true
+  batch_size: 512
+  # Keep the full-pass audit tractable across five seeds while retaining a
+  # nontrivial real-image experiment. All reported gradients still cover the
+  # complete training split used by this experiment.
+  reduce_fraction: 0.1
+
+model:
+  concept_loss_weight: 0.5
+
+learning:
+  n_clients: 10
+  subgraphs:
+    min_number_subgraphs: 2
+    max_number_subgraphs: 6
+    randomly_eliminate_task_from_subgraphs: true
+    # All ten measured clients cycle through all generated supervision
+    # subgraphs; no second (post-drift) client pool is created.
+    dataset_client_multiplier: 1
+    drift_add_nodes_ratio: 0.5
+    dict_subgraph_with_add_nodes:
+      modality: random
+      number_add_nodes: 4
+      number_subgraphs_add_nodes: 2
+    # The configuration remains fixed throughout all measured rounds.
+    rnd_drift: 0
+    aggregate_graph:
+      local_graphs: none
+      perc_clients_alterations: 0.0
+      graph_alteration_prob: 0.0
+  settings:
+    local_epochs: 1
+    freezing: true
+    patience: ${trainer.patience}
+    mia: false
+    sia: false
+    dra: false
+    gradient_alignment:
+      enabled: true
+      every_n_rounds: 1
+      rounds: null
+      max_batches: null
+      include_module_metrics: true
+      eps: 1.0e-12
+      output_dir: results
+
+engine:
+  optim_class:
+    _target_: hydra.utils.get_class
+    path: torch.optim.SGD
+  optim_kwargs:
+    lr: 0.001
+  intervention_prob: 0.0
+  test_interv_noise: 0.0
+
+trainer:
+  devices: [0]
+  max_epochs: 40
+  patience: 40
+
+notes: rebuttal_gradient_alignment_chexpert

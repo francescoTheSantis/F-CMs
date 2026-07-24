@@ -3,6 +3,7 @@ import shutil
 import shutil
 import sys
 import numpy as np
+import pandas as pd
 import torch
 import os
 import warnings
@@ -57,6 +58,11 @@ from src.dra import (
 )
 from src.fedcbm import run_fedcbm_baseline
 from src.fcl import run_fcl_baseline
+from src.gradient_alignment import (
+    compute_gradient_alignment,
+    save_gradient_alignment,
+    should_measure_alignment,
+)
 from src.metrics import _evaluate_graph_against_truth
 
 # data loading
@@ -319,7 +325,27 @@ def main(cfg: DictConfig) -> None:
     print(OmegaConf.to_yaml(cfg))
     
 
-    if cfg.dataset.load_graph:
+    use_fixed_bipartite_graph = bool(
+        OmegaConf.select(cfg, "dataset.fixed_bipartite_graph", default=False)
+    )
+    if use_fixed_bipartite_graph:
+        graph_labels = datasets[0].c_info["names"] + datasets[0].y_info["names"]
+        graph_values = np.zeros(
+            (len(graph_labels), len(graph_labels)),
+            dtype=np.int64,
+        )
+        task_index = len(graph_labels) - 1
+        graph_values[:task_index, task_index] = 1
+        graph = pd.DataFrame(
+            graph_values,
+            index=graph_labels,
+            columns=graph_labels,
+        )
+        print(
+            "\033[94mUsing a fixed bipartite concept-to-task graph "
+            "for experiment setup.\033[0m"
+        )
+    elif cfg.dataset.load_graph:
         try:
             if true_graph is None or cfg.dataset.load_true_graph == False:
                 with open(os.path.join(dataset_directory, "learned_graph.pkl"), 'rb') as f:
@@ -652,6 +678,7 @@ def main(cfg: DictConfig) -> None:
             history["loss_val_client"][cid] = []
             history["y_acc_val_client"][cid] = []
         mia_accuracies, mia_epsilons = initialize_mia_results(n_clients)
+        gradient_alignment_history: List[Dict[str, Any]] = []
         n_dataset_clients = len(train_dataloaders)
 
         # determine clients for possible predrift and postdrift phases
@@ -878,6 +905,84 @@ def main(cfg: DictConfig) -> None:
                 t_init_model = time.time() - t_init_model
                 print(f"\033[94m[Timing] Postdrift model instantiation: {t_init_model:.3f}s\033[0m")
                 timing_metrics["postdrift_model_instantiation"] = t_init_model
+
+            # ------------------------------------------------------------
+            # Empirical S3 gradient-alignment audit at the broadcast model
+            # ------------------------------------------------------------
+            alignment_settings = OmegaConf.select(
+                cfg_round,
+                "learning.settings.gradient_alignment",
+                default={},
+            )
+            if alignment_settings and should_measure_alignment(alignment_settings, rnd):
+                if rnd == cfg.learning.subgraphs.rnd_drift:
+                    set_old_parameters(
+                        engine,
+                        global_params,
+                        global_param_keys,
+                        verbose=False,
+                    )
+                else:
+                    set_parameters(engine, global_params)
+                engine.model.to(cfg.device)
+
+                active_client_indices = list(
+                    range(start_n_client, start_n_client + n_clients)
+                )
+                task_freeze_flags = [
+                    bool(val_dataloaders[cid].dataset.y[0] == -1)
+                    for cid in active_client_indices
+                ]
+                max_alignment_batches = alignment_settings.get("max_batches")
+                if max_alignment_batches is not None:
+                    max_alignment_batches = int(max_alignment_batches)
+
+                print(
+                    "\033[96m[Gradient Alignment] Computing full-pass client "
+                    f"gradients at broadcast round {rnd}...\033[0m"
+                )
+                alignment_start = time.time()
+                alignment_record = compute_gradient_alignment(
+                    global_model=engine.model,
+                    train_dataloaders=train_dataloaders,
+                    client_indices=active_client_indices,
+                    y_to_freeze=task_freeze_flags,
+                    learning_mode=cfg.learning.mode,
+                    freezing=bool(cfg.learning.settings.freezing),
+                    device=cfg.device,
+                    round_index=rnd,
+                    max_batches=max_alignment_batches,
+                    include_module_metrics=bool(
+                        alignment_settings.get("include_module_metrics", True)
+                    ),
+                    eps=float(alignment_settings.get("eps", 1e-12)),
+                )
+                alignment_record["experiment"] = {
+                    "dataset": str(cfg.dataset.name),
+                    "model": str(cfg.model.name),
+                    "seed": int(cfg.seed),
+                    "learning_mode": str(cfg.learning.mode),
+                    "local_epochs": int(cfg.learning.settings.local_epochs),
+                    "optimizer": str(cfg.engine.optim_class.path),
+                    "learning_rate": float(cfg.engine.optim_kwargs.lr),
+                }
+                alignment_record["elapsed_seconds"] = time.time() - alignment_start
+                gradient_alignment_history.append(alignment_record)
+                alignment_summary = save_gradient_alignment(
+                    gradient_alignment_history,
+                    output_dir=str(alignment_settings.get("output_dir", "results")),
+                )
+                overall_alignment = alignment_record["overall"]
+                print(
+                    "\033[96m[Gradient Alignment] "
+                    f"L2={overall_alignment['l2_distance']:.6e}, "
+                    f"relative L2={overall_alignment['relative_l2_distance']:.6f}, "
+                    f"cosine={overall_alignment['cosine_similarity']:.6f}, "
+                    f"max observed zeta²="
+                    f"{alignment_summary['trajectory_diagnostic']['zeta_squared_max_observed']:.6e}, "
+                    f"elapsed={alignment_record['elapsed_seconds']:.2f}s"
+                    "\033[0m"
+                )
 
             # if (rnd >= cfg.learning.subgraphs.rnd_drift) and True:
             if  cfg.learning.subgraphs.rnd_drift >=1:
