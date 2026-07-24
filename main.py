@@ -58,6 +58,11 @@ from src.dra import (
 from src.fedcbm import run_fedcbm_baseline
 from src.fcl import run_fcl_baseline
 from src.metrics import _evaluate_graph_against_truth
+from src.structural_privacy import (
+    graph_pair_disagreement,
+    parse_structural_epsilon,
+    privatize_local_graphs,
+)
 
 # data loading
 from src.data.dataset_block import get_dataset
@@ -327,8 +332,13 @@ def main(cfg: DictConfig) -> None:
                     
             else:
                 graph = true_graph
-        except FileNotFoundError:
-            print("Graph file not found. Change the config or run graph learning.")
+        except FileNotFoundError as exc:
+            expected_graph_path = os.path.join(dataset_directory, "learned_graph.pkl")
+            raise FileNotFoundError(
+                f"Cached graph not found at {expected_graph_path}. Reproduce the graph-learning "
+                "step with dataset.load_graph=false before running experiments that must reuse "
+                "the paper's proxy graph."
+            ) from exc
     else:
         # graph construction
         if len(datasets)>1:
@@ -698,6 +708,7 @@ def main(cfg: DictConfig) -> None:
         # determine whether to use graph aggregation, see if there is the dictionary "aggregate_graph" with local_graphs not none
         use_graph_agg = False
         graph_eval_metrics: Dict[str, Dict[str, float]] = {}
+        structural_privacy_report: Optional[Dict[str, Any]] = None
         if hasattr(cfg.learning.subgraphs, "aggregate_graph") and model_is_causal(cfg.model):
             agg_graph_cfg = cfg.learning.subgraphs.aggregate_graph
             if agg_graph_cfg is not None and hasattr(agg_graph_cfg, "local_graphs"):
@@ -718,19 +729,126 @@ def main(cfg: DictConfig) -> None:
                                                              datasets[0].y_info["names"][0], 
                                                              graph)
 
+            # In the simulator this function marks the client-to-server
+            # boundary: only the randomized-response graphs below are passed
+            # to the aggregation used for model construction.
+            non_private_local_graphs = [local_graph.copy(deep=True) for local_graph in local_graphs]
+            structural_privacy_enabled = bool(
+                OmegaConf.select(
+                    cfg,
+                    "learning.subgraphs.aggregate_graph.structural_privacy.enabled",
+                    default=False,
+                )
+            )
+            privacy_seed_value = OmegaConf.select(
+                cfg,
+                "learning.subgraphs.aggregate_graph.structural_privacy.seed",
+                default=cfg.seed,
+            )
+            privacy_seed = int(cfg.seed if privacy_seed_value is None else privacy_seed_value)
+            evaluate_non_private_reference = bool(
+                OmegaConf.select(
+                    cfg,
+                    "learning.subgraphs.aggregate_graph.structural_privacy."
+                    "evaluate_against_non_private",
+                    default=True,
+                )
+            )
+            ensure_task_parent = bool(
+                OmegaConf.select(
+                    cfg,
+                    "learning.subgraphs.aggregate_graph.ensure_task_parent",
+                    default=True,
+                )
+            )
+
+            if structural_privacy_enabled:
+                structural_epsilon = parse_structural_epsilon(
+                    OmegaConf.select(
+                        cfg,
+                        "learning.subgraphs.aggregate_graph.structural_privacy.epsilon",
+                        default=float("inf"),
+                    )
+                )
+                local_graphs, mechanism_report = privatize_local_graphs(
+                    non_private_local_graphs,
+                    epsilon=structural_epsilon,
+                    seed=privacy_seed,
+                )
+                structural_privacy_report = {
+                    **mechanism_report,
+                    "seed": privacy_seed,
+                    "neighbor_definition": (
+                        "fixed-node-set client graphs differing in the three-state "
+                        "relation of one unordered node pair"
+                    ),
+                    "guarantee": (
+                        "epsilon_s edge local differential privacy for one graph release"
+                    ),
+                    "postprocessing": (
+                        "weighted maximum consensus, random tie-breaking, cycle removal, "
+                        "and task-parent repair use only privatized reports"
+                    ),
+                    "not_protected": [
+                        "client concept/node set",
+                        "number of reported node pairs",
+                        "client aggregation weight or dataset size",
+                    ],
+                    "composition_note": (
+                        "Repeated graph releases compose; d changed pair states have at "
+                        "most d * epsilon_s group-privacy loss."
+                    ),
+                    "non_private_reference_is_offline_evaluation_only": (
+                        evaluate_non_private_reference
+                    ),
+                    "aggregate_graph_disagreement": {},
+                    "aggregate_postprocessing": {},
+                }
+                print(
+                    "\033[96m[Structural DP] Three-way randomized response enabled: "
+                    f"epsilon_s={mechanism_report['epsilon']}, "
+                    f"p={mechanism_report['truth_probability_p']:.6f}, "
+                    f"q={mechanism_report['alternative_probability_q']:.6f}, "
+                    f"changed={mechanism_report['changed_pair_report_rate']:.3%}\033[0m"
+                )
+
             # aggregate graphs for pre-drift and post-drift clients
             # predrift
+            graph_predrift_reference = None
+            if structural_privacy_enabled and evaluate_non_private_reference:
+                graph_predrift_reference, _ = aggregate_graph_proposals(
+                    client_selection=predrift_clients,
+                    local_graphs=non_private_local_graphs,
+                    weights=local_weights,
+                    config_input=cfg_predrift,
+                    task_node=datasets[0].y_info["names"][0],
+                    tie_break_seed=privacy_seed + 101,
+                    ensure_task_parent=ensure_task_parent,
+                )
+
             t_agg_predrift = time.time()
-            graph_predrift, _ = aggregate_graph_proposals(
+            graph_predrift, graph_predrift_meta = aggregate_graph_proposals(
                 client_selection = predrift_clients,
                 local_graphs=local_graphs,
                 weights=local_weights,
                 config_input=cfg_predrift,
-                task_node=datasets[0].y_info["names"][0]
+                task_node=datasets[0].y_info["names"][0],
+                tie_break_seed=privacy_seed + 101,
+                ensure_task_parent=ensure_task_parent,
             )
             t_agg_predrift = time.time() - t_agg_predrift
             print(f"\033[94m[Timing] aggregate_graph_proposals (predrift): {t_agg_predrift:.3f}s\033[0m")
             timing_metrics["aggregate_graph_predrift"] = t_agg_predrift
+
+            if structural_privacy_report is not None:
+                structural_privacy_report["aggregate_postprocessing"]["predrift"] = {
+                    "tie_count": len(graph_predrift_meta["uncertain_edges"]),
+                    "task_parent_repair": graph_predrift_meta["task_parent_repair"],
+                }
+                if graph_predrift_reference is not None:
+                    structural_privacy_report["aggregate_graph_disagreement"]["predrift"] = (
+                        graph_pair_disagreement(graph_predrift, graph_predrift_reference)
+                    )
 
             maybe_plot_graph(graph_predrift, 'graph_predrift')
             eval_res = _evaluate_graph_against_truth(
@@ -741,18 +859,42 @@ def main(cfg: DictConfig) -> None:
                 graph_eval_metrics[k] = metrics
 
             # postdrift
+            graph_postdrift_reference = None
+            if structural_privacy_enabled and evaluate_non_private_reference:
+                graph_postdrift_reference, _ = aggregate_graph_proposals(
+                    client_selection=postdrift_clients,
+                    local_graphs=non_private_local_graphs,
+                    weights=local_weights,
+                    config_input=cfg_postdrift,
+                    task_node=datasets[0].y_info["names"][0],
+                    tie_break_seed=privacy_seed + 202,
+                    ensure_task_parent=ensure_task_parent,
+                )
+
             t_agg_postdrift = time.time()
-            graph_postdrift, _ = aggregate_graph_proposals(
+            graph_postdrift, graph_postdrift_meta = aggregate_graph_proposals(
                 client_selection = postdrift_clients,
                 local_graphs=local_graphs,
                 weights=local_weights,
                 config_input=cfg_postdrift,
-                task_node=datasets[0].y_info["names"][0]
+                task_node=datasets[0].y_info["names"][0],
+                tie_break_seed=privacy_seed + 202,
+                ensure_task_parent=ensure_task_parent,
             )
             t_agg_postdrift = time.time() - t_agg_postdrift
             print(f"\033[94m[Timing] aggregate_graph_proposals (postdrift): {t_agg_postdrift:.3f}s\033[0m")
             if cfg.learning.subgraphs.rnd_drift <= n_rounds:
                 timing_metrics["aggregate_graph_postdrift"] = t_agg_postdrift
+
+            if structural_privacy_report is not None:
+                structural_privacy_report["aggregate_postprocessing"]["postdrift"] = {
+                    "tie_count": len(graph_postdrift_meta["uncertain_edges"]),
+                    "task_parent_repair": graph_postdrift_meta["task_parent_repair"],
+                }
+                if graph_postdrift_reference is not None:
+                    structural_privacy_report["aggregate_graph_disagreement"]["postdrift"] = (
+                        graph_pair_disagreement(graph_postdrift, graph_postdrift_reference)
+                    )
 
             maybe_plot_graph(graph_postdrift, 'graph_postdrift')
             eval_res = _evaluate_graph_against_truth(
@@ -765,6 +907,9 @@ def main(cfg: DictConfig) -> None:
             if graph_eval_metrics:
                 with open(os.path.join("results", "graph_metrics.json"), "w") as fp:
                     json.dump(graph_eval_metrics, fp, indent=2)
+            if structural_privacy_report is not None:
+                with open(os.path.join("results", "structural_privacy.json"), "w") as fp:
+                    json.dump(structural_privacy_report, fp, indent=2)
 
             # update intervention policy for pre-drift clients
             interv_policy_predrift, ip_names_predrift = get_intervention_policy(graph_predrift, 

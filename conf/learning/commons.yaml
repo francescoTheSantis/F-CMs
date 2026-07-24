@@ -4,3 +4,15 @@ subgraphs:
   modality: 'connected_nodes'
   concept_in_common: false
   task_in_common: true
+  aggregate_graph:
+    # Server-side graph post-processing required by graph-based models.
+    ensure_task_parent: true
+    # Optional client-side edge-level local DP.  The node/concept set and
+    # aggregation weight are deliberately outside this guarantee.
+    structural_privacy:
+      enabled: false
+      epsilon: .inf
+      seed: ${seed}
+      # This oracle comparison is for benchmark evaluation only and must not
+      # be computed by a deployment server that never sees raw client graphs.
+      evaluate_against_non_private: true

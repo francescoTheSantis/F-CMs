@@ -784,9 +784,12 @@ def aggregate_graph_proposals(
     weights: Optional[List[float]] = None,
     config_input: Optional[List[str]] = None,
     task_node: Optional[str] = None,
+    tie_break_seed: Optional[int] = None,
+    ensure_task_parent: bool = True,
 ):
 
     config = copy.deepcopy(config_input)
+    tie_rng = random if tie_break_seed is None else random.Random(tie_break_seed)
     # Use client selection to filter local_graphs and weights
     if client_selection is None:
         return None, None
@@ -886,32 +889,44 @@ def aggregate_graph_proposals(
             vote_backward = weighted_votes_backward[i, j]
             vote_noedge = weighted_votes_noedge[i, j]
             
-            # Find the option with maximum votes (weighted majority wins)
-            max_vote = max(vote_forward, vote_backward, vote_noedge)
-            
-            # Check for ties
-            tie_count = sum([
-                vote_forward == max_vote,
-                vote_backward == max_vote,
-                vote_noedge == max_vote
-            ])
-            
-            if tie_count > 1:
-                raise NotImplementedError("Conflict resolution for ties is not implemented.")
+            # Find the maximum-consensus state.  Random tie-breaking matches
+            # the protocol in Sec. 3.2.1 of the paper.  A dedicated RNG makes
+            # paired private/non-private experiments reproducible.
+            votes = [vote_forward, vote_backward, vote_noedge]
+            max_vote = max(votes)
+            tied_states = [state for state, vote in enumerate(votes) if vote == max_vote]
+            selected_state = (
+                tied_states[0]
+                if len(tied_states) == 1
+                else tie_rng.choice(tied_states)
+            )
+            if len(tied_states) > 1:
+                uncertain_edges.append(
+                    {
+                        "node_i": node_order[i],
+                        "node_j": node_order[j],
+                        "tied_states": [
+                            ("forward", "backward", "no_edge")[state]
+                            for state in tied_states
+                        ],
+                        "selected_state": ("forward", "backward", "no_edge")[selected_state],
+                    }
+                )
 
-            else:
-                # Use simple majority without conflict resolution
-                if vote_forward == max_vote and vote_forward > 0:
-                    adj[i, j] = 1
-                elif vote_backward == max_vote and vote_backward > 0:
-                    adj[j, i] = 1
+            if selected_state == 0 and vote_forward > 0:
+                adj[i, j] = 1
+            elif selected_state == 1 and vote_backward > 0:
+                adj[j, i] = 1
     
     # Handle cycles if DAG is required
     graph_df = pd.DataFrame(adj, index=node_order, columns=node_order, dtype=int)
     start_node = n_nodes - 1
     graph_df = remove_cycles(graph_df, start_node)
     
-    # Check that task node has at least one parent
+    task_parent_repair = None
+    # Check that task node has at least one parent.  Randomized response can
+    # make "no edge" win for every task pair.  Repair uses only privatized
+    # aggregate votes, so it is post-processing and does not weaken LDP.
     if task_node is not None:
         if task_node in graph_df.columns:
             # Get incoming edges to task node (parents)
@@ -919,8 +934,49 @@ def aggregate_graph_proposals(
             num_parents = task_column.sum()
             
             if num_parents == 0:
-                raise ValueError(f"Task node '{task_node}' has no parents in the aggregated graph. "
-                               f"At least one parent is required for the task node.")
+                if not ensure_task_parent:
+                    raise ValueError(
+                        f"Task node '{task_node}' has no parents in the aggregated graph. "
+                        "At least one parent is required for the task node."
+                    )
+
+                task_idx = node_order.index(task_node)
+                candidates = []
+                for source_idx, source_node in enumerate(node_order):
+                    if source_idx == task_idx:
+                        continue
+                    pair_i, pair_j = sorted((source_idx, task_idx))
+                    if total_weight_pairs[pair_i, pair_j] == 0:
+                        continue
+                    incoming_vote = (
+                        weighted_votes_forward[pair_i, pair_j]
+                        if source_idx == pair_i
+                        else weighted_votes_backward[pair_i, pair_j]
+                    )
+                    candidates.append((float(incoming_vote), source_node, source_idx))
+
+                # Shuffle first so equal-vote candidates are broken randomly,
+                # then use the noisy incoming vote as the primary key.
+                tie_rng.shuffle(candidates)
+                candidates.sort(key=lambda item: item[0], reverse=True)
+                for incoming_vote, source_node, source_idx in candidates:
+                    candidate_graph = graph_df.copy()
+                    candidate_graph.iloc[source_idx, task_idx] = 1
+                    if not contains_cycle(candidate_graph.values):
+                        graph_df = candidate_graph
+                        task_parent_repair = {
+                            "applied": True,
+                            "source": source_node,
+                            "target": task_node,
+                            "privatized_incoming_vote": incoming_vote,
+                        }
+                        break
+
+                if task_parent_repair is None:
+                    raise ValueError(
+                        f"Task node '{task_node}' has no parents and no acyclic "
+                        "post-processing repair is possible."
+                    )
 
     meta = {
         "weights": pd.DataFrame(total_weight_pairs, index=node_order, columns=node_order),
@@ -928,6 +984,7 @@ def aggregate_graph_proposals(
         "votes_backward": pd.DataFrame(weighted_votes_backward, index=node_order, columns=node_order),
         "votes_noedge": pd.DataFrame(weighted_votes_noedge, index=node_order, columns=node_order),
         "uncertain_edges": uncertain_edges,
+        "task_parent_repair": task_parent_repair or {"applied": False},
     }
     return graph_df, meta
 

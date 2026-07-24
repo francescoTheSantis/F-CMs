@@ -49,7 +49,7 @@ def generate_img_embeddings(dataset: torch.utils.data.Dataset,
         weights_path = ensure_resnet18_imagenet_weights(model_directory)
         input_encoder_res = tv_models.resnet18(weights=None)
         input_encoder_res.load_state_dict(
-            torch.load(weights_path, map_location='cpu', weights_only=True))
+            torch.load(weights_path, map_location='cpu', weights_only=False))
         n_features = input_encoder_res.fc.in_features
         projector = nn.Sequential(nn.Linear(n_features, n_features, bias=False), nn.ReLU(),
                                         nn.Linear(n_features, 256, bias=False), )

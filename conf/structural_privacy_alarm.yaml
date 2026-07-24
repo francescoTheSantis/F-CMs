@@ -1,0 +1,21 @@
+defaults:
+  - test_alarm
+  - _self_
+
+# All training and drift hyperparameters are inherited from test_alarm.yaml.
+hydra:
+  mode: MULTIRUN
+  sweeper:
+    params:
+      seed: 1,2,3,4,5
+      dataset: alarm
+      model: c2bm,cgm
+      learning: local_federated
+      learning.subgraphs.aggregate_graph.structural_privacy.epsilon: .inf,8.0,4.0,2.0,1.0
+
+learning:
+  subgraphs:
+    aggregate_graph:
+      structural_privacy:
+        enabled: true
+        evaluate_against_non_private: true

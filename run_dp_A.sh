@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=fcms_siim  # Job name
+#SBATCH --job-name=fcms_dp  # Job name
 # #SBATCH --gres=gpu:1g:1             # Request 1 MIG slice (24 GB VRAM)
 #SBATCH --gres=gpu:rtx_a6000:1
 #SBATCH --cpus-per-task=6          # CPUs for data loading
@@ -37,14 +37,16 @@ export PATH=~/graphviz-env/bin:$PATH
 # Set common PyTorch environment variables
 export PYTHONUNBUFFERED=1
 
-# Run training
-echo "=== Start SIIM (all) ==="
-python main.py --config-name=test_siim &
-sleep 30
-echo "=== Start SIIM (static) ==="
-python main.py --config-name=test_siim_static &
+cd ~/rebutal-neurips-2026/f-cms/F-CMs-v2/F-CMs
 
-wait  # Wait for all background processes to finish
+python main.py --config-name structural_privacy_asia
+python main.py --config-name structural_privacy_alarm
+python main.py --config-name structural_privacy_chexpert
+
+python scripts/summarize_structural_privacy.py \
+  outputs/multirun/<asia-run> \
+  outputs/multirun/<alarm-run> \
+  outputs/multirun/<chexpert-run>
 
 echo "=== Job Finished ==="
 echo "End time: $(date)"

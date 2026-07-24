@@ -1,0 +1,22 @@
+defaults:
+  - test_asia
+  - _self_
+
+# Paired sweep: every seed is run at the non-private limit and four finite
+# structural privacy budgets.  All other settings match test_asia.yaml.
+hydra:
+  mode: MULTIRUN
+  sweeper:
+    params:
+      seed: 1,2,3,4,5
+      dataset: asia
+      model: c2bm,cgm
+      learning: local_federated
+      learning.subgraphs.aggregate_graph.structural_privacy.epsilon: .inf,8.0,4.0,2.0,1.0
+
+learning:
+  subgraphs:
+    aggregate_graph:
+      structural_privacy:
+        enabled: true
+        evaluate_against_non_private: true

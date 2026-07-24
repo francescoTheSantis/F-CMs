@@ -165,6 +165,14 @@ graph.pkl
 
 Use `show_results.py` to aggregate completed sweep folders and generate the tables/figures. Edit the `paths` list in that script to point to your Hydra output folders.
 
+## Structural Privacy
+
+Graph-based F-CMs can optionally privatize every client's transmitted
+three-state pair relations with edge-level local differential privacy.
+Rebuttal sweeps for C2BM and CGM on Asia, Alarm, and CheXpert, together with
+the precise guarantee, output metrics, and table-generation commands, are
+documented in [STRUCTURAL_PRIVACY.md](STRUCTURAL_PRIVACY.md).
+
 ## License
 
 This project is released under the MIT License. See [LICENSE](LICENSE) for details.
