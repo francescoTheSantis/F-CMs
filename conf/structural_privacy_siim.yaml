@@ -1,0 +1,22 @@
+defaults:
+  - test_siim
+  - _self_
+
+# All SIIM training, graph-loading, and drift settings are inherited from
+# test_siim.yaml; this sweep only restricts the models/regime and adds LDP.
+hydra:
+  mode: MULTIRUN
+  sweeper:
+    params:
+      seed: 1,2,3
+      dataset: siim_pneumothorax
+      model: c2bm,cgm
+      learning: local_federated
+      learning.subgraphs.aggregate_graph.structural_privacy.epsilon: .inf,8.0,4.0,2.0,1.0
+
+learning:
+  subgraphs:
+    aggregate_graph:
+      structural_privacy:
+        enabled: true
+        evaluate_against_non_private: true

@@ -73,6 +73,9 @@ def discover_rows(roots: Iterable[Path], phase: str) -> List[Dict[str, Any]]:
                 report,
                 f"aggregate_graph_disagreement.{phase}.disagreement_rate",
             )
+            completion_status = (
+                "complete" if accuracy is not None else "incomplete_missing_task_metrics"
+            )
             rows.append(
                 {
                     "run_dir": str(resolved),
@@ -86,6 +89,7 @@ def discover_rows(roots: Iterable[Path], phase: str) -> List[Dict[str, Any]]:
                     ),
                     "changed_pair_report_rate": report.get("changed_pair_report_rate"),
                     "phase": phase,
+                    "completion_status": completion_status,
                 }
             )
     return rows
@@ -133,6 +137,7 @@ def summarize(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 "dataset": dataset,
                 "model": model,
                 "epsilon": epsilon,
+                "n_runs": len(group),
                 "n_accuracy": n_accuracy,
                 "task_accuracy_pct_mean": None if acc_mean is None else 100.0 * acc_mean,
                 "task_accuracy_pct_std": None if acc_std is None else 100.0 * acc_std,
@@ -184,17 +189,19 @@ def write_markdown(path: Path, rows: List[Dict[str, Any]], phase: str) -> None:
     lines = [
         f"# Structural privacy results ({phase})",
         "",
-        "| Dataset | Model | $\\varepsilon_s$ | Task accuracy (%) | Change vs. non-private (pp) | Graph disagreement (%) |",
-        "|---|---|---:|---:|---:|---:|",
+        "| Dataset | Model | $\\varepsilon_s$ | Complete task runs | Task accuracy (%) | Change vs. non-private (pp) | Graph disagreement (%) |",
+        "|---|---|---:|---:|---:|---:|---:|",
     ]
     for row in rows:
         epsilon = row["epsilon"]
         epsilon_text = "$\\infty$" if math.isinf(epsilon_sort_value(epsilon)) else str(epsilon)
         lines.append(
-            "| {dataset} | {model} | {epsilon} | {accuracy} | {change} | {graph} |".format(
+            "| {dataset} | {model} | {epsilon} | {complete}/{total} | {accuracy} | {change} | {graph} |".format(
                 dataset=row["dataset"],
                 model=row["model"],
                 epsilon=epsilon_text,
+                complete=row["n_accuracy"],
+                total=row["n_runs"],
                 accuracy=format_mean_std(
                     row["task_accuracy_pct_mean"], row["task_accuracy_pct_std"]
                 ),
@@ -230,14 +237,38 @@ def main() -> None:
         type=Path,
         default=Path("structural_privacy_summary"),
     )
+    parser.add_argument(
+        "--allow-incomplete",
+        action="store_true",
+        help=(
+            "Write aggregate tables even when one or more discovered runs are "
+            "missing final task metrics. By default this is treated as an error."
+        ),
+    )
     args = parser.parse_args()
 
     rows = discover_rows(args.roots, args.phase)
     if not rows:
         raise SystemExit("No completed structural-privacy runs were found.")
-    summaries = summarize(rows)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     write_csv(args.output_dir / "runs.csv", rows)
+
+    incomplete = [row for row in rows if row["completion_status"] != "complete"]
+    if incomplete and not args.allow_incomplete:
+        print("Incomplete structural-privacy runs (graph report exists, task metrics missing):")
+        for row in incomplete:
+            print(
+                "  dataset={dataset} model={model} seed={seed} epsilon={epsilon}: "
+                "{run_dir}".format(**row)
+            )
+        raise SystemExit(
+            f"{len(incomplete)} incomplete run(s) found. Their graph aggregation "
+            "completed, but training/final evaluation did not write "
+            "results/aggregated_test_metrics.json. See runs.csv; fix or rerun "
+            "them, or pass --allow-incomplete to produce a partial table."
+        )
+
+    summaries = summarize(rows)
     write_csv(args.output_dir / "summary.csv", summaries)
     write_markdown(args.output_dir / "table.md", summaries, args.phase)
     print(f"Found {len(rows)} runs; wrote summaries to {args.output_dir.resolve()}")
@@ -245,4 +276,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

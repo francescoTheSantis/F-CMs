@@ -46,6 +46,7 @@ class StructuralPrivacySummaryTests(unittest.TestCase):
 
         result = summarize(rows)
         finite = next(row for row in result if row["epsilon"] == 4.0)
+        self.assertEqual(finite["n_runs"], 2)
         self.assertAlmostEqual(finite["task_accuracy_pct_mean"], 73.5)
         self.assertAlmostEqual(finite["change_from_non_private_pp_mean"], -1.5)
         self.assertEqual(finite["n_paired"], 2)
@@ -54,4 +55,3 @@ class StructuralPrivacySummaryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -14,6 +14,19 @@ from env import CACHE
 
 from src.models.layers.intervention import get_test_intervention_index
 
+
+def _update_concept_metric_if_available(metric, predictions, concept_name, target):
+    """Update an auxiliary concept metric only when the model emits that concept.
+
+    Graph-based models do not predict root concepts. Structural perturbations
+    can change the root set without invalidating the task prediction.
+    """
+    if predictions is None or concept_name not in predictions:
+        return False
+    metric.update(predictions[concept_name], target)
+    return True
+
+
 class Predictor(pl.LightningModule):    
     def __init__(self,
                 model: Optional[nn.Module] = None,
@@ -486,23 +499,49 @@ class Predictor(pl.LightningModule):
                     # after interveening on a level of the graph, how well can we predict each child concept
                     childs = list(itertools.chain(*self.test_interv_policy[l:]))
                     for child_index in childs:
-                        if not use_shared_level_outputs:
-                            if self.c_names_all[child_index] not in c_hat_id.keys():
-                                continue
-                        elif self.learning_modality == "localized":
-                            if self.c_names_all[child_index] not in c_hat.keys():
-                                continue
+                        c_name = self.c_names_all[child_index]
                         if use_shared_level_outputs:
-                            c_name = self.c_names_all[child_index]
-                            self.test_intervention_level_c[f'level {l}/child {c_name}'].update(c_hat[c_name], c[:,child_index])
+                            # Causal models do not emit predictions for graph
+                            # roots. A privatized graph can change which
+                            # concepts are roots, so an intervention policy
+                            # may legitimately contain a child absent from
+                            # c_hat. The task prediction remains valid; only
+                            # this unavailable auxiliary concept metric must
+                            # be skipped.
+                            updated = _update_concept_metric_if_available(
+                                self.test_intervention_level_c[f'level {l}/child {c_name}'],
+                                c_hat,
+                                c_name,
+                                c[:, child_index],
+                            )
+                            if not updated:
+                                continue
                         else:
                             if self.learning_modality not in ["centralized", "localized"]:
                                 if child_index in id_indices:
-                                    c_name = self.c_names_all[child_index]
-                                    self.test_intervention_ood_level_c_id[f'client {client_id}'][f'level {l}/child {c_name}'].to(device).update(c_hat_ood[c_name], c[:,child_index])
+                                    metric = self.test_intervention_ood_level_c_id[
+                                        f'client {client_id}'
+                                    ][f'level {l}/child {c_name}'].to(device)
+                                    updated = _update_concept_metric_if_available(
+                                        metric,
+                                        c_hat_ood,
+                                        c_name,
+                                        c[:, child_index],
+                                    )
+                                    if not updated:
+                                        continue
                                 elif child_index in ood_indices:
-                                    c_name = self.c_names_all[child_index]
-                                    self.test_intervention_id_level_c_ood[f'client {client_id}'][f'level {l}/child {c_name}'].to(device).update(c_hat_id[c_name], c[:,child_index])
+                                    metric = self.test_intervention_id_level_c_ood[
+                                        f'client {client_id}'
+                                    ][f'level {l}/child {c_name}'].to(device)
+                                    updated = _update_concept_metric_if_available(
+                                        metric,
+                                        c_hat_id,
+                                        c_name,
+                                        c[:, child_index],
+                                    )
+                                    if not updated:
+                                        continue
 
                         #if c_name in self.c_names_id[1]:
                         #    self.test_intervention_level_c[f'level {l}/child {c_name}'].update(c_hat[c_name], c[:,child_index])

@@ -12,6 +12,11 @@ import shutil
 import random
 import math
 
+
+class SplitConfigurationError(ValueError):
+    """Raised when retrying with another random seed cannot fix a split."""
+
+
 def dfs_forward(torch_graph, start_node, end_node, visited=None, randomize=True, nodes_not_allowed = []):
     """
     DFS forward traversal to find a path from start_node to end_node.
@@ -289,8 +294,11 @@ def generate_add_nodes_values(graph, torch_graph, y_index_graph, y_index, add_no
 
         if add_nodes_modality == 'connection':
             # order nodes in base of connections and select top add_nodes_number
-            possible_nodes = sorted(possible_nodes, key=lambda x: connections[possible_nodes.index(x)], reverse=True)    
-            return possible_nodes[:add_nodes_number]
+            possible_nodes = sorted(
+                possible_nodes,
+                key=lambda x: connections[possible_nodes.index(x)],
+                reverse=True,
+            )
     elif add_nodes_modality == 'specific_nodes':
         if not add_nodes_values:
             raise ValueError("add_nodes_values must be provided when using 'specific_nodes' modality.")
@@ -302,14 +310,22 @@ def generate_add_nodes_values(graph, torch_graph, y_index_graph, y_index, add_no
             raise ValueError("One or more specified additional nodes have already been used in previous attempts. Please provide different specific_nodes_names.")
         if any(node == y_index for node in add_nodes_values):
             raise ValueError("The specified additional nodes cannot include the task node.")
-        if len(add_nodes_values) > add_nodes_number:
-            return random.sample(add_nodes_values, add_nodes_number)
         possible_nodes = add_nodes_values
       
     else:
         raise ValueError("Unsupported modality for dict_subgraph_with_add_nodes. Supported modalities are 'connected_nodes' and 'random'")
 
-    return random.sample(possible_nodes, min(add_nodes_number, len(possible_nodes)))
+    if len(possible_nodes) < add_nodes_number:
+        raise ValueError(
+            f"Cannot select exactly number_add_nodes={add_nodes_number}: only "
+            f"{len(possible_nodes)} eligible task-ancestor concepts remain for "
+            f"modality={add_nodes_modality!r}. Try another split seed, reduce "
+            "number_add_nodes, or revise the learned graph."
+        )
+
+    if add_nodes_modality == 'connection':
+        return possible_nodes[:add_nodes_number]
+    return random.sample(possible_nodes, add_nodes_number)
 
 
 def add_additional_nodes_to_subgraph(graph, subgraph, add_nodes_values, randomize=True):
@@ -376,7 +392,9 @@ def get_subgraphs(graph, y_index, min_number_subgraphs = 3, max_number_subgraphs
     from src.utils import get_roots, get_task_graph
 
     if min_number_subgraphs > max_number_subgraphs:
-        raise ValueError("min_number_subgraphs must be less than or equal to max_number_subgraphs.")
+        raise SplitConfigurationError(
+            "min_number_subgraphs must be less than or equal to max_number_subgraphs."
+        )
 
     ### INITIALIZATION ###
     torch_graph = torch.tensor(graph.values)
@@ -418,18 +436,33 @@ def get_subgraphs(graph, y_index, min_number_subgraphs = 3, max_number_subgraphs
 
 
         # Validate parameters for additional nodes
-        if add_nodes_number <1:
-            raise ValueError("number_add_nodes must be at least 1")
-        if add_nodes_number >= len(y_index_graph)-1:
-            raise ValueError("number_add_nodes exceeds the number of available nodes in the y_index subgraph minus one: {}".format(len(y_index_graph)-1))
+        if add_nodes_number < 1:
+            raise SplitConfigurationError("number_add_nodes must be at least 1.")
+
+        eligible_add_nodes = sum(node != y_index for node in y_index_graph)
+        count_based_max_add_nodes = max(eligible_add_nodes - 1, 0)
+        if add_nodes_number > count_based_max_add_nodes:
+            raise SplitConfigurationError(
+                f"number_add_nodes={add_nodes_number} is invalid for the current graph: "
+                f"the task-ancestor subgraph contains {eligible_add_nodes} eligible "
+                f"concept nodes, so the count-based upper bound is "
+                f"{count_based_max_add_nodes} while reserving at least one for "
+                "pre-drift subgraphs. Graph connectivity may impose a lower bound. Reduce "
+                "learning.subgraphs.dict_subgraph_with_add_nodes.number_add_nodes "
+                "or restore the paper's original learned proxy graph."
+            )
         if n_subgraphs_add_nodes_to_generate < 1:
-            raise ValueError("number_subgraphs_add_nodes must be at least 1")
+            raise SplitConfigurationError(
+                "number_subgraphs_add_nodes must be at least 1."
+            )
         
         # at least one subgraph without additional nodes
         if n_subgraphs_add_nodes_to_generate > (max_number_subgraphs-1):
-            raise ValueError("Number of subgraphs with additional nodes to generate exceeds the maximum number of subgraphs-1, i.e., number of clients-1: {}".format(max_number_subgraphs -1 ))
-        if n_subgraphs_add_nodes_to_generate < 1:
-            raise ValueError("Number of subgraphs with additional nodes to generate must be at least 1")
+            raise SplitConfigurationError(
+                "number_subgraphs_add_nodes exceeds max_number_subgraphs - 1 "
+                f"({max_number_subgraphs - 1}); at least one subgraph must remain "
+                "without additional nodes."
+            )
            
         # Generate initial add_nodes_values
         add_nodes_values = generate_add_nodes_values(
@@ -1323,6 +1356,10 @@ def generate_split_with_fallback(
 
                 return generate_split(cfg, datasets, graph, y_index)
 
+            except SplitConfigurationError:
+                # This failure is determined by the graph/configuration and
+                # cannot be repaired by trying another random seed.
+                raise
             except Exception as e:
                 last_err = e
                 print(e)

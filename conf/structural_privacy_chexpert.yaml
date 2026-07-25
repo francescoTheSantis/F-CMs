@@ -8,7 +8,7 @@ hydra:
   mode: MULTIRUN
   sweeper:
     params:
-      seed: 1,2,3,4,5
+      seed: 1,2,3
       dataset: cheXpert
       model: c2bm,cgm
       learning: local_federated
@@ -16,6 +16,15 @@ hydra:
 
 learning:
   subgraphs:
+    # The cached rebuttal proxy has two task-root concepts whose paths merge
+    # through Pneumothorax and Edema. Introducing a single root preserves a
+    # complete pre-drift path through the other root. A fixed node also keeps
+    # the graph split paired across privacy budgets and model variants.
+    dict_subgraph_with_add_nodes:
+      modality: specific_nodes
+      number_add_nodes: 1
+      specific_nodes_names:
+        - Fracture
     aggregate_graph:
       structural_privacy:
         enabled: true

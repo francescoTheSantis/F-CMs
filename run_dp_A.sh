@@ -8,6 +8,8 @@
 #SBATCH --output=logs/%j_%x.out     # Output: logs/<jobid>_<jobname>.out
 #SBATCH --error=logs/%j_%x.err      # Errors: logs/<jobid>_<jobname>.err
 #SBATCH --container-image=mamba
+set -euo pipefail
+
 #
 # PyTorch single-GPU training template
 # Available containers: pip, mamba, uv, pixi
@@ -46,7 +48,7 @@ python main.py --config-name structural_privacy_chexpert
 python scripts/summarize_structural_privacy.py \
   outputs/multirun/<asia-run> \
   outputs/multirun/<alarm-run> \
-  outputs/multirun/<chexpert-run>
+  outputs/multirun/2026-07-25/10-09-52
 
 echo "=== Job Finished ==="
 echo "End time: $(date)"
