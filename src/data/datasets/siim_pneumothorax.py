@@ -52,7 +52,7 @@ def preprocess_csv_file(data_path):
     # rename ImageId as image
     df = df.rename(columns={"ImageId": "image", "Unnamed: 0": "index"})
     # create label column
-    df["label"] = df["EncodedPixels"].apply(lambda x: 1 if x=="-1" else 0)
+    df["label"] = df["EncodedPixels"].apply(lambda x: 0 if x=="-1" else 1)
     # eliminate column EncodePixels
     df = df.drop(columns=["EncodedPixels"])
     # create class column
@@ -139,8 +139,8 @@ class ImageClassificationDataset(Dataset):
 
         self.c_info = {'names': None, 
                        'cardinality': None} # to be updated in the split method
-        # self.y_info = {'names': ["there_is_lung_diseases"],
-                    #    'cardinality': [2]}        
+        #self.y_info = {'names': ["there_is_lung_diseases"],
+        #               'cardinality': [2]}        
         self.y_info = {'names': ["Pneumothorax"],
                        'cardinality': [2]}
 
@@ -157,7 +157,6 @@ class ImageClassificationDataset(Dataset):
         
         # if seed is not None:
         #     np.random.seed(seed)
-        
         data_file = os.path.join(str(CACHE / "siim_pneumothorax/siim_train.csv"))
 
         if not os.path.exists(data_file):
@@ -196,6 +195,12 @@ class _ImageClassificationDataset(Dataset):
 
         # load the data
         self.df = pd.read_csv(data_file)
+        self.df["image"] = self.df["image"].str.replace(
+            r"^([^/]*/[^/]*/)[^/]+(/.*)$",
+            r"\1admin\2",
+            regex=True
+        )
+
         self.X = None
         self.c = None
         self.y = None

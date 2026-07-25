@@ -34,10 +34,10 @@ CONCEPT_NAMES = ['Enlarged Cardiomediastinum',
                  'Pneumonia',
                  'Atelectasis',
                  'Pneumothorax',
-                'Pleural Effusion',
-                'Pleural Other',
-                'Fracture',
-                'Support Devices']
+                 'Pleural Effusion',
+                 'Pleural Other',
+                 'Fracture',
+                 'Support Devices']
 
 #---- Transformations ----
 transResize = 224
@@ -100,6 +100,8 @@ def clean_and_split_data(data_path, seed=42):
         patient_part = next(part for part in path_parts if "patient" in part)
         subject_ids.append(patient_part[len("patient"):])
     full_df['subject_id'] = subject_ids
+    #print("Path", full_df['Path'][0:5])
+    #print("patient_id",full_df['subject_id'][0:5])
 
     # Droping duplicate patient recordings except for the last visit
     full_df = full_df.drop_duplicates(subset=['subject_id'], keep='last')

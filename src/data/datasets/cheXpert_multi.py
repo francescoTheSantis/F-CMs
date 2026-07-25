@@ -330,8 +330,17 @@ def build_multimodal_metadata(
     rows_before_text_filter = len(merged_df)
     merged_df = merged_df[merged_df["text_input"].notna()].reset_index(drop=True)
 
+    # filter only frontal images
+    merged_df = merged_df[merged_df["view_id"].str.contains("frontal", case=False, na=False)].reset_index(drop=True)
+
+    # eliminate duplicates as in chexpert: keep last visit per patient
+    print("patient_id",merged_df['patient_id'][0:5])
+    merged_df = merged_df.drop_duplicates(subset=['patient_id'], keep='last')
+    merged_df = merged_df.sort_values(by=['patient_id']).reset_index(drop=True)
+
+    
     merged_df[CONCEPT_NAMES] = merged_df[CONCEPT_NAMES].fillna(0)
-    merged_df[CONCEPT_NAMES] = merged_df[CONCEPT_NAMES].replace(-1, 0)
+    merged_df[CONCEPT_NAMES] = merged_df[CONCEPT_NAMES].replace(-1, 1)
     merged_df[TARGET_NAME] = np.where(merged_df[TARGET_NAME] == 1, 0, 1)
     merged_df["sample_id"] = merged_df["img_id"]
     merged_df, balancing_stats = _balance_task_classes(merged_df, target_name=TARGET_NAME, seed=seed)
