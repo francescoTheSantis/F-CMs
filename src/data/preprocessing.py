@@ -335,6 +335,7 @@ def preprocess_dataset(dataset_cfg, _dataset, device, backbone ='resnet18', seed
         # avoid empty spaces in the concepts names
         dataset.c_info['names'] = [concept.replace(' ', '_') for concept in dataset.c_info['names']]
         
+        
         # switch the task to "there_is_lung_diseases" and put "Pneumothorax" as concept in the same place as "there_is_lung_diseases"
         if "there_is_lung_diseases" in dataset.c_info['names']:
             print("\033[93mChanging task to 'there_is_lung_diseases'\033[0m")

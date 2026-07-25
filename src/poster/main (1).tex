@@ -1,0 +1,196 @@
+%%%% Better Poster latex template example v1.0 (2019/04/04)
+%%%% GNU General Public License v3.0
+%%%% Rafael Bailo
+%%%% https://github.com/rafaelbailo/betterposter-latex-template
+%%%% 
+%%%% Original design from Mike Morrison
+%%%% https://twitter.com/mikemorrison
+
+\documentclass[a0paper,fleqn]{betterposter}
+
+%%%% Uncomment the following commands to customise the format
+
+%% Setting the width of columns
+% Left column
+\setlength{\leftbarwidth}{0.3\paperwidth}
+% Right column
+\setlength{\rightbarwidth}{0.3\paperwidth}
+
+%% Setting the column margins
+% Horizontal margin
+%\setlength{\columnmarginvertical}{0.05\paperheight}
+% Vertical margin
+%\setlength{\columnmarginhorizontal}{0.05\paperheight}
+% Horizontal margin for the main column
+%\setlength{\maincolumnmarginvertical}{0.15\paperheight}
+% Vertical margin for the main column
+%\setlength{\maincolumnmarginhorizontal}{0.15\paperheight}
+
+%% Changing font sizes
+% Text font
+\renewcommand{\fontsizestandard}{\fontsize{28}{50} \selectfont}
+% Main column font
+\renewcommand{\fontsizemain}{\fontsize{72}{95} \selectfont}
+% Title font
+%\renewcommand{\fontsizetitle}{\fontsize{28}{35} \selectfont}
+% Author font
+%\renewcommand{\fontsizeauthor}{\fontsize{28}{35} \selectfont}
+% Section font
+\renewcommand{\fontsizesection}{\fontsize{28}{35} \selectfont}
+
+%% Changing font sizes for a specific text segment
+% Place the text inside brackets:
+% {\fontsize{28}{35} \selectfont Your text goes here}
+
+%% Changing colours
+% Background of side columns
+%\renewcommand{\columnbackgroundcolor}{black}
+% Font of side columns
+%\renewcommand{\columnfontcolor}{gray}
+% Background of main column
+%\renewcommand{\maincolumnbackgroundcolor}{empirical}
+%\renewcommand{\maincolumnbackgroundcolor}{theory}
+%\renewcommand{\maincolumnbackgroundcolor}{methods}
+%\renewcommand{\maincolumnbackgroundcolor}{intervention}
+% Font of main column
+%\renewcommand{\maincolumnfontcolor}{gray}
+
+\begin{document}	
+\betterposter{
+%%%%%%%% MAIN COLUMN
+
+\maincolumn{
+%%%% Main space
+
+\textbf{Aplicaciones de la derivada}
+\\\textbf{Optimización}
+\\Aprovechamiento de material
+\\ \vspace{2cm}
+\\\begin{tikzpicture}[line width = 2pt]
+    % material
+    \draw (0, 0) rectangle (26, 16);
+    
+    % cortes
+    \draw[fill = white] (0, 0) rectangle (4, 4);
+    \draw[fill = white] (0, 12) rectangle (4, 16);
+    \draw[fill = white] (22, 0) rectangle (26, 4);
+    \draw[fill = white] (22, 12) rectangle (26, 16);
+    \draw (4, 4) -- (8, 4);
+    \draw (4, 12) -- (8, 12);
+    \draw (18, 4) -- (22, 4);
+    \draw (18, 12) -- (22, 12);
+    
+    % dobleces
+    \begin{scope}[dashed]
+        \draw (4, 4) -- (4, 12);
+        \draw (8, 0) -- (8, 16);
+        \draw (18, 0) -- (18, 16);
+        \draw (22, 4) -- (22, 12);
+        \draw (8, 4) -- (18, 4);
+        \draw (8, 12) -- (18, 12);
+    \end{scope}
+    
+    % etiquetas
+    \node (C) at (6.5, 7) {\Huge{Corte}};
+    \draw[<-] (6, 4) -- (C);
+    \node (D) at (14, 8) {\Huge{Doblez}};
+    \draw[<-] (16, 12) -- (D);
+    \draw[<-] (18, 10) -- (D);
+    \node (L) at (13, 17) {\Huge{$30 in$}};
+    \draw[<-] (0, 17) -- (L);
+    \draw[<-] (26, 17) -- (L);
+    \node (A) at (27, 8) {\Huge{$20 in$}};
+    \draw[<-] (27, 16) -- (A);
+    \draw[<-] (27, 0) -- (A);
+    \node (x1) at (2, -1) {\Huge{$x$}};
+    \draw[<-] (0, -1) -- (x1);
+    \draw[<-] (4, -1) -- (x1);
+    \node (x2) at (-1, 2) {\Huge{$x$}};
+    \draw[<-] (-1, 0) -- (x2);
+    \draw[<-] (-1, 4) -- (x2);
+    \node (x3) at (6, -1) {\Huge{$x$}};
+    \draw[<-] (4, -1) -- (x3);
+    \draw[<-] (8, -1) -- (x3);
+\end{tikzpicture}
+}{
+%%%% Bottom space
+
+%% QR code img/qrcode
+\QRcode{https://youtu.be/AlOqfLs3Wbo}{img/smartphoneWhite}{
+\textbf{Escanee el QR} para
+\\ver el desarrollo detallado
+}
+% Smartphone icon
+% Author: Freepik
+% Retrieved from: https://www.flaticon.com/free-icon/smartphone_65680
+
+%% Compact QR code (comment the previous command and uncomment this one to switch)
+%\compactqrcode{img/qrcode}{
+%\textbf{Take a picture} to
+%\\download the full paper
+%}
+
+}
+
+}{
+%%%%%%%% LEFT COLUMN
+
+\title{Diseño de una caja plegable de cartón}
+\author{Autor 1}
+\author{Autor 2}
+\institution{Colegio Seminario Diocesano de Duitama}
+
+\section{Problema}
+Se producirá una caja, abierta por la parte superior, de una pieza rectangular de cartón que mide 30 pulg de largo por 20 pulg de ancho. La caja puede cerrarse al cortar un cuadrado en cada esquina, al cortar sobre las líneas sólidas interiores y doblar luego el cartón por las líneas discontinuas. Exprese el volumen de la caja como una función de la variable indicada $x$. Encuentre las dimensiones de la caja con que se obtiene el volumen máximo. ¿Cuál es el volumen máximo?
+
+\section{La función del volumen de la caja y su derivada}
+\begin{center}
+    \begin{tikzpicture}[scale = 2]
+        \tkzInit[xmin = -.5, xmax = 8, ymin = -300, ymax = 800, ystep = 100]
+        \tkzAxeXY
+        \tkzFct[line width = 3pt, color = cyan!75!gray, domain = 0:7.5]{8 * x ** 3 - 140 * x ** 2 + 600 * x}
+        \node[right] at (1.5, 5.5) {$v(x)$};
+        \tkzFct[line width = 3pt, color = magenta!75!gray, domain = 0:8]{24 * x ** 2 - 280 * x + 600}
+        \node[right] at (1.5, 2.5) {$\frac{dv}{dx}$};
+        \tkzFct[line width = 3pt, color = green!75!gray, domain = 0:8]{48 * x - 280}
+        \node[left] at (2, -1.5) {$\frac{d^2v}{dx^2}$};
+        \draw[cyan!75!gray] (2.82, 7.58) circle[radius = 3pt] node[above] {máx.};
+        \draw[cyan!75!gray] (5.83, 3.24) circle[radius = 3pt] node[right] {P.I.};
+        \draw[magenta!75!gray] (2.82, 0) circle[radius = 3pt] node[above right] {$v' = 0$};
+        \draw[green!75!gray] (5.83, 0) circle[radius = 3pt] node[above] {$v'' = 0$};
+    \end{tikzpicture}
+\end{center}
+
+%% This fills the space between the content and the logo
+\vfill
+
+%% Institution logo
+\includegraphics[scale=.5]{img/escudo.png}\\
+
+}{
+%%%%%%%% RIGHT COLUMN
+
+\section{Verificación}
+\begin{itemize}
+    \item \textbf{Variable:} $x$ la longitud de los cortes.
+    \item \textbf{Restricciones:} Debido a que $x$ es la longitud de los cortes que es harán sobre el material, $x$ no puede ser superior a la longitud (largo o ancho) del material, en particular $x$ no puede ser superior a $\frac{30}{4}$ del largo del material entonces $0 < x < \frac{15}{2}$.
+    \item \textbf{Modelo matemático:} El modelo matemático que define el volumen de la caja es 
+        \begin{align*}
+            v(x) &= l\times a \times h \\
+            &= (30 - 4x)(20 - 2x)x \tag{1} \label{eq:model}
+        \end{align*}
+    \item \textbf{Optimización:} Obtención de los extremos de $v$ mediante el criterio de primera derivada.
+        \[
+            v' = 3x^2 - 35x + 75 \tag{2} \label{eq:first_derivative}
+        \]
+        que es cero en $x_1 = \frac{35 - 5\sqrt{13}}{6} \approx 2.8287$ y $x_2 = \frac{35 + 5\sqrt{13}}{6} \approx 8.8380$. $x_2$ se descarta por estar fuera del intervalo de restricciones para $x$.
+    \item \textbf{Determinación del máximo:} Una vez obtenido el valor extremo en el intervalo de restricciones se comprueba que éste se corresponde al máximo mediante el criterio de la segunda derivada.
+        \[
+            v'' = 6x - 35, \tag{3} \label{eq:second_derivative}
+        \]
+        entonces $v'' < 0$ en el intervalo $\left(-\infty, \frac{35}{6}\right)$ i.e $v$ es cóncava hacia abajo en este intervalo y ya que $x_2 \in \left(-\infty, \frac{35}{6}\right)$, $x_2$ es máximo local en el intervalo de restricciones.
+    \item \textbf{Interpretación:} $x \approx 2.8287 in$ es la longitud máxima de los cortes que se pueden aplicar al material para obtener la caja de volumen máximo por lo tanto la longitud de los lados de la caja (largo) $l = 30 - 4x$, (ancho) $a = 20 - 2x$ y (altura) $h = x$.
+    \item \textbf{Conclusión:} Las dimensiones de la caja de volumen máximo que puede construirse con las condiciones dadas son Largo $18.72 pul$ y ancho $14.36 pul$. El Volumen máximo de la caja es de aproximadamente $758 pul^3$.
+\end{itemize}
+}
+\end{document}

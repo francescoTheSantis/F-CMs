@@ -1,0 +1,70 @@
+defaults:
+  - default
+  - override causal_discovery: ges
+  - _self_
+
+client_id: 3
+
+hydra:
+  mode: MULTIRUN
+  sweeper:
+    params:
+      seed: 1, 4, 5  #, 2, 3, 4, 5
+      # possible datsets are: asia, sachs, alarm, hailfinder, insurance, siim_pneumothorax
+      dataset: asia #, sachs, alarm
+      # possible models are:
+      # blackbox, blackbox_multi, cbm_linear, cbm_mlp, cem, cgm, c2bm
+      model: cem, c2bm #, blackbox_multi, cbm_mlp, cem, cgm # c2bm, blackbox_multi, cbm_linear, cbm_mlp, cem, cgm
+      learning: local_federated #, localized, centralize #FedCBM, FCL #
+
+#combined_datasets:
+#  other_datasets: [fashionmnist]  # or [colormnist, fashionmnist]
+#  common_task: color
+
+model:
+  concept_loss_weight: 0.8
+
+dataset:
+  load_embeddings: true
+  load_graph: false
+  load_true_graph: true
+  batch_size: 512
+  autoencoder:
+   noise: 0.5  # for bndatasets only
+
+learning:
+  subgraphs:
+    # rnd_drift: 0 # 0 if no drift
+  #subgraphs:
+   min_number_subgraphs: 3
+   max_number_subgraphs: 3
+   randomly_eliminate_task_from_subgraphs: true # false
+   dataset_client_multiplier: 2
+   drift_add_nodes_ratio: 0.5
+   dict_subgraph_with_add_nodes:
+     modality: random
+     number_add_nodes: 5
+     number_subgraphs_add_nodes: 1
+   rnd_drift: 1000 # 0 if no drift
+   aggregate_graph:
+     local_graphs: from_true_graph # from_true_graph / learned / none
+     perc_clients_alterations: 0.1 # 1 per il test con dario e 2 clients
+     graph_alteration_prob: 0.1 # 0.1 per il test con dario
+  
+engine:
+  intervention_prob: 0.8
+  test_interv_noise: 0.8   # for bndatasets only
+  optim_kwargs:
+    lr: 0.01
+
+trainer:
+  # logger: wandb
+  devices: [0]
+  max_epochs: 120
+  patience: 10
+
+rag:
+  verbose: false
+
+notes: test_run
+

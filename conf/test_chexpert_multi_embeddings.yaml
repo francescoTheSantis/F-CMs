@@ -12,16 +12,16 @@ hydra:
     params:
       seed: 1, 2, 3, 4, 5
       dataset: cheXpert_multi
-      model: cem_multi, c2bm_multi, cgm_multi #, cbm_mlp_multi, blackbox_multi_multi
-      learning: local_federated #centralized #, localized, local_federated
+      model: cem_multi #, c2bm_multi, cgm_multi #, cbm_mlp_multi, blackbox_multi_multi
+      learning: centralized
 
 model:
   concept_loss_weight: 0.3
 
 dataset:
-  load_embeddings: true # set true
-  load_graph: true # set true
-  load_true_graph: true 
+  load_embeddings: false
+  load_graph: true
+  load_true_graph: true
   batch_size: 512
   image_client_ratio: 0.5
   per_client_reduce_fraction: Null # set a fraction to reduce it
@@ -38,7 +38,7 @@ learning:
       modality: random
       number_add_nodes: 4
       number_subgraphs_add_nodes: 2
-    rnd_drift: 10 # 0 if no drift
+    rnd_drift: 1000 # 0 if no drift
     aggregate_graph:
       local_graphs: from_true_graph
       perc_clients_alterations: 0.1
@@ -59,7 +59,7 @@ engine:
 trainer:
   # logger: wandb
   devices: [0]
-  max_epochs: 140
-  patience: 10
+  max_epochs: 2
+  patience: 1
 
 notes: chexpert_multi_first_run

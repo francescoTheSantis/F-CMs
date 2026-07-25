@@ -647,6 +647,11 @@ def run_fcl_baseline(
         json.dump(
             {
                 "concept_coverage": concept_coverage,
+                "structural_concept_coverage": float(
+                    cfg.learning.subgraphs.get(
+                        "structural_concept_coverage", float("nan")
+                    )
+                ),
                 "percent_params_changed": 0.0,
                 "drift_happened": False,
                 "last_round": int(executed_rounds),

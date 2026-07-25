@@ -21,6 +21,9 @@ args = parser.parse_args()
 
 # List the paths containing the sweeps' results
 paths = [
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/12-09-51_int_siim_seed1",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/12-08-41_int_siim_s_seed1",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/12-06-48_int_siim_loc_new_seed1"
     # "outputs/multirun/2026-04-16/13-02-51_asia", #OK
     # "outputs/multirun/2026-04-16/13-02-46_asia_s", #OK
     # "outputs/multirun/2026-04-16/13-58-53_ins", #OK
@@ -33,12 +36,92 @@ paths = [
     # "outputs/multirun/2026-04-20/19-21-16_alarm_s", #OK 
     # "outputs/multirun/2026-04-21/11-11-20_siim", #OK but skipped seed 1 for all models/learning modes
     # "outputs/multirun/2026-04-21/11-11-42_siim_s", #OK but skipped seed 1 for all models/learning modes
-    "outputs/multirun/2026-04-22/15-49-04_asia_bas", 
-    "outputs/multirun/2026-04-22/15-51-34_sachs_bas",
-    "outputs/multirun/2026-04-22/15-53-59_alarm_bas",
-    "outputs/multirun/2026-04-22/15-56-11_ins_bas",
-    "outputs/multirun/2026-04-22/15-59-30_hail_bas",
-    "outputs/multirun/2026-04-22/16-03-56_siim_bas",
+    # "outputs/multirun/2026-04-22/15-49-04_asia_bas", 
+    # "outputs/multirun/2026-04-22/15-51-34_sachs_bas",
+    # "outputs/multirun/2026-04-22/15-53-59_alarm_bas",
+    # "outputs/multirun/2026-04-22/15-56-11_ins_bas",
+    # "outputs/multirun/2026-04-22/15-59-30_hail_bas",
+    # "outputs/multirun/2026-04-22/16-03-56_siim_bas",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-05-01/11-30-03_chexpert_old_s"
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-03-29/09-24-50_CheXpert_FINAL",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-04-03/09-59-47_othermodels_245",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-04-04/09-13-02_chexpert_finalseeds"
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-04-04/09-13-07_chexpert_s_final_seeds",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-03-29/09-24-55_CheXpert_FINAL_s",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-04-03/09-59-52_othermodels_245_s"
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-05-02/18-00-35_chexpert_oldpr",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-05-02/23-42-04_othermodels",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-05-03/07-26-40_otherseed",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-05-02/18-00-30_chexpert_oldpr_s",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-05-03/10-01-01_othermodels_s",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-05-03/07-26-45_otherseed_2",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-05-03/11-33-32_chexpert_oldpr_int",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-05-03/18-48-05_chexpert_oldpr_int_s"
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-05-03/21-19-13_oherbaselines"
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-05-03/21-29-59_int_seed1",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-05-03/21-30-04_int_seed1_s"
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-05-04/08-35-54_int_seed3",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-05-04/08-35-59_int_seed3_s"
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/00-35-11_seed4_dario",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/00-19-32_static_seed4_dario"
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/22-05-17_seed3_dario",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/23-20-07_static_seed3_dario",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/00-12-11_int_siim_correct_data/00-12-11_int_siim_correct_data",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/00-13-18_int_siim_s_correct_data/00-13-18_int_siim_s_correct_data",
+    #"/home/admin/Federated-C2BM_v2/outputs/08-57-08_seed2_dario",
+    #"/home/admin/Federated-C2BM_v2/outputs/08-56-51_static_seed2_dario"
+    ### new ones ###
+    #"/home/admin/Federated-C2BM_v2/outputs/01-12-38_seed5_dario",
+    #"/home/admin/Federated-C2BM_v2/outputs/01-01-13_static_seed5_dario"
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-05-19/08-59-59_hail_int_seed3_prova",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-05-20_hail_int_seed4_prova/08-58-01" # 4 NO
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-05-25/09-57-53_hail_int_seed5_prova", # 4 YES
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-05-26/08-34-29_hail_int_s_seed3_prova",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-05-27/09-35-05_hail_int__s_seed5_prova",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-05-28/09-51-15_asia_int_seed5",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-05-28/12-26-34_asia_int_s_seed5",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-05-29/13-17-13_asia_int_s_seed3",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-05-29/13-25-01_asia_int_seed3"
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-05-29/16-45-06_asia_int_s_seed4",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-05-29/18-59-15_asia_int_seed4"
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-06-02/08-09-59_siim_int_seed3",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-06-03/08-44-21_siim_int_s_seed3",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-06-05/09-09-07_siim_int_seed6", # NO
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-06-05/10-58-57_siim_int_seed6_s", # NO
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-06-05/09-09-12_siim_int_seed7", # NO
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-06-05/11-11-09_siim_int_seed_7_s" # NO
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-06-09/09-20-18_siim_int_seed3",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-06-09/11-30-15_siim_int_seed3_s"
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-06-09/09-20-23_siim_int_seed5",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-06-09/11-41-00_siim_int_seed5_s"
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-06-09/13-25-13_siim_int_seed8", 
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-06-09/15-16-12_siim_int_seed8_s"
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-06-09/13-25-18_siim_int_seed9", # NO
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-06-09/15-32-24_siim_int_seed9_s" # NO
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-06-16/07-52-02_siim_int_seed8_c",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-06-17/09-23-17_siim_int_seed8_d"
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-06-18/09-56-05_siim_int_seed11_c", # c2bm perfect, cem no
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-06-18/10-52-26_siim_int_seed11_d",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-06-18/13-52-26_siim_int_seed11_s"
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-06-18/09-56-10_siim_int_seed12_c",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-06-18/10-52-31_siim_int_seed12_d",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-06-18/14-15-08_siim_int_seed12_s",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-06-19/08-32-47_siim_int_seed13_c", # c2bm perfect, cem no
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-06-19/09-29-03_siim_int_seed13_d_l",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-06-19/12-33-28_siim_int_seed13_s",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-06-19/08-32-52_siim_int_seed14_c",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-06-19/09-29-08_siim_int_seed14_d_l",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-06-19/13-03-28_siim_int_seed14_s",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-06-24/08-32-41_siim_int_seed15_c", # NO
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-06-24/09-23-06_siim_int_seed15_d_l",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-06-24/12-00-10_siim_int_seed15_s",
+    "/home/admin/Federated-C2BM_v2/outputs/multirun/2026-06-24/08-32-46_siim_int_seed16_c", # centralized > local_fed ma local_fed_s = localized
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-06-24/09-23-30_siim_int_seed16_d_l",
+    "/home/admin/Federated-C2BM_v2/outputs/multirun/2026-06-24/13-03-59_siim_int_seed16_s",
+    "/home/admin/Federated-C2BM_v2/outputs/multirun/2026-06-25/09-10-55_siim_int_seed16_l",
+    "/home/admin/Federated-C2BM_v2/outputs/multirun/2026-06-25/12-05-21_siim_int_seed16_d"
+
+
 ]
 
 # folder to save processed results
@@ -93,6 +176,8 @@ dataset_styles = {
     # 'cub_causal_struct': {'name': 'CUB_CAUSAL'},
     'siim_pneumothorax': {'name': 'SIIM-Pneumothorax'},
     'cheXpert_multi': {'name': 'CheXpert-Multi'},
+    'cheXpert': {'name': 'CheXpert'},
+    'chexpert': {'name': 'CheXpert'},
 }
 
 # Define the custom order
@@ -107,9 +192,10 @@ custom_order = [
     # 'CUB_CAUSAL',
     'SIIM-Pneumothorax',
     'CheXpert-Multi',
+    'CheXpert',
 ]
 
-apply_styles(performance, dataset_styles, model_styles, custom_order)
+performance = apply_styles(performance, dataset_styles, model_styles, custom_order)
 
 
 ########## Task & Concept Accuracy Plot ##########
@@ -180,7 +266,7 @@ else:
             performance,
             custom_order,
             architecture_name=architecture,
-            variable='task',
+            variable='labels',
             c_info=c_info,
             folder=visualization_folder,
             return_data=True,  # Return data for grid plot
@@ -189,17 +275,18 @@ else:
             plot_data_dict.update(data)
 
     # Create grid plot with CEM and C2BM only
-    grid_model_names = ['cem','c2bm']  # Only CEM and C2BM
-    datasets = ['Asia','Hailfinder', "SIIM-Pneumothorax"]
-    # Sort datasets according to custom_order
-    datasets = sorted(datasets, key=lambda x: custom_order.index(x) if x in custom_order else len(custom_order))
+    grid_model_names = ['CEM', 'C2BM']  # Only CEM and C2BM (display names, post apply_styles)
+    datasets = [d for d in custom_order if d in performance['dataset'].unique()]
+    if not datasets:
+        datasets = sorted(performance['dataset'].unique(), key=lambda x: custom_order.index(x) if x in custom_order else len(custom_order))
+    print(f"[show_results] Grid datasets: {datasets}")
 
 
     plot_cumulative_accuracy_grid_multi_modality(
         plot_data_dict=plot_data_dict,
         model_names=grid_model_names,
         datasets=datasets,
-        variable='task',
+        variable='labels',
         folder=visualization_folder,
     )
 
@@ -210,18 +297,31 @@ else:
             performance,
             custom_order,
             learning_modality='local_federated_drift',
-            variable='task',
+            variable='labels',
             c_info=c_info,
             folder=visualization_folder,
             return_data=True  # Return data for grid plot
             #seeds_to_average = [3,4,5],
         )
 
+    # Eliminate blackbox models from plot_data_dict
+    data_2_filtered = {}
+    for key, value in data_2.items():
+        if value is None:
+            data_2_filtered[key] = None
+        else:
+            filtered_model_data = {k: v for k, v in value.get('model_data', {}).items() 
+                                  if 'blackbox' not in k.lower()}
+            data_2_filtered[key] = {
+                'model_data': filtered_model_data,
+                'n_interventions': value.get('n_interventions', 0)
+            }
+
     plot_cumulative_accuracy_grid_multi_model(
-        plot_data_dict=data_2,
+        plot_data_dict=data_2_filtered,
         learning_modalities=['local_federated_drift'],
         datasets=datasets,
-        variable='task',
+        variable='labels',
         folder=visualization_folder,
     )
 

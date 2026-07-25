@@ -202,6 +202,22 @@ def _extract_task_labels(dataset) -> Optional[torch.Tensor]:
     return None
 
 
+def _dataloaders_have_task_labels(dataloaders, client_ids=None):
+    """Check whether selected client datasets contain an unmasked task label."""
+    if not isinstance(dataloaders, (list, tuple)):
+        dataloaders = [dataloaders]
+    selected_loaders = dataloaders if client_ids is None else [
+        dataloaders[client_id - 1]
+        for client_id in client_ids
+        if 1 <= client_id <= len(dataloaders)
+    ]
+    for dataloader in selected_loaders:
+        labels = _extract_task_labels(dataloader.dataset)
+        if labels is not None and torch.any(labels != -1):
+            return True
+    return False
+
+
 def _binary_label_counts(labels: torch.Tensor) -> Tuple[int, int, int]:
     labels = labels.to(torch.float32).view(-1)
     labels = labels[~torch.isnan(labels)]
@@ -254,7 +270,7 @@ def _print_task_label_distribution(
 
 
 
-@hydra.main(config_path="conf", config_name="test_mmist_ccrcc", version_base="1.3")
+@hydra.main(config_path="conf", config_name="test", version_base="1.3")
 def main(cfg: DictConfig) -> None:
     # various preliminaries, it set the seed for reproducibility
     torch.set_num_threads(cfg.get("num_threads", 1))
@@ -438,11 +454,12 @@ def main(cfg: DictConfig) -> None:
                 cfg, datasets, graph, y_index,
                 seed_everything_fn=seed_everything,  # <-- pass your seeding function
                 step=100,
-                max_tries=20,
+                max_tries=100,
             )  
         if cfg.learning.get("seed_plot_interventions") is not None:
-            seed_everything(cfg.get("seed"))      
-        
+            seed_everything(cfg.get("seed")) 
+                 
+        print("seed_plot_interventions:", cfg.learning.get("seed_plot_interventions"))
         
         ## Save subgraphs_concept_names, add_nodes_values, and subgraphs_with_add_nodes
         #model_name = cfg.model._target_.split('.')[-1] if hasattr(cfg.model, '_target_') else 'model'
@@ -539,6 +556,8 @@ def main(cfg: DictConfig) -> None:
             val_dataloader = DataLoader(datasets[0].data['val'], batch_size=cfg.dataset.batch_size, collate_fn=static_graph_collate)
             test_dataloader = DataLoader(datasets[0].data['test'], batch_size=cfg.dataset.batch_size, collate_fn=static_graph_collate)
 
+        #batch = next(iter(val_dataloader))
+        #print(batch['y'][0])
         engine = instantiate(cfg.engine)
         if hasattr(datasets[0], 'class_weights') and datasets[0].class_weights is not None:
             engine.model.class_weights = datasets[0].class_weights
@@ -573,7 +592,9 @@ def main(cfg: DictConfig) -> None:
                 essential_concepts = None
             if not essential_concepts:
                 essential_concepts = OmegaConf.select(cfg, "engine.centralized_topological_order", default=[]) or []
+            task_name = datasets[0].y_info["names"][0]
             essential_set = set(essential_concepts)
+            essential_set.add(task_name)
 
             model_concepts = set()
             predicted_concepts = getattr(engine.model, "predicted_concepts", None)
@@ -589,13 +610,20 @@ def main(cfg: DictConfig) -> None:
                 if engine_c_names:
                     engine_c_names = list(engine_c_names.values())[0]
                     model_concepts.update(engine_c_names)
+            if _dataloaders_have_task_labels(train_dataloader):
+                model_concepts.add(task_name)
 
             covered_concepts = model_concepts & essential_set
             concept_coverage = float(len(covered_concepts) / len(essential_set)) if len(essential_set) > 0 else float('nan')
 
 
             additional_metrics = {
-                "concept_coverage": concept_coverage
+                "concept_coverage": concept_coverage,
+                "structural_concept_coverage": OmegaConf.select(
+                    cfg,
+                    "learning.subgraphs.structural_concept_coverage",
+                    default=float("nan"),
+                ),
             }
             os.makedirs("results", exist_ok=True)
             with open("results/additional_metrics.json", "w") as fp:
@@ -657,23 +685,28 @@ def main(cfg: DictConfig) -> None:
         # determine clients for possible predrift and postdrift phases
         if cfg.learning.subgraphs.rnd_drift > 1:
             predrift_clients = list(range(1, n_clients + 1))
-            postdrift_clients = list(range(n_clients + 1, min(2 * n_clients, n_dataset_clients) + 1))
+            postdrift_clients = []
 
-            # check postdrift clients have subgraphs that cover all the subgraphs
-            postdrift_subgraphs = set()
-            for cid in postdrift_clients:
-                subgraph_id = identify_subgraph(path, cid)
-                subgraph = subgraphs_concept_names[f'subgraph_{subgraph_id}']
-                # I want to add the subgraph, not the nodes
-                postdrift_subgraphs.add(frozenset(subgraph))
-     
-            # check if postdrift_subgraphs cover all subgraphs, not nodes but subgraphs
-            all_subgraphs = set()
-            for sg in subgraphs_concept_names.values():
-                all_subgraphs.add(frozenset(sg))
+            if cfg.learning.subgraphs.rnd_drift <= n_rounds:
+                postdrift_clients = list(
+                    range(n_clients + 1, min(2 * n_clients, n_dataset_clients) + 1)
+                )
 
-            if postdrift_subgraphs != all_subgraphs:
-                raise ValueError("Post-drift clients do not cover all subgraphs. Adjust post-drift clients to include all subgraphs.")
+                # check postdrift clients have subgraphs that cover all the subgraphs
+                postdrift_subgraphs = set()
+                for cid in postdrift_clients:
+                    subgraph_id = identify_subgraph(path, cid)
+                    subgraph = subgraphs_concept_names[f'subgraph_{subgraph_id}']
+                    # I want to add the subgraph, not the nodes
+                    postdrift_subgraphs.add(frozenset(subgraph))
+
+                # check if postdrift_subgraphs cover all subgraphs, not nodes but subgraphs
+                all_subgraphs = set()
+                for sg in subgraphs_concept_names.values():
+                    all_subgraphs.add(frozenset(sg))
+
+                if postdrift_subgraphs != all_subgraphs:
+                    raise ValueError("Post-drift clients do not cover all subgraphs. Adjust post-drift clients to include all subgraphs.")
 
         else:
             predrift_clients = None
@@ -743,7 +776,7 @@ def main(cfg: DictConfig) -> None:
             # postdrift
             t_agg_postdrift = time.time()
             graph_postdrift, _ = aggregate_graph_proposals(
-                client_selection = postdrift_clients,
+                client_selection = postdrift_clients or predrift_clients,
                 local_graphs=local_graphs,
                 weights=local_weights,
                 config_input=cfg_postdrift,
@@ -819,6 +852,9 @@ def main(cfg: DictConfig) -> None:
                 path
             )
 
+        for i in range(len(train_dataloaders)):
+            batch = next(iter(train_dataloaders[i]))
+            print(f"batch of client {i}: {batch['y'][0:3]}")
 
         # start federated learning rounds
         init_cfg = cfg_predrift if cfg_predrift is not None else cfg_postdrift
@@ -1214,7 +1250,9 @@ def main(cfg: DictConfig) -> None:
                 essential_concepts = None
             if not essential_concepts:
                 essential_concepts = OmegaConf.select(cfg, "engine.centralized_topological_order", default=[]) or []
+            task_name = datasets[0].y_info["names"][0]
             essential_set = set(essential_concepts)
+            essential_set.add(task_name)
 
             model_concepts = set()
             predicted_concepts = getattr(local_engine.model, "predicted_concepts", None)
@@ -1229,6 +1267,13 @@ def main(cfg: DictConfig) -> None:
                     engine_c_names = OmegaConf.select(cfg, "engine.c_names_all", default=None)
                 if engine_c_names:
                     model_concepts.update(engine_c_names)
+            coverage_client_ids = (
+                predrift_clients
+                if best_round < cfg.learning.subgraphs.rnd_drift
+                else postdrift_clients
+            )
+            if _dataloaders_have_task_labels(train_dataloaders, coverage_client_ids):
+                model_concepts.add(task_name)
 
             covered_concepts = model_concepts & essential_set
             concept_coverage = float(len(covered_concepts) / len(essential_set)) if len(essential_set) > 0 else float('nan')
@@ -1240,6 +1285,11 @@ def main(cfg: DictConfig) -> None:
 
             additional_metrics = {
                 "concept_coverage": concept_coverage,
+                "structural_concept_coverage": OmegaConf.select(
+                    cfg,
+                    "learning.subgraphs.structural_concept_coverage",
+                    default=float("nan"),
+                ),
                 "percent_params_changed": params_change_ratio,
                 "drift_happened": drift_happened,
                 "last_round": last_round,

@@ -11,6 +11,7 @@ import random
 import shutil
 import random
 import math
+from omegaconf import OmegaConf
 
 def dfs_forward(torch_graph, start_node, end_node, visited=None, randomize=True, nodes_not_allowed = []):
     """
@@ -829,6 +830,8 @@ def build_client_subgraph_ids(
     subgraphs_with_add_nodes,
     dataset_client_multiplier=1,
     drift_add_nodes_ratio=0.5,
+    client_selection_mode="all",
+    subgraphs_reaching_task=None,
     ):
     
     if dataset_client_multiplier < 1:
@@ -844,6 +847,16 @@ def build_client_subgraph_ids(
     no_add_ids = [i for i, flag in enumerate(subgraphs_with_add_nodes) if not flag]
     if not no_add_ids:
         raise ValueError("No subgraphs without additional nodes are available.")
+
+    if subgraphs_reaching_task is not None:
+        reaching_task_ids = set(subgraphs_reaching_task)
+        first_no_add_without_task = next(
+            (subgraph_id for subgraph_id in no_add_ids if subgraph_id + 1 not in reaching_task_ids),
+            None,
+        )
+        if first_no_add_without_task is not None:
+            no_add_ids.remove(first_no_add_without_task)
+            no_add_ids.insert(0, first_no_add_without_task)
 
     n_extra_clients = n_dataset_clients - n_train_clients
     n_extra_add = int(round(n_extra_clients * drift_add_nodes_ratio))
@@ -866,7 +879,38 @@ def build_client_subgraph_ids(
     if n_extra_no_add > 0:
         client_subgraph_ids.extend(cycle_ids(no_add_ids, n_extra_no_add))
 
-    return n_dataset_clients, client_subgraph_ids
+    first_last_ten_client_id = max(1, n_dataset_clients - 9)
+    last_ten_clients = list(
+        zip(
+            range(first_last_ten_client_id, n_dataset_clients + 1),
+            client_subgraph_ids[-10:],
+        )
+    )
+    if client_selection_mode == "first_no_add":
+        first_no_add_id = no_add_ids[0]
+        selected_clients = [
+            (client_id, subgraph_id)
+            for client_id, subgraph_id in last_ten_clients
+            if subgraph_id == first_no_add_id
+        ]
+    elif client_selection_mode == "all_no_add":
+        selected_clients = [
+            (client_id, subgraph_id)
+            for client_id, subgraph_id in last_ten_clients
+            if not subgraphs_with_add_nodes[subgraph_id]
+        ]
+    elif client_selection_mode == "all":
+        selected_clients = last_ten_clients
+    else:
+        raise ValueError(
+            "client_selection_mode must be one of: first_no_add, all_no_add, all."
+        )
+
+    if not selected_clients:
+        raise ValueError(f"No clients match client_selection_mode={client_selection_mode!r}.")
+
+    selected_source_client_ids = [client_id for client_id, _ in selected_clients]
+    return n_dataset_clients, client_subgraph_ids, selected_source_client_ids
 
 def build_client_subgraph_ids_for_datasets(
     n_train_clients,
@@ -929,7 +973,131 @@ def build_balanced_client_modalities(
     rng.shuffle(client_modalities)
     return client_modalities
 
-def generate_split(cfg, datasets, graph, y_index):
+def _generate_subgraphs_from_cfg(cfg, graph, y_index):
+    """Generate subgraphs without performing any client selection or I/O."""
+    return get_subgraphs(
+        graph,
+        y_index,
+        min_number_subgraphs=cfg.learning.subgraphs.get("min_number_subgraphs", 2),
+        max_number_subgraphs=cfg.learning.subgraphs.get(
+            "max_number_subgraphs", cfg.learning.n_clients
+        ),
+        modality=cfg.learning.subgraphs.modality,
+        randomly_eliminate_task_from_subgraphs=cfg.learning.subgraphs.get(
+            "randomly_eliminate_task_from_subgraphs", True
+        ),
+        dict_subgraph_with_add_nodes=cfg.learning.subgraphs.get(
+            "dict_subgraph_with_add_nodes", {}
+        ),
+    )
+
+
+def _validate_structural_concept_coverage_ranges(
+    cfg, graph, y_index, subgraphs, subgraphs_with_add_nodes
+):
+    """Validate drift coverage without changing the generated subgraphs."""
+    coverage_ranges = cfg.learning.subgraphs.get(
+        "structural_concept_coverage_ranges"
+    )
+    if not coverage_ranges:
+        return
+
+    structural_nodes = set(range(len(graph)))
+    if not structural_nodes:
+        raise ValueError("Cannot compute structural coverage: the graph has no nodes.")
+
+    no_add_ids = [
+        idx for idx, has_add_nodes in enumerate(subgraphs_with_add_nodes)
+        if not has_add_nodes
+    ]
+    if not no_add_ids:
+        raise ValueError("Cannot compute drift coverage: no no-add subgraphs exist.")
+
+    # Use the same priority as build_client_subgraph_ids.
+    first_no_add_without_task = next(
+        (idx for idx in no_add_ids
+         if int(y_index) not in subgraphs[f"subgraph_{idx + 1}"]),
+        None,
+    )
+    if first_no_add_without_task is not None:
+        no_add_ids.remove(first_no_add_without_task)
+        no_add_ids.insert(0, first_no_add_without_task)
+
+    def covered_nodes(subgraph_ids):
+        covered = set()
+        for idx in subgraph_ids:
+            covered.update(subgraphs[f"subgraph_{idx + 1}"])
+        return covered & structural_nodes
+
+    dataset_client_multiplier = int(
+        cfg.learning.subgraphs.get("dataset_client_multiplier", 1)
+    )
+    if dataset_client_multiplier != 1:
+        mode_nodes = {}
+        for mode in ("first_no_add", "all_no_add", "all"):
+            _, full_ids, selected_client_ids = build_client_subgraph_ids(
+                n_train_clients=cfg.learning.n_clients,
+                subgraphs_with_add_nodes=subgraphs_with_add_nodes,
+                dataset_client_multiplier=dataset_client_multiplier,
+                drift_add_nodes_ratio=cfg.learning.subgraphs.get(
+                    "drift_add_nodes_ratio", 0.5
+                ),
+                client_selection_mode=mode,
+                subgraphs_reaching_task=[
+                    idx + 1
+                    for idx in range(len(subgraphs))
+                    if int(y_index) in subgraphs[f"subgraph_{idx + 1}"]
+                ],
+            )
+            selected_subgraph_ids = {
+                full_ids[client_id - 1] for client_id in selected_client_ids
+            }
+            mode_nodes[mode] = covered_nodes(selected_subgraph_ids)
+    else:
+        mode_nodes = {
+            "first_no_add": covered_nodes(no_add_ids[:1]),
+            "all_no_add": covered_nodes(no_add_ids),
+            "all": covered_nodes(range(len(subgraphs))),
+        }
+
+    summaries = []
+    for mode, nodes in mode_nodes.items():
+        ratio = len(nodes) / len(structural_nodes)
+        summaries.append(
+            f"{mode}={len(nodes)}/{len(structural_nodes)} ({ratio:.1%})"
+        )
+
+        bounds = coverage_ranges.get(mode)
+        if bounds is None:
+            continue
+        if len(bounds) != 2:
+            raise ValueError(
+                f"structural_concept_coverage_ranges.{mode} must contain "
+                "[min, max]."
+            )
+        lower, upper = float(bounds[0]), float(bounds[1])
+        if not 0 <= lower <= upper <= 1:
+            raise ValueError(
+                f"Invalid concept coverage range for {mode}: [{lower}, {upper}]."
+            )
+        if ratio < lower or ratio > upper:
+            raise ValueError(
+                f"Concept coverage outside the requested range for {mode}: "
+                f"{len(nodes)}/{len(structural_nodes)} ({ratio:.1%}), expected "
+                f"{lower:.1%}-{upper:.1%}."
+            )
+
+    selected_mode = cfg.learning.subgraphs.get("client_selection_mode", "all")
+    OmegaConf.update(
+        cfg,
+        "learning.subgraphs.structural_concept_coverage",
+        len(mode_nodes[selected_mode]) / len(structural_nodes),
+        force_add=True,
+    )
+    print("[Structural concept coverage] " + ", ".join(summaries))
+
+
+def generate_split(cfg, datasets, graph, y_index, precomputed_subgraphs=None):
 
     n = cfg.learning.n_clients
     dataset_client_multiplier = int(cfg.learning.subgraphs.get('dataset_client_multiplier', 1))
@@ -937,6 +1105,10 @@ def generate_split(cfg, datasets, graph, y_index):
     n_dataset_clients = n
     client_subgraph_ids = None
     client_modalities = None
+    full_n_dataset_clients = None
+    full_client_subgraph_ids = None
+    full_client_modalities = None
+    selected_source_client_ids = None
 
     if len(datasets)>1:
         # if cfg.learning.subgraphs.get('dict_subgraph_with_add_nodes', {}) != {}:
@@ -984,16 +1156,15 @@ def generate_split(cfg, datasets, graph, y_index):
         if cfg.learning.subgraphs.rnd_drift > 1:
            assert cfg.learning.subgraphs.get('dict_subgraph_with_add_nodes', {}) != {}, "To use rnd_drift > 1, you must specify dict_subgraph_with_add_nodes in the config."
         # Get the subgraph for each client
-        subgraphs, subgraphs_concept_names, subgraphs_with_add_nodes, add_nodes_values, add_nodes_names = get_subgraphs(graph, 
-                                                                         y_index, 
-                                                                         min_number_subgraphs= cfg.learning.subgraphs.get('min_number_subgraphs', 2),
-                                                                         max_number_subgraphs = cfg.learning.subgraphs.get('max_number_subgraphs', cfg.learning.n_clients),
-                                                                         modality=cfg.learning.subgraphs.modality,
-                                                                         #concept_in_common=cfg.learning.subgraphs.concept_in_common,
-                                                                         #task_in_common=cfg.learning.subgraphs.task_in_common,
-                                                                         randomly_eliminate_task_from_subgraphs=cfg.learning.subgraphs.get('randomly_eliminate_task_from_subgraphs', True),
-                                                                         dict_subgraph_with_add_nodes=cfg.learning.subgraphs.get('dict_subgraph_with_add_nodes', {})
-                                    )
+        if precomputed_subgraphs is None:
+            precomputed_subgraphs = _generate_subgraphs_from_cfg(cfg, graph, y_index)
+        (
+            subgraphs,
+            subgraphs_concept_names,
+            subgraphs_with_add_nodes,
+            add_nodes_values,
+            add_nodes_names,
+        ) = precomputed_subgraphs
         
         # eliminate y_index from each subgraph but save from which I eliminated it
         indices_subgraphs_reaching_task = []
@@ -1013,20 +1184,25 @@ def generate_split(cfg, datasets, graph, y_index):
     #    subgraphs_task_excluded = None
 
     if len(datasets) == 1 and dataset_client_multiplier != 1:
-        n_dataset_clients, client_subgraph_ids = build_client_subgraph_ids(
+        full_n_dataset_clients, full_client_subgraph_ids, selected_source_client_ids = build_client_subgraph_ids(
             n_train_clients=n,
             subgraphs_with_add_nodes=subgraphs_with_add_nodes,
             dataset_client_multiplier=dataset_client_multiplier,
             drift_add_nodes_ratio=drift_add_nodes_ratio,
+            client_selection_mode=cfg.learning.subgraphs.get(
+                'client_selection_mode', 'all'
+            ),
+            subgraphs_reaching_task=indices_subgraphs_reaching_task,
         )
 
-        n_extra_clients = n_dataset_clients - n
-        n_extra_add = sum(
-            1 for idx in client_subgraph_ids[n:] if subgraphs_with_add_nodes[idx]
-        )
+        client_subgraph_ids = [
+            full_client_subgraph_ids[client_id - 1]
+            for client_id in selected_source_client_ids
+        ]
+        n_dataset_clients = len(selected_source_client_ids)
         print(
-            f"Dataset clients: {n_dataset_clients} (base {n} without additional nodes, "
-            f"extra {n_extra_clients}: {n_extra_add} with additional nodes)"
+            f"Selected original clients {selected_source_client_ids} with "
+            f"client_selection_mode={cfg.learning.subgraphs.get('client_selection_mode', 'all')}."
         )
 
     supports_multimodal = (
@@ -1038,11 +1214,22 @@ def generate_split(cfg, datasets, graph, y_index):
     )
     if supports_multimodal:
         image_ratio = cfg.dataset.get('image_client_ratio', 0.5)
-        client_modalities = build_balanced_client_modalities(
-            n_dataset_clients,
-            image_ratio=image_ratio,
-            seed=int(cfg.get('seed', 0)),
-        )
+        if selected_source_client_ids is not None:
+            full_client_modalities = build_balanced_client_modalities(
+                full_n_dataset_clients,
+                image_ratio=image_ratio,
+                seed=int(cfg.get('seed', 0)),
+            )
+            client_modalities = [
+                full_client_modalities[client_id - 1]
+                for client_id in selected_source_client_ids
+            ]
+        else:
+            client_modalities = build_balanced_client_modalities(
+                n_dataset_clients,
+                image_ratio=image_ratio,
+                seed=int(cfg.get('seed', 0)),
+            )
         print("\nClient modality assignment:")
         for i, modality in enumerate(client_modalities):
             print(f"client {i + 1}: {modality}")
@@ -1057,17 +1244,38 @@ def generate_split(cfg, datasets, graph, y_index):
         concepts = subgraphs_concept_names.get(subgraph_key, [])
         print(f"client {i + 1}: {subgraph_key} -> {concepts}")
     
-    # clean the directory
+    # Create the complete client population before selecting the active clients.
     root = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
     path = os.path.join(root)
     shutil.rmtree(path, ignore_errors=True)
     os.makedirs(path, exist_ok=True)
+
+    if selected_source_client_ids is not None:
+        staging_root = os.path.join(root, "_all_clients")
+        os.makedirs(staging_root, exist_ok=True)
+        for split_name in ("train", "val", "test"):
+            split_and_save(cfg, datasets, graph, split_name, full_n_dataset_clients, subgraphs, subgraphs_task_excluded, staging_root, full_client_subgraph_ids, full_client_modalities)
+        for new_client_id, source_client_id in enumerate(selected_source_client_ids, start=1):
+            subgraph_idx = full_client_subgraph_ids[source_client_id - 1]
+            for split_name in ("train", "val", "test"):
+                source_path = os.path.join(
+                    staging_root, f"{split_name}set_{source_client_id}_subgraph_{subgraph_idx + 1}.pkl"
+                )
+                destination_path = os.path.join(
+                    root, f"{split_name}set_{new_client_id}_subgraph_{subgraph_idx + 1}.pkl"
+                )
+                shutil.copy2(source_path, destination_path)
+        shutil.rmtree(staging_root)
+        cfg.learning.n_clients = n_dataset_clients
+        cfg.learning.subgraphs.dataset_client_multiplier = 1
+    else:
+        split_and_save(cfg, datasets, graph, 'train', n_dataset_clients, subgraphs, subgraphs_task_excluded, root, client_subgraph_ids, client_modalities)
+        split_and_save(cfg, datasets, graph, 'val', n_dataset_clients, subgraphs, subgraphs_task_excluded, root, client_subgraph_ids, client_modalities)
+        split_and_save(cfg, datasets, graph, 'test', n_dataset_clients, subgraphs, subgraphs_task_excluded, root, client_subgraph_ids, client_modalities)
+
     if client_modalities is not None:
         with open(os.path.join(root, "client_modalities.pkl"), "wb") as f:
             pickle.dump(client_modalities, f)
-    split_and_save(cfg, datasets, graph, 'train', n_dataset_clients, subgraphs, subgraphs_task_excluded, root, client_subgraph_ids, client_modalities)
-    split_and_save(cfg, datasets, graph, 'val', n_dataset_clients, subgraphs, subgraphs_task_excluded, root, client_subgraph_ids, client_modalities)
-    split_and_save(cfg, datasets, graph, 'test', n_dataset_clients, subgraphs, subgraphs_task_excluded, root, client_subgraph_ids, client_modalities)
     # Save the dataloader for the unique, real test-set (if not combined datasets)
     if len(datasets) == 1 and not cfg.dataset.get('per_client_testset', False):
         test_dataloader = DataLoader(datasets[0].data['test'], batch_size=cfg.dataset.batch_size, collate_fn=static_graph_collate)
@@ -1321,16 +1529,33 @@ def generate_split_with_fallback(
                 if seed_everything_fn is not None:
                     seed_everything_fn(trial_seed)
 
-                return generate_split(cfg, datasets, graph, y_index)
+                # Retry only graph generation. Client filtering and split I/O
+                # must never influence which fallback seed defines the graphs.
+                precomputed_subgraphs = _generate_subgraphs_from_cfg(
+                    cfg, graph, y_index
+                )
+                _validate_structural_concept_coverage_ranges(
+                    cfg,
+                    graph,
+                    y_index,
+                    precomputed_subgraphs[0],
+                    precomputed_subgraphs[2],
+                )
+                break
 
             except Exception as e:
                 last_err = e
                 print(e)
+        else:
+            raise RuntimeError(
+                f"subgraph generation failed after {max_tries} attempts "
+                f"(base_seed={base_seed}, step={step}, key='{seed_key}')."
+            ) from last_err
 
-        raise RuntimeError(
-            f"generate_split failed after {max_tries} attempts "
-            f"(base_seed={base_seed}, step={step}, key='{seed_key}')."
-        ) from last_err
+        return generate_split(
+            cfg, datasets, graph, y_index,
+            precomputed_subgraphs=precomputed_subgraphs,
+        )
 
     finally:
         cfg[seed_key] = original_seed

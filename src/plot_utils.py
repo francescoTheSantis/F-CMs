@@ -147,7 +147,7 @@ def plot_cumulative_accuracy_grid_multi_modality(
             all_stds = []
             for lm_data in learning_data.values():
                 all_means.append(np.array(lm_data['mean']) * 100)
-                all_stds.append(np.array(lm_data['stderr']) * 100)
+                all_stds.append(np.array(lm_data.get('stdev', lm_data.get('stderr', []))) * 100)
             ymin = min((m - s).min() for m, s in zip(all_means, all_stds))
             ymax = max((m + s).max() for m, s in zip(all_means, all_stds))
             pad = 0.05 * (ymax - ymin if ymax > ymin else 1.0)
@@ -158,7 +158,7 @@ def plot_cumulative_accuracy_grid_multi_modality(
             
             for learning_method, lm_data in learning_data.items():
                 mean_label = np.array(lm_data['mean']) * 100
-                stderr_label = np.array(lm_data['stderr']) * 100
+                stdev_label = np.array(lm_data.get('stdev', lm_data.get('stderr', []))) * 100
                 missing_mask = np.array(lm_data.get('missing_mask', [False] * len(mean_label)))
 
                 style = learning_styles.get(learning_method, {
@@ -181,8 +181,8 @@ def plot_cumulative_accuracy_grid_multi_modality(
                     alpha_value = 0.10 if missing_mask[k+1] else 0.15
                     ax.fill_between(
                         x_for_plot_shifted[k:k+2],
-                        (mean_label - stderr_label)[k:k+2],
-                        (mean_label + stderr_label)[k:k+2],
+                        (mean_label - stdev_label)[k:k+2],
+                        (mean_label + stdev_label)[k:k+2],
                         color=style['color'],
                         alpha=alpha_value,
                         linewidth=0,
@@ -274,7 +274,7 @@ def plot_cumulative_accuracy_grid_multi_model(
     Args:
         plot_data_dict: Dictionary with keys (learning_modality, dataset) containing plot data.
                         Each value is a dict with 'model_data' containing per-model data:
-                        {'model_data': {model_name: {'mean': [...], 'stderr': [...], 'missing_mask': [...]}}, 'n_interventions': int}
+                        {'model_data': {model_name: {'mean': [...], 'stdev': [...], 'missing_mask': [...]}}, 'n_interventions': int}
         learning_modalities: List of learning modality names (rows)
         datasets: List of dataset names (columns)
         variable: 'task' or 'labels'
@@ -327,7 +327,7 @@ def plot_cumulative_accuracy_grid_multi_model(
         'c2bm': {'color': MODEL_PALETTE[0], 'linestyle': '-', 'linewidth': 1.5, 'name': 'C2BM'},
         'c2bm_multi': {'color': 'forestgreen', 'linestyle': '-', 'linewidth': 1.5, 'name': 'C2BM (Multi)'},
         'cbm_linear': {'color': MODEL_PALETTE[5], 'linestyle': '-', 'linewidth': 1.5, 'name': 'CBM+Linear'},
-        'cbm_mlp': {'color': MODEL_PALETTE[1], 'linestyle': '-', 'linewidth': 1.5, 'name': 'CBM'},
+        'cbm_mlp': {'color': MODEL_PALETTE[1], 'linestyle': '-', 'linewidth': 1.5, 'name': 'CBM+MLP'},
         'cgm': {'color': MODEL_PALETTE[4], 'linestyle': '-', 'linewidth': 1.5, 'name': 'CGM'},
         'cgm_multi': {'color': 'royalblue', 'linestyle': '-', 'linewidth': 1.5, 'name': 'CGM (Multi)'},
         'blackbox': {'color': MODEL_PALETTE[3], 'linestyle': '-', 'linewidth': 1.5, 'name': 'BlackBox'},
@@ -376,7 +376,7 @@ def plot_cumulative_accuracy_grid_multi_model(
             all_stds = []
             for m_data in model_data.values():
                 all_means.append(np.array(m_data['mean']) * 100)
-                all_stds.append(np.array(m_data['stderr']) * 100)
+                all_stds.append(np.array(m_data['stdev']) * 100)
             ymin = min((m - s).min() for m, s in zip(all_means, all_stds))
             ymax = max((m + s).max() for m, s in zip(all_means, all_stds))
             pad = 0.05 * (ymax - ymin if ymax > ymin else 1.0)
@@ -387,7 +387,7 @@ def plot_cumulative_accuracy_grid_multi_model(
             
             for model_name, m_data in model_data.items():
                 mean_label = np.array(m_data['mean']) * 100
-                stderr_label = np.array(m_data['stderr']) * 100
+                stdev_label = np.array(m_data['stdev']) * 100
                 missing_mask = np.array(m_data.get('missing_mask', [False] * len(mean_label)))
                 
                 style = model_styles.get(model_name, {
@@ -410,8 +410,8 @@ def plot_cumulative_accuracy_grid_multi_model(
                     alpha_value = 0.10 if missing_mask[k+1] else 0.15
                     ax.fill_between(
                         x_for_plot_shifted[k:k+2],
-                        (mean_label - stderr_label)[k:k+2],
-                        (mean_label + stderr_label)[k:k+2],
+                        (mean_label - stdev_label)[k:k+2],
+                        (mean_label + stdev_label)[k:k+2],
                         color=style['color'],
                         alpha=alpha_value,
                         linewidth=0,
@@ -1667,11 +1667,11 @@ def plot_cumulative_accuracy_multi_modality(
             if not label_avg_per_seed:
                 continue
             
-            # Calculate mean and standard error across seeds
+            # Calculate mean and standard deviation across seeds
             label_array = np.array(label_avg_per_seed)
             mean_label = np.mean(label_array, axis=0)
             std_label = np.std(label_array, axis=0)
-            stderr_label = std_label / np.sqrt(len(label_avg_per_seed)) #1.96 *
+            stderr_label = std_label / np.sqrt(len(label_avg_per_seed))
 
             # Aggregate missing mask: a concept is missing if it's missing in ALL seeds
             if missing_masks_per_seed:
@@ -1682,7 +1682,7 @@ def plot_cumulative_accuracy_multi_modality(
             # Store data for return
             dataset_learning_data[learning_method] = {
                 'mean': mean_label.tolist(),
-                'stderr': stderr_label.tolist(),
+                'stdev': std_label.tolist(),
                 'missing_mask': missing_mask.tolist()
             }
 
@@ -1719,8 +1719,8 @@ def plot_cumulative_accuracy_multi_modality(
                 alpha_value = 0.2 if (missing_mask[k+1]) else 0.4
                 ax.fill_between(
                     x_for_plot[k:k+2],
-                    (mean_label - stderr_label)[k:k+2],
-                    (mean_label + stderr_label)[k:k+2],
+                    (mean_label - std_label)[k:k+2],
+                    (mean_label + std_label)[k:k+2],
                     color=color,
                     alpha=alpha_value
                 )
@@ -2080,11 +2080,10 @@ def plot_cumulative_accuracy_multi_model(
             if not label_avg_per_seed:
                 continue
             
-            # Calculate mean and standard error across seeds
+            # Calculate mean and standard deviation across seeds
             label_array = np.array(label_avg_per_seed)
             mean_label = np.mean(label_array, axis=0)
             std_label = np.std(label_array, axis=0)
-            stderr_label = std_label / np.sqrt(len(label_avg_per_seed)) #1.96 *
 
             # Aggregate missing mask: a concept is missing if it's missing in ALL seeds
             if missing_masks_per_seed:
@@ -2095,7 +2094,7 @@ def plot_cumulative_accuracy_multi_model(
             # Store data for return
             dataset_model_data[model] = {
                 'mean': mean_label.tolist(),
-                'stderr': stderr_label.tolist(),
+                'stdev': std_label.tolist(),
                 'missing_mask': missing_mask.tolist()
             }
 
@@ -2132,8 +2131,8 @@ def plot_cumulative_accuracy_multi_model(
                 alpha_value = 0.2 if (missing_mask[k+1]) else 0.4
                 ax.fill_between(
                     x_for_plot[k:k+2],
-                    (mean_label - stderr_label)[k:k+2],
-                    (mean_label + stderr_label)[k:k+2],
+                    (mean_label - std_label)[k:k+2],
+                    (mean_label + std_label)[k:k+2],
                     color=color,
                     alpha=alpha_value
                 )
@@ -2810,16 +2809,38 @@ def tabular_task_and_concept_accuracy(
 def compute_drift_statistics(performance):
     coverage_stats = pd.DataFrame()
     param_change_stats = pd.DataFrame()
+    group_columns = ['model', 'dataset', 'learning']
 
     if 'concept_coverage' in performance.columns:
-        coverage_df = performance[['model', 'dataset', 'learning', 'concept_coverage']].dropna(subset=['concept_coverage'])
+        coverage_df = performance[group_columns + ['concept_coverage']].dropna(subset=['concept_coverage'])
         if not coverage_df.empty:
-            coverage_stats = coverage_df.groupby(['model', 'dataset', 'learning']).agg(
+            coverage_stats = coverage_df.groupby(group_columns).agg(
                 avg_coverage=('concept_coverage', 'mean'),
                 std_coverage=('concept_coverage', 'std'),
                 total_occurrences=('concept_coverage', 'count')
             ).reset_index().fillna(0)
             coverage_stats['ci_coverage'] = coverage_stats['std_coverage'] / np.sqrt(coverage_stats['total_occurrences']) #1.96*
+
+    if 'structural_concept_coverage' in performance.columns:
+        structural_df = performance[group_columns + ['structural_concept_coverage']].dropna(
+            subset=['structural_concept_coverage']
+        )
+        if not structural_df.empty:
+            structural_stats = structural_df.groupby(group_columns).agg(
+                avg_structural_coverage=('structural_concept_coverage', 'mean'),
+                std_structural_coverage=('structural_concept_coverage', 'std'),
+                total_structural_occurrences=('structural_concept_coverage', 'count')
+            ).reset_index().fillna(0)
+            structural_stats['ci_structural_coverage'] = (
+                structural_stats['std_structural_coverage']
+                / np.sqrt(structural_stats['total_structural_occurrences'])
+            )
+            if coverage_stats.empty:
+                coverage_stats = structural_stats
+            else:
+                coverage_stats = coverage_stats.merge(
+                    structural_stats, on=group_columns, how='outer'
+                )
 
     if 'percent_params_changed' in performance.columns:
         params_df = performance[['model', 'dataset', 'learning', 'percent_params_changed']].dropna(subset=['percent_params_changed'])
@@ -2878,6 +2899,36 @@ def tabular_drift_metrics(
                 if not os.path.exists(os.path.dirname(result_file)):
                     os.makedirs(os.path.dirname(result_file))
                 final_table.to_csv(result_file, index=True)
+
+            structural_columns = {'avg_structural_coverage', 'ci_structural_coverage'}
+            if structural_columns.issubset(cov_subset.columns):
+                structural_subset = cov_subset.dropna(subset=['avg_structural_coverage'])
+                if not structural_subset.empty:
+                    structural_avg = structural_subset[['model', 'dataset', 'avg_structural_coverage']]
+                    structural_ci = structural_subset[['model', 'dataset', 'ci_structural_coverage']]
+                    pivot_avg = structural_avg.pivot(index='model', columns='dataset', values='avg_structural_coverage')
+                    pivot_ci = structural_ci.pivot(index='model', columns='dataset', values='ci_structural_coverage')
+
+                    final_table = pd.DataFrame()
+                    for idx, row in pivot_avg.iterrows():
+                        row_dict = {}
+                        for dataset in pivot_avg.columns:
+                            coverage = row.get(dataset, np.nan) * 100
+                            ci = pivot_ci.loc[idx, dataset] * 100
+                            row_dict[dataset] = f"{coverage:.2f} ± {ci:.2f}" if not np.isnan(coverage) else "N/A"
+                        final_table = pd.concat([final_table, pd.DataFrame(row_dict, index=[idx])], axis=0)
+
+                    final_table = final_table.reindex(columns=custom_order)
+                    final_table.index = final_table.index.map(lambda x: model_styles[x]['name'] if x in model_styles else x)
+
+                    print('Structural Concept Coverage Table:')
+                    print('----------------------------------')
+                    print(final_table)
+
+                    result_file = f'{visualization_folder}/{learning}/structural_concept_coverage.csv'
+                    if not os.path.exists(os.path.dirname(result_file)):
+                        os.makedirs(os.path.dirname(result_file))
+                    final_table.to_csv(result_file, index=True)
 
         if not param_change_stats.empty:
             param_subset = param_change_stats[param_change_stats['learning'] == learning]
@@ -3373,6 +3424,7 @@ def load_exps(exps_path, n_clients=5, args=None):
 
                 # Additional drift metrics (optional)
                 d['concept_coverage'] = np.nan
+                d['structural_concept_coverage'] = np.nan
                 d['percent_params_changed'] = np.nan
                 additional_metrics_path = os.path.join(result_file, "additional_metrics.json")
                 if os.path.exists(additional_metrics_path):
@@ -3380,6 +3432,9 @@ def load_exps(exps_path, n_clients=5, args=None):
                         with open(additional_metrics_path, "r") as f:
                             additional_metrics = json.load(f)
                         d['concept_coverage'] = float(additional_metrics.get("concept_coverage", np.nan))
+                        d['structural_concept_coverage'] = float(
+                            additional_metrics.get("structural_concept_coverage", np.nan)
+                        )
                         d['percent_params_changed'] = float(additional_metrics.get("percent_params_changed", np.nan))
                     except Exception:
                         pass
@@ -3470,20 +3525,28 @@ def load_exps(exps_path, n_clients=5, args=None):
                 if os.path.exists(single_id_on_y_file):
                     with open(single_id_on_y_file, 'rb') as f:
                         data = pickle.load(f)
-                        for client in range(1, n_clients+1):
-                            # filter only the concepts in valid concepts
-                            if len(valid_concepts[key]) > 0:
-                                data[client] = {k:v for k,v in data[client].items() if k in valid_concepts[key] or k == "_baseline"}
+                        if len(valid_concepts[key]) > 0:
+                            for client, client_results in data.items():
+                                if isinstance(client_results, dict):
+                                    data[client] = {
+                                        k: v
+                                        for k, v in client_results.items()
+                                        if k in valid_concepts[key] or k == "_baseline"
+                                    }
                         d['single_id_on_y'] = data
                            
 
                 if os.path.exists(single_ood_on_y_file):
                     with open(single_ood_on_y_file, 'rb') as f:
                         data = pickle.load(f)
-                        for client in range(1, n_clients+1):
-                            # filter only the concepts in valid concepts
-                            if len(valid_concepts[key]) > 0:
-                                data[client] = {k:v for k,v in data[client].items() if k in valid_concepts[key] or k == "_baseline"}
+                        if len(valid_concepts[key]) > 0:
+                            for client, client_results in data.items():
+                                if isinstance(client_results, dict):
+                                    data[client] = {
+                                        k: v
+                                        for k, v in client_results.items()
+                                        if k in valid_concepts[key] or k == "_baseline"
+                                    }
                         d['single_ood_on_y'] = data
 
                 if d['single_id_on_y'] == []:

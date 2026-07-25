@@ -142,6 +142,7 @@ dataset_styles = {
     # 'nih_chest_images': {'name': 'NIH Chest X-Ray'},
     # 'cub_causal_struct': {'name': 'CUB_CAUSAL'},
     'siim_pneumothorax': {'name': 'SIIM-ACR Pneumothorax'},
+    'cheXpert': {'name': 'CheXpert'},
     'cheXpert_multi': {'name': 'CheXpert-Multi'},
 }
 
@@ -155,11 +156,12 @@ custom_order = [
     'Hailfinder',
     # 'NIH Chest X-Ray',
     # 'CUB_CAUSAL',
+    'CheXpert',
     'SIIM-ACR Pneumothorax',
     'CheXpert-Multi',
 ]
 
-apply_styles(performance, dataset_styles, model_styles, custom_order)
+performance = apply_styles(performance, dataset_styles, model_styles, custom_order)
 
 
 ########## Task & Concept Accuracy Plot ##########

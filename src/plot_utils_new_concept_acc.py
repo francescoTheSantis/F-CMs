@@ -2690,6 +2690,7 @@ def load_exps(exps_path, n_clients=5, args=None):
 
                 # Additional drift metrics (optional)
                 d['concept_coverage'] = np.nan
+                d['structural_concept_coverage'] = np.nan
                 d['percent_params_changed'] = np.nan
                 additional_metrics_path = os.path.join(result_file, "additional_metrics.json")
                 if os.path.exists(additional_metrics_path):
@@ -2697,6 +2698,9 @@ def load_exps(exps_path, n_clients=5, args=None):
                         with open(additional_metrics_path, "r") as f:
                             additional_metrics = json.load(f)
                         d['concept_coverage'] = float(additional_metrics.get("concept_coverage", np.nan))
+                        d['structural_concept_coverage'] = float(
+                            additional_metrics.get("structural_concept_coverage", np.nan)
+                        )
                         d['percent_params_changed'] = float(additional_metrics.get("percent_params_changed", np.nan))
                     except Exception:
                         pass
