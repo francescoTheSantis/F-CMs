@@ -1078,6 +1078,47 @@ def generate_split(cfg, datasets, graph, y_index):
 
     return subgraphs, subgraphs_concept_names, subgraphs_with_add_nodes, add_nodes_values, add_nodes_names
 
+def merge_adjacent_concept_categories(values, cardinality, swapping_factor, generator=None):
+    """Merge one adjacent category into the category immediately above it."""
+    if cardinality not in (3, 4) or swapping_factor <= 0:
+        return None
+    if swapping_factor > 1:
+        raise ValueError("swapping_factor must be between 0 and 1")
+
+    draw = torch.rand((), generator=generator).item()
+    if draw >= swapping_factor:
+        return None
+
+    if cardinality == 3:
+        probability_per_pair = swapping_factor / 2
+
+        if draw < probability_per_pair:
+            lower_category = 0       # unisce 0 e 1, mantenendo l'etichetta 1
+        elif draw < 2 * probability_per_pair:
+            lower_category = 1       # unisce 1 e 2, mantenendo l'etichetta 2
+        else:
+            lower_category = None    # nessuna fusione
+
+    elif cardinality == 4:
+        probability_per_pair = swapping_factor / 3
+
+        if draw < probability_per_pair:
+            lower_category = 0       # unisce 0 e 1, mantenendo l'etichetta 1
+        elif draw < 2 * probability_per_pair:
+            lower_category = 1       # unisce 1 e 2, mantenendo l'etichetta 2
+        elif draw < 3 * probability_per_pair:
+            lower_category = 2       # unisce 2 e 3, mantenendo l'etichetta 3
+        else:
+            lower_category = None    # nessuna fusione
+
+    if lower_category is not None:
+        values[values == lower_category] = lower_category + 1
+
+    return lower_category
+
+
+
+
 def split_and_save(cfg, datasets, graph, set, n, subgraphs = None, subgraphs_task_excluded = None, root = None, client_subgraph_ids = None, client_modalities = None):
 
         if len(datasets)==1:
@@ -1131,7 +1172,7 @@ def split_and_save(cfg, datasets, graph, set, n, subgraphs = None, subgraphs_tas
         if subgraphs is None:
             raise ValueError("`subgraphs` cannot be None.")
 
-        # Swap concept values for a fraction of clients: invert class labels within selected concepts
+        # Merge adjacent categories for selected concepts and clients.
         swapping_clients = cfg.learning.get('swapping_clients', 0.0)
         swapping_concepts = cfg.learning.get('swapping_concepts', 0.0)
         swapping_factor = cfg.learning.get('swapping_factor', 0.0)
@@ -1139,11 +1180,20 @@ def split_and_save(cfg, datasets, graph, set, n, subgraphs = None, subgraphs_tas
         swap_concept_clients = {}
 
         if swapping_clients > 0 and swapping_concepts > 0 and set == 'train':
-            # 1) Collect all available (non-masked) concept indices across all subgraphs
-            all_available_concepts = list(range(len(dataset.c_info['names']))) if len(datasets) == 1 else []
+            # 1) Only concepts with cardinality 3 or 4 are eligible.
+            all_available_concepts = (
+                [
+                    col for col, cardinality in enumerate(dataset.c_info['cardinality'])
+                    if cardinality in (3, 4)
+                ]
+                if len(datasets) == 1 else []
+            )
 
             # 2) Choose which concepts to swap
-            n_swap = max(1, round(len(all_available_concepts) * swapping_concepts))
+            n_swap = min(
+                len(all_available_concepts),
+                max(1, round(len(all_available_concepts) * swapping_concepts)),
+            )
             swap_concept_indices = random.sample(all_available_concepts, n_swap)
 
             # 3) For each concept, find eligible clients (those who have it in their subgraph)
@@ -1206,22 +1256,16 @@ def split_and_save(cfg, datasets, graph, set, n, subgraphs = None, subgraphs_tas
                     for col in concepts_to_swap_here:
                         valid = masked_c_splits[:, col] != -1
                         if valid.any():
-                            vals = masked_c_splits[valid, col]
-                            unique_vals = vals.unique().sort()[0]
-                            if len(unique_vals) >= 2:
-                                v0, v1 = unique_vals[0], unique_vals[1]
-                                new_vals = vals.clone()
-                                # Only swap a fraction of the valid values
-                                n_valid = valid.sum().item()
-                                n_to_swap = max(1, round(n_valid * swapping_factor))
-                                swap_row_indices = torch.randperm(n_valid, generator=rng)[:n_to_swap]
-                                swap_mask = torch.zeros(n_valid, dtype=torch.bool)
-                                swap_mask[swap_row_indices] = True
-                                new_vals[swap_mask & (vals == v0)] = v1
-                                new_vals[swap_mask & (vals == v1)] = v0
-                                new_vals[~swap_mask] = vals[~swap_mask]
-                                masked_c_splits[valid, col] = new_vals
-                    print(f"[Swap] Client {i+1}: swapped concepts {concepts_to_swap_here}, factor {swapping_factor}")
+                            vals = masked_c_splits[valid, col].clone()
+                            lower_category = merge_adjacent_concept_categories(
+                                vals,
+                                dataset.c_info["cardinality"][col],
+                                swapping_factor,
+                                generator=rng,
+                            )
+                            if lower_category is not None:
+                                masked_c_splits[valid, col] = vals
+                    print(f"[Swap] Client {i+1}: processed concepts {concepts_to_swap_here}, factor {swapping_factor}")
 
             dataloader = DataLoader(
                 CustomDataset(x_i, masked_c_splits, masked_y_splits, graph, modality=client_modality),

@@ -33,12 +33,30 @@ paths = [
     # "outputs/multirun/2026-04-20/19-21-16_alarm_s", #OK 
     # "outputs/multirun/2026-04-21/11-11-20_siim", #OK but skipped seed 1 for all models/learning modes
     # "outputs/multirun/2026-04-21/11-11-42_siim_s", #OK but skipped seed 1 for all models/learning modes
-    "outputs/multirun/2026-04-22/15-49-04_asia_bas", 
-    "outputs/multirun/2026-04-22/15-51-34_sachs_bas",
-    "outputs/multirun/2026-04-22/15-53-59_alarm_bas",
-    "outputs/multirun/2026-04-22/15-56-11_ins_bas",
-    "outputs/multirun/2026-04-22/15-59-30_hail_bas",
-    "outputs/multirun/2026-04-22/16-03-56_siim_bas",
+    #"outputs/multirun/2026-04-22/15-49-04_asia_bas", 
+    #"outputs/multirun/2026-04-22/15-51-34_sachs_bas",
+    #"outputs/multirun/2026-04-22/15-53-59_alarm_bas",
+    #"outputs/multirun/2026-04-22/15-56-11_ins_bas",
+    #"outputs/multirun/2026-04-22/15-59-30_hail_bas",
+    #"outputs/multirun/2026-04-22/16-03-56_siim_bas",
+    #"/home/admin/FedDario/F-CMs/outputs/multirun/2026-07-26/14-50-40_asia_rnd5",
+    #"/home/admin/FedDario/F-CMs/outputs/multirun/2026-07-26/15-03-18_asia_rnd10"
+    #"/home/admin/FedDario/F-CMs/outputs/multirun/2026-07-26/15-17-24_asia_rnd20"
+    #"/home/admin/FedDario/F-CMs/outputs/multirun/2026-07-26/15-32-41_asia_rnd50"
+    #"/home/admin/FedDario/F-CMs/outputs/multirun/2026-07-26/15-58-20_asia_rnd1000"
+    #"/home/admin/FedDario/F-CMs/outputs/multirun/2026-07-26/16-25-05_alarm_rnd5"
+    #"/home/admin/FedDario/F-CMs/outputs/multirun/2026-07-26/15-03-18_asia_rnd10"
+    #"/home/admin/FedDario/F-CMs/outputs/multirun/2026-07-26/20-30-07_alarm_rnd20"
+    #"/home/admin/FedDario/F-CMs/outputs/multirun/2026-07-27/02-14-40_chexpert_rnd10"
+    #"/home/admin/FedDario/F-CMs/outputs/multirun/2026-07-27/05-26-13_chexpert_rnd50"
+    #"/home/admin/FedDario/F-CMs/outputs/multirun/2026-07-27/06-47-19_chexpert_rnd1000"
+    #"/home/admin/FedDario/F-CMs/outputs/multirun/2026-07-27/08-39-41_alarm_rnd50"
+    #"/home/admin/FedDario/F-CMs/outputs/multirun/2026-07-27/13-09-26_chexpert_rnd1000"
+    #"/home/admin/FedDario/F-CMs/outputs/multirun/2026-07-27/14-44-59_asia_rnd100"
+    #"/home/admin/FedDario/F-CMs/outputs/multirun/2026-07-27/15-28-04_asia_rnd130"
+    #"/home/admin/FedDario/F-CMs/outputs/multirun/2026-07-27/15-34-57_chexpert_rnd10"
+    #"/home/admin/FedDario/F-CMs/outputs/multirun/2026-07-27/17-13-15_chexpert_rnd1000"
+    "/home/admin/FedDario/F-CMs/outputs/multirun/2026-07-31/15-03-20"
 ]
 
 # folder to save processed results
@@ -52,6 +70,40 @@ exps_path = setup_results(paths, visualization_folder)
 
 # load the experiment results
 performance, c_info = load_exps(exps_path, n_clients=n_clients, args=args)
+
+
+def print_concept_cardinality_summary(c_info):
+    """Print counts and shares of concepts with cardinality 3 and 4."""
+    rows = []
+    for dataset, dataset_c_info in sorted(c_info.items()):
+        if not dataset_c_info or "cardinality" not in dataset_c_info:
+            continue
+
+        cardinalities = dataset_c_info["cardinality"]
+        total = len(cardinalities)
+        cardinality_3 = sum(cardinality == 3 for cardinality in cardinalities)
+        cardinality_4 = sum(cardinality == 4 for cardinality in cardinalities)
+        rows.append({
+            "dataset": dataset,
+            "total_concepts": total,
+            "cardinality_3": cardinality_3,
+            "cardinality_3_ratio": cardinality_3 / total if total else 0.0,
+            "cardinality_4": cardinality_4,
+            "cardinality_4_ratio": cardinality_4 / total if total else 0.0,
+        })
+
+    print("\n[show_results] Concept cardinality summary:")
+    if not rows:
+        print("No concept cardinality metadata found.")
+        return
+
+    summary = pd.DataFrame(rows)
+    summary["cardinality_3_ratio"] = summary["cardinality_3_ratio"].map(lambda value: f"{value:.2%}")
+    summary["cardinality_4_ratio"] = summary["cardinality_4_ratio"].map(lambda value: f"{value:.2%}")
+    print(summary.to_string(index=False))
+
+
+print_concept_cardinality_summary(c_info)
 
 # Debug: Check drift configuration
 print("\n[DEBUG] Loaded experiments configuration:")
@@ -89,6 +141,7 @@ dataset_styles = {
     'alarm': {'name': 'Alarm'},
     'hailfinder': {'name': 'Hailfinder'},
     'insurance': {'name': 'Insurance'},
+    'cheXpert': {'name': 'CheXpert'},
     # 'nih_chest_images': {'name': 'NIH Chest X-Ray'},
     # 'cub_causal_struct': {'name': 'CUB_CAUSAL'},
     'siim_pneumothorax': {'name': 'SIIM-Pneumothorax'},
@@ -103,6 +156,7 @@ custom_order = [
     'Alarm',
     'Insurance',
     'Hailfinder',
+    'CheXpert',
     # 'NIH Chest X-Ray',
     # 'CUB_CAUSAL',
     'SIIM-Pneumothorax',

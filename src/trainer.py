@@ -1,6 +1,6 @@
 from time import time
 
-from omegaconf import DictConfig
+from omegaconf import DictConfig, ListConfig
 import pytorch_lightning as pl
 from pytorch_lightning import Trainer as _Trainer_
 from pytorch_lightning.callbacks import (
@@ -150,7 +150,11 @@ class Trainer(_Trainer_):
             accelerator = "cpu"
             dev_cfg = cfg.trainer.get("devices")
             if dev_cfg in (None, "auto"):
-                devices = None           
+                devices = None
+            elif isinstance(dev_cfg, (list, tuple, ListConfig)):
+                # Lists denote CUDA device indices (for example [0]). On a CPU
+                # fallback, use one process instead of trying to cast the list.
+                devices = 1
             else:
                 devices = int(dev_cfg)
                 if devices <= 0:        
