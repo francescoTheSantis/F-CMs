@@ -4,3 +4,6 @@ subgraphs:
   modality: 'connected_nodes'
   concept_in_common: false
   task_in_common: true
+  # Backward-compatible architectural update behavior.  Alternatives are
+  # partial_random and partial_zero.
+  architecture_update_strategy: full_reinit

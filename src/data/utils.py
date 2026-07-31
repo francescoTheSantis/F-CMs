@@ -18,6 +18,8 @@ def static_graph_collate(batch):
         "y": torch.stack([item["y"] for item in batch]),
         "graph": batch[0]["graph"],  # Add the graph once
     }
+    if "y_eval" in batch[0]:
+        result["y_eval"] = torch.stack([item["y_eval"] for item in batch])
     if "modality" in batch[0]:
         modalities = [item["modality"] for item in batch]
         result["modality"] = modalities[0] if len(set(modalities)) == 1 else modalities

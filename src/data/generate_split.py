@@ -1438,8 +1438,19 @@ def split_and_save(cfg, datasets, graph, set, n, subgraphs = None, subgraphs_tas
                                 masked_c_splits[valid, col] = new_vals
                     print(f"[Swap] Client {i+1}: swapped concepts {concepts_to_swap_here}, factor {swapping_factor}")
 
+            # Keep the unmasked target only for validation-time measurement.  It is
+            # deliberately exposed under a separate key so local training continues
+            # to use ``y`` (which may be masked for clients without task labels).
+            evaluation_y = y_splits[i] if len(datasets) == 1 and set == "val" else None
             dataloader = DataLoader(
-                CustomDataset(x_i, masked_c_splits, masked_y_splits, graph, modality=client_modality),
+                CustomDataset(
+                    x_i,
+                    masked_c_splits,
+                    masked_y_splits,
+                    graph,
+                    modality=client_modality,
+                    y_eval=evaluation_y,
+                ),
                 batch_size=cfg.dataset.batch_size,
                 collate_fn=static_graph_collate
             )
@@ -1482,10 +1493,11 @@ def apply_mask(tensor, keep):
     return masked_tensor
 
 class CustomDataset(Dataset):
-    def __init__(self, x, c, y, graph, modality=None):
+    def __init__(self, x, c, y, graph, modality=None, y_eval=None):
         self.x = x
         self.c = c
         self.y = y
+        self.y_eval = y_eval
         self.graph = graph
         self.modality = modality
 
@@ -1499,6 +1511,9 @@ class CustomDataset(Dataset):
             'y': self.y[idx],
             'graph': self.graph,
         }
+        y_eval = getattr(self, 'y_eval', None)
+        if y_eval is not None:
+            item['y_eval'] = y_eval[idx]
         if self.modality is not None:
             item['modality'] = self.modality
         return item

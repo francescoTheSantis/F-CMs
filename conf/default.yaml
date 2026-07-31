@@ -37,3 +37,15 @@ client_id: 1
 
 seed: 42
 notes: null
+
+# Disabled by default.  Dedicated rebuttal sweeps enable this block and the
+# training loop then persists untrimmed, task-only validation trajectories.
+architecture_ablation:
+  enabled: false
+  record_shift_snapshot: true
+  pre_shift_window: 5
+  post_peak_window: 5
+  smoothing_window: 5
+  stability_window: 5
+  final_window: 5
+  post_shift_horizon: null

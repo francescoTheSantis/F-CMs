@@ -41,6 +41,10 @@ from torch.utils.data import (
 
 from src.causal_discovery.causal_discovery_block import causal_discovery
 from src.completion.completion_block import complete_graph_with_llm
+from src.architecture_migration import (
+    MIGRATION_STRATEGIES,
+    migrate_architecture_state,
+)
 
 def load_dataloaders(cfg: DictConfig, path: str, n_clients: int):
     combined_dataset = OmegaConf.select(cfg, 'combined_datasets.other_datasets', default=None)
@@ -177,47 +181,70 @@ def set_parameters(engine, parameters):
     engine.model.load_state_dict(state_dict, strict=True)
 
 
-def set_old_parameters(engine, parameters, parameter_keys, verbose: bool = False):
+def set_old_parameters(
+    engine,
+    parameters,
+    parameter_keys,
+    verbose: bool = False,
+    *,
+    strategy: str = "full_reinit",
+    old_model=None,
+):
     """
-    Load only the parameters that are compatible with the current model.
-    Useful when the architecture expands and new modules are introduced.
+    Transfer pre-shift parameters into a freshly instantiated architecture.
+
+    ``full_reinit`` exactly preserves the historical same-key/same-shape
+    behavior.  The partial strategies additionally require ``old_model`` so
+    graph blocks can be mapped by node/parent identity rather than position.
+    The returned report contains element-level accounting and explicit
+    semantic fallbacks for persistence by the architecture ablation.
     """
     if parameter_keys is None:
         raise ValueError("parameter_keys must be provided to map previous parameters.")
+    if strategy not in MIGRATION_STRATEGIES:
+        raise ValueError(
+            f"Unknown architecture update strategy {strategy!r}; expected one of "
+            f"{MIGRATION_STRATEGIES}."
+        )
+    if strategy != "full_reinit" and old_model is None:
+        raise ValueError(
+            f"old_model metadata is required for semantic strategy {strategy!r}."
+        )
     if len(parameters) != len(parameter_keys):
         warnings.warn(
             f"Parameter/key length mismatch: {len(parameters)} params vs {len(parameter_keys)} keys. "
             "Proceeding with the shortest length."
         )
 
-    new_state = engine.model.state_dict()
-    loaded = 0
-    missing = 0
-    mismatched = 0
-
-    for k, v in zip(parameter_keys, parameters):
-        if k not in new_state:
-            print(f"Key {k} not found in the current model state_dict.")
-            missing += 1
-            continue
-        old_tensor = torch.tensor(v)
-        if new_state[k].shape != old_tensor.shape:
-            print(f"Shape mismatch for key {k}: expected {new_state[k].shape}, got {old_tensor.shape}.")
-            mismatched += 1
-            continue
-        if old_tensor.dtype != new_state[k].dtype:
-            old_tensor = old_tensor.to(new_state[k].dtype)
-        new_state[k] = old_tensor
-        loaded += 1
-
-    engine.model.load_state_dict(new_state, strict=False)
+    old_state = OrderedDict(
+        (str(key), torch.as_tensor(value))
+        for key, value in zip(parameter_keys, parameters)
+    )
+    migrated_state, report = migrate_architecture_state(
+        old_state,
+        old_model,
+        engine.model,
+        strategy=strategy,
+    )
+    engine.model.load_state_dict(migrated_state, strict=True)
     if verbose:
-        total = len(parameter_keys)
+        counts = report["parameter_counts"]
         print(
-            f"\033[96mLoaded {loaded}/{total} params from previous model "
-            f"(missing={missing}, shape_mismatch={mismatched}).\033[0m"
+            "\033[96m[Architecture migration] "
+            f"strategy={strategy}, preserved={counts['preserved']}/{counts['total']} "
+            f"({counts['preserved_fraction']:.2%}), "
+            f"new={counts['newly_initialized']} "
+            f"({counts['newly_initialized_fraction']:.2%}), "
+            f"fully_reinitialized={counts['fully_reinitialized']} "
+            f"({counts['fully_reinitialized_fraction']:.2%}).\033[0m"
         )
-    return {"loaded": loaded, "missing": missing, "mismatched": mismatched}
+        for fallback in report.get("fallbacks", []):
+            print(
+                "\033[93m[Architecture migration fallback] "
+                f"module={fallback.get('module')}, tensor={fallback.get('tensor')}: "
+                f"{fallback.get('reason')}\033[0m"
+            )
+    return report
 
 
 def model_has_concepts(model):

@@ -606,6 +606,19 @@ class Predictor(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         val_loss, y_output, c_output, y, c = self.shared_step(batch, step='val')
+        # The architectural-initialization ablation requires task-only loss.
+        # ``y_eval`` is an evaluation-only, unmasked validation target; training
+        # still consumes ``batch['y']`` and therefore cannot use this label.
+        y_eval = batch.get('y_eval', y).flatten().long()
+        y_hat_loss, _ = self.model.filter_output_for_loss(y_output, c_output)
+        task_loss = self.model._compute_task_loss(
+            y_hat_loss,
+            y_eval,
+            reduction='mean',
+            ignore_index=-1,
+        )
+        if task_loss is not None:
+            self.log_loss("val_task", task_loss, batch_size=batch['batch_size'])
         # Update metrics and log
         y_hat, c_hat = self.model.filter_output_for_metric(y_output, c_output)
         if y[y== -1].numel() != 0:

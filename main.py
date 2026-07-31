@@ -58,6 +58,7 @@ from src.dra import (
 from src.fedcbm import run_fedcbm_baseline
 from src.fcl import run_fcl_baseline
 from src.metrics import _evaluate_graph_against_truth
+from src.architecture_ablation import ArchitectureAblationRecorder
 
 # data loading
 from src.data.dataset_block import get_dataset
@@ -98,6 +99,58 @@ TEST_RESULT_FILENAMES = [
 
 def _is_numeric_scalar(value):
     return isinstance(value, (int, float, np.integer, np.floating))
+
+
+def _compute_unmasked_validation_task_loss(engine, dataloader, device):
+    """Evaluate task loss without exposing validation-only labels to training.
+
+    This lightweight evaluator is used once, immediately after architectural
+    migration and before any local optimization.  It mirrors the validation
+    forward pass (zero interventions) but avoids attaching another Lightning
+    trainer, so it does not modify optimizer state or consume random samples.
+    """
+
+    if dataloader is None:
+        return float("nan"), 0
+
+    was_training = engine.training
+    engine.to(device)
+    engine.eval()
+    total_loss = 0.0
+    total_count = 0
+    with torch.no_grad():
+        for batch in dataloader:
+            moved_batch = {
+                key: value.to(device) if torch.is_tensor(value) else value
+                for key, value in batch.items()
+            }
+            x, c, y, modality = engine._unpack_batch(moved_batch)
+            intervention_index = torch.zeros(c.shape, device=device)
+            inputs = engine._build_model_inputs(
+                x,
+                c,
+                intervention_index=intervention_index,
+                modality=modality,
+            )
+            y_output, c_output = engine.forward(**inputs)
+            y_hat_loss, _ = engine.model.filter_output_for_loss(y_output, c_output)
+            y_eval = moved_batch.get("y_eval", y).flatten().long()
+            losses = engine.model._compute_task_loss(
+                y_hat_loss,
+                y_eval,
+                reduction="none",
+                ignore_index=-1,
+            )
+            if losses is None:
+                continue
+            valid = (y_eval != -1) & torch.isfinite(losses)
+            total_loss += float(losses[valid].sum().detach().cpu())
+            total_count += int(valid.sum().detach().cpu())
+
+    engine.train(was_training)
+    if total_count == 0:
+        return float("nan"), 0
+    return total_loss / total_count, total_count
 
 
 def _weighted_average_test_artifacts(values, weights):
@@ -636,11 +689,37 @@ def main(cfg: DictConfig) -> None:
     elif cfg.learning.mode == 'local_federated':
         
         # hyperparameters   
-        n_rounds = cfg.learning.settings.n_rounds 
+        n_rounds = int(cfg.learning.settings.n_rounds)
         n_clients = cfg.learning.n_clients 
-        patience = cfg.learning.settings.patience
+        patience = int(cfg.learning.settings.patience)
+        architecture_update_strategy = str(
+            cfg.learning.subgraphs.get(
+                "architecture_update_strategy", "full_reinit"
+            )
+        )
+        architecture_ablation_enabled = bool(
+            OmegaConf.select(
+                cfg, "architecture_ablation.enabled", default=False
+            )
+        )
+        # The local-FL loop mutates trainer.max_epochs/patience below.  Preserve
+        # the resolved pre-mutation configuration so saved artifacts describe
+        # the actual federated horizon rather than the local trainer settings.
+        architecture_ablation_cfg_snapshot = (
+            OmegaConf.create(OmegaConf.to_container(cfg, resolve=True))
+            if architecture_ablation_enabled
+            else None
+        )
+        record_shift_snapshot = bool(
+            OmegaConf.select(
+                cfg,
+                "architecture_ablation.record_shift_snapshot",
+                default=True,
+            )
+        )
         cfg.trainer.max_epochs = cfg.learning.settings.local_epochs
         cfg.trainer.patience = 0
+        architecture_ablation_recorder = None
         # use_concepts = True # whether to use concept information in the MIA attacks
         
         num_threads = cfg.learning.settings.num_threads
@@ -892,6 +971,35 @@ def main(cfg: DictConfig) -> None:
             loader_client_ids=None if per_client_testset else [1],
         )
 
+        if architecture_ablation_enabled:
+            if int(cfg.learning.subgraphs.rnd_drift) > int(n_rounds):
+                raise ValueError(
+                    "architecture_ablation.enabled requires rnd_drift to occur "
+                    "within learning.settings.n_rounds."
+                )
+            recorder_cfg = architecture_ablation_cfg_snapshot
+            metric_cfg = OmegaConf.select(
+                recorder_cfg, "architecture_ablation", default={}
+            )
+            metric_cfg = OmegaConf.to_container(metric_cfg, resolve=True)
+            architecture_ablation_recorder = ArchitectureAblationRecorder(
+                recorder_cfg,
+                method=architecture_update_strategy,
+                metric_config=metric_cfg,
+                experiment_fields={
+                    "validation_population": "active training-federation clients",
+                    "client_aggregation": "unweighted arithmetic mean",
+                    "client_uncertainty": "population standard deviation (ddof=0)",
+                    "predrift_client_ids": list(predrift_clients or []),
+                    "postdrift_client_ids": list(postdrift_clients or []),
+                    "federated_rounds": n_rounds,
+                    "federated_patience": patience,
+                    "local_epochs_per_round": int(
+                        cfg.learning.settings.local_epochs
+                    ),
+                },
+            )
+
         for i in range(len(train_dataloaders)):
             batch = next(iter(train_dataloaders[i]))
             print(f"batch of client {i}: {batch['y'][0:3]}")
@@ -962,6 +1070,7 @@ def main(cfg: DictConfig) -> None:
             # local training (sequentially)
             # ------------------------------------------------------------
             print(f"\033[93mLocal training on {n_clients_round} clients\033[0m")
+            shift_snapshot_rows = []
             for n, cid in enumerate(round_client_indices):
                 # clone global params → local model
                 update_config_from_client(cfg_round, datasets, cid)
@@ -976,12 +1085,21 @@ def main(cfg: DictConfig) -> None:
                 if rnd == cfg.learning.subgraphs.rnd_drift:
                     # load new architecture and update only those parameters that were present before
                     t_set_params = time.time()
-                    set_old_parameters(
+                    migration_report = set_old_parameters(
                         local_engine,
                         global_params,
                         global_param_keys,
                         verbose=(cid == round_client_indices[0]),
+                        strategy=architecture_update_strategy,
+                        old_model=init_engine.model,
                     )
+                    if (
+                        architecture_ablation_recorder is not None
+                        and cid == round_client_indices[0]
+                    ):
+                        architecture_ablation_recorder.set_structural_metadata(
+                            migration_report
+                        )
                     t_set_params = time.time() - t_set_params
                     if cid == round_client_indices[0]:
                         print(f"\033[94m[Timing] Postdrift set_old_parameters (client {cid}): {t_set_params:.3f}s\033[0m")
@@ -990,6 +1108,31 @@ def main(cfg: DictConfig) -> None:
                     set_parameters(local_engine, global_params)
                     
                 local_engine.model.to(cfg.device)
+
+                if (
+                    architecture_ablation_recorder is not None
+                    and record_shift_snapshot
+                    and rnd == cfg.learning.subgraphs.rnd_drift
+                ):
+                    immediate_loss, immediate_count = (
+                        _compute_unmasked_validation_task_loss(
+                            local_engine,
+                            round_val_dataloaders[cid],
+                            cfg.device,
+                        )
+                    )
+                    shift_snapshot_rows.append(
+                        {
+                            "client_id": client_id,
+                            "task_loss": immediate_loss,
+                            "n_labeled_samples": immediate_count,
+                            "eligible": True,
+                            "phase": "postdrift",
+                            "reason": None
+                            if np.isfinite(immediate_loss)
+                            else "immediate_task_loss_unavailable",
+                        }
+                    )
 
                 # freeze if required
                 maybe_freeze_parameters(
@@ -1030,6 +1173,13 @@ def main(cfg: DictConfig) -> None:
                     client_params.append((get_parameters(local_engine), n_samples, client_modality))
                 else:
                     client_params.append((get_parameters(local_engine), n_samples))
+
+            if shift_snapshot_rows:
+                architecture_ablation_recorder.record_shift_snapshot(
+                    "post_migration_pre_local_training",
+                    rnd,
+                    shift_snapshot_rows,
+                )
 
             
             # # ------------------------------------------------------------
@@ -1153,6 +1303,7 @@ def main(cfg: DictConfig) -> None:
                 history["loss_val_client"][tracked_client_id].append(float("nan"))
                 history["y_acc_val_client"][tracked_client_id].append(float("nan"))
 
+            ablation_client_rows = []
             for client_id, cid in zip(round_client_ids, round_client_indices):
                 local_engine.cid = client_id
                 val_metrics = trainer.validate(local_engine, round_val_dataloaders[cid])[0]  #{'val/c/asia': 0.0, 'val/c/bronc': 0.0, 'val/c/either': 0.0, 'val/c/lung': 0.0, 'val/c/smoke': 0.0, 'val/c/tub': 0.0, 'val/c/xray': 0.0, 'val_loss': nan}
@@ -1161,7 +1312,30 @@ def main(cfg: DictConfig) -> None:
                  # log per-client val metrics
                 history["loss_val_client"][client_id][-1] = val_metrics["val_loss"]
                 history["y_acc_val_client"][client_id][-1] = val_metrics.get("val/y/y_accuracy", np.nan)
-                sizes.append(len(round_val_dataloaders[cid].dataset))
+                validation_size = len(round_val_dataloaders[cid].dataset)
+                sizes.append(validation_size)
+
+                task_loss_value = val_metrics.get("val_task_loss", float("nan"))
+                if torch.is_tensor(task_loss_value):
+                    task_loss_value = task_loss_value.detach().cpu().item()
+                try:
+                    task_loss_value = float(task_loss_value)
+                except (TypeError, ValueError):
+                    task_loss_value = float("nan")
+                ablation_client_rows.append(
+                    {
+                        "client_id": client_id,
+                        "task_loss": task_loss_value,
+                        "n_labeled_samples": validation_size,
+                        "eligible": True,
+                        "phase": "predrift"
+                        if rnd < cfg.learning.subgraphs.rnd_drift
+                        else "postdrift",
+                        "reason": None
+                        if np.isfinite(task_loss_value)
+                        else "val_task_loss_unavailable",
+                    }
+                )
 
             # log aggregated val metrics (weighted)
             w_loss = sum(l * s for l, s in zip(val_losses, sizes)) / sum(sizes)
@@ -1175,6 +1349,16 @@ def main(cfg: DictConfig) -> None:
             history["loss_val_avg"].append(w_loss)
             history["y_acc_val_avg"].append(y_acc)
             print(f"\033[92m✅ aggregated  val_loss={w_loss:.4f}, val/y/y_accuracy={y_acc:.4f}  \033[0m")
+            if architecture_ablation_recorder is not None:
+                ablation_summary = architecture_ablation_recorder.record_round(
+                    rnd, ablation_client_rows
+                )
+                print(
+                    "\033[96m[Architecture ablation] "
+                    f"task_loss_mean={ablation_summary['mean_task_loss']:.4f}, "
+                    f"client_std={ablation_summary['std_task_loss']:.4f}, "
+                    f"n={ablation_summary['n_evaluated_clients']}\033[0m"
+                )
 
             # check improvement
             check_improvements = False
@@ -1197,6 +1381,10 @@ def main(cfg: DictConfig) -> None:
             if no_improvement_count >= patience:
                 print(f"\033[91mEarly stopping triggered at round {rnd}.\033[0m")
                 break
+
+
+        if architecture_ablation_recorder is not None:
+            architecture_ablation_recorder.finalize()
 
 
         # ------------------------------------------------------------
@@ -1245,7 +1433,10 @@ def main(cfg: DictConfig) -> None:
             print(f"\033[91m[WARN] Failed trimming metrics: {e}\033[0m")
 
 
-        plot_training_metrics(history)
+        # Ablation figures are deliberately generated only by the standalone
+        # results reader so plotting choices never require retraining.
+        if not architecture_ablation_enabled:
+            plot_training_metrics(history)
         # ------------------------------------------------------------
         # Final evaluation on the test set
         # ------------------------------------------------------------
