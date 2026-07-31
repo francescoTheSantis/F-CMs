@@ -28,7 +28,7 @@ model:
 dataset:
   load_embeddings: false
   load_graph: true
-  load_true_graph: false
+  load_true_graph: true
   batch_size: 512
   autoencoder:
    noise: 0.5  # for bndatasets only
