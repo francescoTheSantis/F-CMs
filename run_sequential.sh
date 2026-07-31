@@ -17,13 +17,17 @@ commands=(
     #"python main.py --config-name=rebuttal_r1_alarm_ablconcepts_drift_1.yaml"
     #"python main.py --config-name=rebuttal_r1_alarm_ablconcepts_drift_2.yaml"
     #"python main.py --config-name=rebuttal_r1_alarm_ablconcepts_drift_3.yaml"
-    "python main.py --config-name=rebuttal_r1_asia_ablconcepts_drift_1.yaml"
-    "python main.py --config-name=rebuttal_r1_asia_ablconcepts_drift_2.yaml"
-    "python main.py --config-name=rebuttal_r1_asia_ablconcepts_drift_3.yaml"
-    "python main.py --config-name=test_alarm_data_preparation.yaml"
-    "python main.py --config-name=rebuttal_r1_alarm_ablconcepts_drift_1.yaml"
-    "python main.py --config-name=rebuttal_r1_alarm_ablconcepts_drift_2.yaml"
-    "python main.py --config-name=rebuttal_r1_alarm_ablconcepts_drift_3.yaml"
+    #"python main.py --config-name=test_cheXpert_preparedata.yaml"
+    #"python main.py --config-name=test_asia_r1_2steps.yaml"
+    #"python main.py --config-name=test_asia_r1_2steps_2.yaml"
+    #"python main.py --config-name=test_asia_r1_2steps_0.yaml"
+    #"python main.py --config-name=test_alarm_r1_2steps_0.yaml"
+    #"python main.py --config-name=test_alarm_r1_2steps_1.yaml"
+    #"python main.py --config-name=test_alarm_r1_2steps_2.yaml"
+    "python main.py --config-name=test_chexpert_r1_2steps_0.yaml"
+    "python main.py --config-name=test_chexpert_r1_2steps_1.yaml"
+    "python main.py --config-name=test_chexpert_r1_2steps_2.yaml"
+
 )
 
 running=0

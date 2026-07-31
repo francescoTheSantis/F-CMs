@@ -831,6 +831,7 @@ def build_client_subgraph_ids(
     dataset_client_multiplier=1,
     drift_add_nodes_ratio=0.5,
     client_selection_mode="all",
+    client_selection_mode_postdrift=None,
     subgraphs_reaching_task=None,
     ):
     
@@ -879,38 +880,47 @@ def build_client_subgraph_ids(
     if n_extra_no_add > 0:
         client_subgraph_ids.extend(cycle_ids(no_add_ids, n_extra_no_add))
 
+    def select_clients(candidates, mode):
+        if mode == "first_no_add":
+            first_no_add_id = no_add_ids[0]
+            selected = [pair for pair in candidates if pair[1] == first_no_add_id]
+        elif mode == "all_no_add":
+            selected = [
+                pair for pair in candidates
+                if not subgraphs_with_add_nodes[pair[1]]
+            ]
+        elif mode == "all":
+            selected = candidates
+        else:
+            raise ValueError(
+                "client selection mode must be one of: "
+                "first_no_add, all_no_add, all."
+            )
+        if not selected:
+            raise ValueError(f"No clients match client selection mode={mode!r}.")
+        return selected
+
     first_last_ten_client_id = max(1, n_dataset_clients - 9)
-    last_ten_clients = list(
-        zip(
-            range(first_last_ten_client_id, n_dataset_clients + 1),
-            client_subgraph_ids[-10:],
-        )
+    candidates = list(zip(
+        range(first_last_ten_client_id, n_dataset_clients + 1),
+        client_subgraph_ids[-10:],
+    ))
+
+    if client_selection_mode_postdrift is None:
+        selected_clients = select_clients(candidates, client_selection_mode)
+        selected_source_client_ids = [client_id for client_id, _ in selected_clients]
+        return n_dataset_clients, client_subgraph_ids, selected_source_client_ids
+
+    # Select both phases independently from the same final ten generated
+    # clients, preserving the original mixed add/no-add candidate pool.
+    selected_predrift = select_clients(candidates, client_selection_mode)
+    selected_postdrift = select_clients(candidates, client_selection_mode_postdrift)
+    return (
+        n_dataset_clients,
+        client_subgraph_ids,
+        [client_id for client_id, _ in selected_predrift],
+        [client_id for client_id, _ in selected_postdrift],
     )
-    if client_selection_mode == "first_no_add":
-        first_no_add_id = no_add_ids[0]
-        selected_clients = [
-            (client_id, subgraph_id)
-            for client_id, subgraph_id in last_ten_clients
-            if subgraph_id == first_no_add_id
-        ]
-    elif client_selection_mode == "all_no_add":
-        selected_clients = [
-            (client_id, subgraph_id)
-            for client_id, subgraph_id in last_ten_clients
-            if not subgraphs_with_add_nodes[subgraph_id]
-        ]
-    elif client_selection_mode == "all":
-        selected_clients = last_ten_clients
-    else:
-        raise ValueError(
-            "client_selection_mode must be one of: first_no_add, all_no_add, all."
-        )
-
-    if not selected_clients:
-        raise ValueError(f"No clients match client_selection_mode={client_selection_mode!r}.")
-
-    selected_source_client_ids = [client_id for client_id, _ in selected_clients]
-    return n_dataset_clients, client_subgraph_ids, selected_source_client_ids
 
 def build_client_subgraph_ids_for_datasets(
     n_train_clients,
@@ -1087,7 +1097,24 @@ def _validate_structural_concept_coverage_ranges(
                 f"{lower:.1%}-{upper:.1%}."
             )
 
-    selected_mode = cfg.learning.subgraphs.get("client_selection_mode", "all")
+    predrift_mode = cfg.learning.subgraphs.get(
+        "client_selection_mode_predrift",
+        cfg.learning.subgraphs.get("client_selection_mode", "all"),
+    )
+    postdrift_mode = cfg.learning.subgraphs.get(
+        "client_selection_mode_postdrift", predrift_mode
+    )
+    drift_round = int(cfg.learning.subgraphs.get("rnd_drift", 0))
+    n_rounds = int(
+        OmegaConf.select(
+            cfg,
+            "learning.settings.n_rounds",
+            default=OmegaConf.select(cfg, "trainer.max_epochs", default=0),
+        )
+    )
+    selected_mode = (
+        postdrift_mode if drift_round <= n_rounds else predrift_mode
+    )
     OmegaConf.update(
         cfg,
         "learning.subgraphs.structural_concept_coverage",
@@ -1105,10 +1132,8 @@ def generate_split(cfg, datasets, graph, y_index, precomputed_subgraphs=None):
     n_dataset_clients = n
     client_subgraph_ids = None
     client_modalities = None
-    full_n_dataset_clients = None
-    full_client_subgraph_ids = None
-    full_client_modalities = None
-    selected_source_client_ids = None
+    predrift_client_ids = None
+    postdrift_client_ids = None
 
     if len(datasets)>1:
         # if cfg.learning.subgraphs.get('dict_subgraph_with_add_nodes', {}) != {}:
@@ -1184,25 +1209,30 @@ def generate_split(cfg, datasets, graph, y_index, precomputed_subgraphs=None):
     #    subgraphs_task_excluded = None
 
     if len(datasets) == 1 and dataset_client_multiplier != 1:
-        full_n_dataset_clients, full_client_subgraph_ids, selected_source_client_ids = build_client_subgraph_ids(
+        predrift_mode = cfg.learning.subgraphs.get(
+            "client_selection_mode_predrift",
+            cfg.learning.subgraphs.get("client_selection_mode", "all"),
+        )
+        postdrift_mode = cfg.learning.subgraphs.get(
+            "client_selection_mode_postdrift", predrift_mode
+        )
+        (
+            n_dataset_clients,
+            client_subgraph_ids,
+            predrift_client_ids,
+            postdrift_client_ids,
+        ) = build_client_subgraph_ids(
             n_train_clients=n,
             subgraphs_with_add_nodes=subgraphs_with_add_nodes,
             dataset_client_multiplier=dataset_client_multiplier,
             drift_add_nodes_ratio=drift_add_nodes_ratio,
-            client_selection_mode=cfg.learning.subgraphs.get(
-                'client_selection_mode', 'all'
-            ),
+            client_selection_mode=predrift_mode,
+            client_selection_mode_postdrift=postdrift_mode,
             subgraphs_reaching_task=indices_subgraphs_reaching_task,
         )
-
-        client_subgraph_ids = [
-            full_client_subgraph_ids[client_id - 1]
-            for client_id in selected_source_client_ids
-        ]
-        n_dataset_clients = len(selected_source_client_ids)
         print(
-            f"Selected original clients {selected_source_client_ids} with "
-            f"client_selection_mode={cfg.learning.subgraphs.get('client_selection_mode', 'all')}."
+            f"Pre-drift clients ({predrift_mode}): {predrift_client_ids}\n"
+            f"Post-drift clients ({postdrift_mode}): {postdrift_client_ids}"
         )
 
     supports_multimodal = (
@@ -1214,22 +1244,11 @@ def generate_split(cfg, datasets, graph, y_index, precomputed_subgraphs=None):
     )
     if supports_multimodal:
         image_ratio = cfg.dataset.get('image_client_ratio', 0.5)
-        if selected_source_client_ids is not None:
-            full_client_modalities = build_balanced_client_modalities(
-                full_n_dataset_clients,
-                image_ratio=image_ratio,
-                seed=int(cfg.get('seed', 0)),
-            )
-            client_modalities = [
-                full_client_modalities[client_id - 1]
-                for client_id in selected_source_client_ids
-            ]
-        else:
-            client_modalities = build_balanced_client_modalities(
-                n_dataset_clients,
-                image_ratio=image_ratio,
-                seed=int(cfg.get('seed', 0)),
-            )
+        client_modalities = build_balanced_client_modalities(
+            n_dataset_clients,
+            image_ratio=image_ratio,
+            seed=int(cfg.get("seed", 0)),
+        )
         print("\nClient modality assignment:")
         for i, modality in enumerate(client_modalities):
             print(f"client {i + 1}: {modality}")
@@ -1244,34 +1263,22 @@ def generate_split(cfg, datasets, graph, y_index, precomputed_subgraphs=None):
         concepts = subgraphs_concept_names.get(subgraph_key, [])
         print(f"client {i + 1}: {subgraph_key} -> {concepts}")
     
-    # Create the complete client population before selecting the active clients.
+    # Save all generated clients. The training loop selects the active IDs.
     root = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
     path = os.path.join(root)
     shutil.rmtree(path, ignore_errors=True)
     os.makedirs(path, exist_ok=True)
 
-    if selected_source_client_ids is not None:
-        staging_root = os.path.join(root, "_all_clients")
-        os.makedirs(staging_root, exist_ok=True)
-        for split_name in ("train", "val", "test"):
-            split_and_save(cfg, datasets, graph, split_name, full_n_dataset_clients, subgraphs, subgraphs_task_excluded, staging_root, full_client_subgraph_ids, full_client_modalities)
-        for new_client_id, source_client_id in enumerate(selected_source_client_ids, start=1):
-            subgraph_idx = full_client_subgraph_ids[source_client_id - 1]
-            for split_name in ("train", "val", "test"):
-                source_path = os.path.join(
-                    staging_root, f"{split_name}set_{source_client_id}_subgraph_{subgraph_idx + 1}.pkl"
-                )
-                destination_path = os.path.join(
-                    root, f"{split_name}set_{new_client_id}_subgraph_{subgraph_idx + 1}.pkl"
-                )
-                shutil.copy2(source_path, destination_path)
-        shutil.rmtree(staging_root)
-        cfg.learning.n_clients = n_dataset_clients
-        cfg.learning.subgraphs.dataset_client_multiplier = 1
-    else:
-        split_and_save(cfg, datasets, graph, 'train', n_dataset_clients, subgraphs, subgraphs_task_excluded, root, client_subgraph_ids, client_modalities)
-        split_and_save(cfg, datasets, graph, 'val', n_dataset_clients, subgraphs, subgraphs_task_excluded, root, client_subgraph_ids, client_modalities)
-        split_and_save(cfg, datasets, graph, 'test', n_dataset_clients, subgraphs, subgraphs_task_excluded, root, client_subgraph_ids, client_modalities)
+    split_and_save(cfg, datasets, graph, "train", n_dataset_clients, subgraphs, subgraphs_task_excluded, root, client_subgraph_ids, client_modalities)
+    split_and_save(cfg, datasets, graph, "val", n_dataset_clients, subgraphs, subgraphs_task_excluded, root, client_subgraph_ids, client_modalities)
+    split_and_save(cfg, datasets, graph, "test", n_dataset_clients, subgraphs, subgraphs_task_excluded, root, client_subgraph_ids, client_modalities)
+
+    if predrift_client_ids is not None:
+        OmegaConf.update(cfg, "learning.subgraphs.predrift_client_ids", predrift_client_ids, force_add=True)
+        OmegaConf.update(cfg, "learning.subgraphs.postdrift_client_ids", postdrift_client_ids, force_add=True)
+        OmegaConf.update(cfg, "learning.subgraphs.n_clients_predrift", len(predrift_client_ids), force_add=True)
+        OmegaConf.update(cfg, "learning.subgraphs.n_clients_postdrift", len(postdrift_client_ids), force_add=True)
+        OmegaConf.update(cfg, "learning.subgraphs.n_clients_saved", n_dataset_clients, force_add=True)
 
     if client_modalities is not None:
         with open(os.path.join(root, "client_modalities.pkl"), "wb") as f:

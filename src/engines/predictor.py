@@ -32,7 +32,7 @@ class Predictor(pl.LightningModule):
                 c_names_all: Optional[list] = None,
                 annotation_assumption: Optional[str] = None,
                 learning_modality: Optional[str] = 'localized',
-                cid: Optional[int] = 1,
+                cid: Optional[int] = None,
                 centralized_topological_order: Optional[list] = None,
                 centralized_c_dict: Optional[dict] = None,
                 ):
@@ -63,7 +63,9 @@ class Predictor(pl.LightningModule):
         self.c_names_id = c_names_id 
         self.c_names_ood = c_names_ood 
         self.c_names_all = c_names_all
-        self.clients = range(1, len(self.c_names_ood)+2)  # +1 for the case where there are no OOD concepts
+        self.client_ids = list(self.c_names_ood.keys())
+        self.aggregate_client_id = "__all_clients__"
+        self.clients = self.client_ids + [self.aggregate_client_id]
 
         self.learning_modality = learning_modality
         self.centralized_topological_order = centralized_topological_order
@@ -167,7 +169,7 @@ class Predictor(pl.LightningModule):
             if self.learning_modality not in ["centralized", "localized"]:
                 self.test_intervention_id_level_y = {}
                 self.test_intervention_ood_level_y = {}
-                for client_id in range(1,len(self.c_names_ood)+1):
+                for client_id in self.client_ids:
                     self.test_intervention_id_level_y[f'client {client_id}'] = MetricCollection(
                         metrics={k: self._check_metric(m) for k, m in c_acc_levels_metrics.items()},
                         prefix=f"test_intervention/id_level/y/client_{client_id}/")
@@ -192,7 +194,7 @@ class Predictor(pl.LightningModule):
             if self.learning_modality not in ["centralized", "localized"]:
                 self.test_intervention_id_level_c_ood ={}
                 childs_per_level_ood = {}
-                for client_id in range(1,len(self.c_names_ood)+1):
+                for client_id in self.client_ids:
                     ood_concepts = self.c_names_ood[client_id]
                     # create a dictionary childs
                     childs_per_level_ood[client_id] = {}
@@ -215,7 +217,7 @@ class Predictor(pl.LightningModule):
                 # intervention on ood ancestors in the graph for each client
                 self.test_intervention_ood_level_c_id ={}
                 childs_per_level_id = {}
-                for client_id in range(1,len(self.c_names_ood)+1):
+                for client_id in self.client_ids:
                     id_concepts = self.c_names_id[client_id]
                     # create a dictionary childs
                     childs_per_level_id[client_id] = {}
@@ -337,6 +339,7 @@ class Predictor(pl.LightningModule):
     def test_intervention(self, batch):
         if self.model.has_concepts:
             x, c, y, modality = self._unpack_batch(batch)
+            first_key = next(iter(self.c_names_id))
             # maybe add noise
             if self.test_interv_noise > 0:
                 x = x + torch.randn_like(x) * self.test_interv_noise
@@ -416,41 +419,33 @@ class Predictor(pl.LightningModule):
                 self.clients = [first_key]
             elif self.learning_modality == "centralized":
                 self.clients = [1]
+            elif self.cid is None:
+                # A shared test set has no client identity.
+                self.clients = [self.aggregate_client_id]
             else:
-                self.clients = range(1, len(self.c_names_ood)+2)  # +1 for the case where there are no OOD concepts
-            possible_clients = deepcopy(self.clients)  # copy the list of clients
-            # If there are multiple test sets, select only the clients with the correct one
-            if (c == -1).all(dim=0).any():
-                # extract columns of c where there are all -1
-                mask = (c == -1).all(dim=0)
-                # take indices where mask == True
-                mask_true = torch.nonzero(mask, as_tuple=True)[0].tolist()
-                # take indices in c_names_all corresponding to c_names_ood[client_id] for each client
-                client_ood_indices = {}
-                ood_keys = list(self.c_names_ood.keys())
-                for client in possible_clients[:-1]:
-                    key = ood_keys[client-1]
-                    client_ood_indices[client] = [self.c_names_all.index(c_name) for c_name in self.c_names_ood[key]]
-
-                client_ood_indices[len(self.c_names_ood)+1] = mask_true
-                possible_clients = [client_id for client_id in possible_clients if (client_ood_indices[client_id] == mask_true)]
-                self.clients = possible_clients
+                if self.cid not in self.client_ids:
+                    raise KeyError(
+                        f"Test client {self.cid} is not present in c_names_id/c_names_ood. "
+                        f"Available client IDs: {self.client_ids}"
+                    )
+                # Update metrics for this exact client and the shared aggregate.
+                self.clients = [self.cid, self.aggregate_client_id]
 
             for client_id in self.clients:
                 self.level_intervention_id_annotations[client_id] = {}
                 self.level_intervention_ood_annotations[client_id] = {}
-                if client_id!= len(self.c_names_ood)+1:
+                if client_id != self.aggregate_client_id:
                     if self.learning_modality not in ["centralized", "localized"]:
                         id_concepts = self.c_names_id[client_id]
                         ood_concepts = self.c_names_ood[client_id]
                         id_indices = [i for i, c in enumerate(self.c_names_all) if c in id_concepts]
                         ood_indices = [i for i, c in enumerate(self.c_names_all) if c in ood_concepts]
-                # client_id == len(self.c_names_ood)+1 does not exist. It is created to calculate level intervention without difference id/ood concepts
+                # client_id == self.aggregate_client_id does not exist. It is created to calculate level intervention without difference id/ood concepts
                 for l in range(0, len(self.test_interv_policy)+1):
                     # get the nodes to intervene on
                     nodes = list(itertools.chain(*self.test_interv_policy[:l]))
                     use_shared_level_outputs = (
-                        client_id == len(self.c_names_ood)+1
+                        client_id == self.aggregate_client_id
                         or self.learning_modality in ["centralized", "localized"]
                     )
                     if use_shared_level_outputs:

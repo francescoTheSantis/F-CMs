@@ -651,12 +651,18 @@ def main(cfg: DictConfig) -> None:
         # seed_everything(cfg.seed)
         
         # read client data
-        train_dataloaders, val_dataloaders, test_dataloaders = load_dataloaders(cfg, path, n_clients * cfg.learning.subgraphs.get('dataset_client_multiplier', 1))
+        n_saved_clients = cfg.learning.subgraphs.get(
+            "n_clients_saved",
+            n_clients * cfg.learning.subgraphs.get('dataset_client_multiplier', 1),
+        )
+        train_dataloaders, val_dataloaders, test_dataloaders = load_dataloaders(
+            cfg, path, n_saved_clients
+        )
         task_name = datasets[0].y_info["names"][0]
         _print_task_label_distribution(train_dataloaders, task_name, "train", per_client=True)
         _print_task_label_distribution(val_dataloaders, task_name, "val", per_client=False)
         _print_task_label_distribution(test_dataloaders, task_name, "test", per_client=False)
-        train_dataloaders, canary_loaders, true_in_outs, sia_loader = dataprocess_auditing(train_dataloaders, n_clients * cfg.learning.subgraphs.get('dataset_client_multiplier', 1), cfg) # NOTE: for the moment we are reducing the training data size
+        train_dataloaders, canary_loaders, true_in_outs, sia_loader = dataprocess_auditing(train_dataloaders, n_saved_clients, cfg) # NOTE: for the moment we are reducing the training data size
         _print_task_label_distribution(train_dataloaders, task_name, "train after auditing", per_client=True)
         print("\033[94mNumber of samples per client:\033[0m")
         for client_idx, train_loader in enumerate(train_dataloaders, start=1):
@@ -665,7 +671,7 @@ def main(cfg: DictConfig) -> None:
         # identify if y is present or not for the clients
         #y_present = []
         #for cid in range(len(val_dataloaders)):
-        #    if val_dataloaders[cid].dataset.y[0]!=-1:
+        #    if round_val_dataloaders[cid].dataset.y[0]!=-1:
         #        y_present.append(True)
         #    else:
         #         y_present.append(False)
@@ -676,42 +682,56 @@ def main(cfg: DictConfig) -> None:
         no_improvement_count = 0
         sia_accuracies = []
         history = {"round": [], "loss_val_avg": [], "loss_val_client": {}, "y_acc_val_avg": [], "y_acc_val_client": {}}
-        for cid in range(n_clients):
-            history["loss_val_client"][cid] = []
-            history["y_acc_val_client"][cid] = []
-        mia_accuracies, mia_epsilons = initialize_mia_results(n_clients)
         n_dataset_clients = len(train_dataloaders)
 
         # determine clients for possible predrift and postdrift phases
         if cfg.learning.subgraphs.rnd_drift > 1:
-            predrift_clients = list(range(1, n_clients + 1))
+            predrift_clients = [
+                int(client_id) for client_id in cfg.learning.subgraphs.get(
+                    "predrift_client_ids", range(1, n_clients + 1)
+                )
+            ]
             postdrift_clients = []
 
             if cfg.learning.subgraphs.rnd_drift <= n_rounds:
-                postdrift_clients = list(
-                    range(n_clients + 1, min(2 * n_clients, n_dataset_clients) + 1)
-                )
+                postdrift_clients = [
+                    int(client_id) for client_id in cfg.learning.subgraphs.get(
+                        "postdrift_client_ids", range(1, n_dataset_clients + 1)
+                    )
+                ]
 
                 # check postdrift clients have subgraphs that cover all the subgraphs
-                postdrift_subgraphs = set()
-                for cid in postdrift_clients:
-                    subgraph_id = identify_subgraph(path, cid)
-                    subgraph = subgraphs_concept_names[f'subgraph_{subgraph_id}']
-                    # I want to add the subgraph, not the nodes
-                    postdrift_subgraphs.add(frozenset(subgraph))
+                #postdrift_subgraphs = set()
+                #for cid in postdrift_clients:
+                #    subgraph_id = identify_subgraph(path, cid)
+                #    subgraph = subgraphs_concept_names[f'subgraph_{subgraph_id}']
+                #    # I want to add the subgraph, not the nodes
+                #    postdrift_subgraphs.add(frozenset(subgraph))
 
                 # check if postdrift_subgraphs cover all subgraphs, not nodes but subgraphs
-                all_subgraphs = set()
-                for sg in subgraphs_concept_names.values():
-                    all_subgraphs.add(frozenset(sg))
+                #all_subgraphs = set()
+                #for sg in subgraphs_concept_names.values():
+                #    all_subgraphs.add(frozenset(sg))
 
-                if postdrift_subgraphs != all_subgraphs:
-                    raise ValueError("Post-drift clients do not cover all subgraphs. Adjust post-drift clients to include all subgraphs.")
+                #postdrift_mode = cfg.learning.subgraphs.get(
+                 #   'client_selection_mode_postdrift',
+                 #   cfg.learning.subgraphs.get('client_selection_mode', 'all'),
+                #)
+                #if postdrift_mode == 'all' and postdrift_subgraphs != all_subgraphs:
+                #    raise ValueError("Post-drift clients selected with mode 'all' do not cover all subgraphs. Adjust the generated clients to include all subgraphs.")
 
         else:
             predrift_clients = None
             postdrift_clients = list(range(1, n_clients + 1))
-            
+
+        tracked_client_ids = list(dict.fromkeys(
+            (predrift_clients or []) + postdrift_clients
+        ))
+        for client_id in tracked_client_ids:
+            history["loss_val_client"][client_id] = []
+            history["y_acc_val_client"][client_id] = []
+        mia_accuracies, mia_epsilons = initialize_mia_results(n_dataset_clients)
+
 
         # determine node order
         node_order = datasets[0].c_info["names"] + datasets[0].y_info["names"]
@@ -722,7 +742,9 @@ def main(cfg: DictConfig) -> None:
                                                            datasets, 
                                                            subgraphs_concept_names, 
                                                            node_order)
-        cfg_postdrift = cfg
+        cfg_postdrift = update_config_from_data_subgroup_clients(
+            cfg, postdrift_clients, datasets, subgraphs_concept_names, node_order
+        )
 
 
         # timing metrics (saved for c2bm and cem)
@@ -743,7 +765,7 @@ def main(cfg: DictConfig) -> None:
             if predrift_clients is None:
                 all_clients = postdrift_clients
             else:
-                all_clients = predrift_clients + postdrift_clients
+                all_clients = list(dict.fromkeys(predrift_clients + postdrift_clients))
 
             local_graphs, local_weights = build_local_graphs(all_clients, 
                                                              cfg, 
@@ -804,8 +826,12 @@ def main(cfg: DictConfig) -> None:
                                                                                 y_index = graph_predrift.columns.get_loc(datasets[0].y_info["names"][0]) if graph_predrift is not None else None)
             # take in consideration that the intervention policy is already constructed relative to the graph_predrift with the node indices referred to it
             interv_policy_predrift_constructed = True
-            # Note: intervention policy postidrft remains the one on the true graph to guarantee consistency among the models            
-            cfg = maybe_update_config_with_graph(cfg, graph_postdrift, interv_policy)
+            interv_policy_postdrift, _ = get_intervention_policy(
+                graph_postdrift,
+                y_index=graph_postdrift.columns.get_loc(datasets[0].y_info["names"][0])
+                if graph_postdrift is not None else None,
+            )
+            interv_policy_postdrift_constructed = True
         
         else:
             # update graph and intervention policy based on predrift clients
@@ -814,43 +840,57 @@ def main(cfg: DictConfig) -> None:
             )
             # the intervention policy is not constructed from the graph_predrift, it is just a selection of the one relative to the global graph -> the node indices are still related to the global graph
             interv_policy_predrift_constructed = False
+            interv_policy_postdrift, graph_postdrift = update_intervention_policy_and_graph(
+                cfg_postdrift, interv_policy, graph, datasets
+            )
+            interv_policy_postdrift_constructed = False
 
 
         # update config predrift with the graph and intervention policy updated based on predrift clients
         cfg_predrift = maybe_update_config_with_graph_subgroup_clients(cfg_predrift, predrift_clients, graph_predrift,interv_policy_predrift,  interv_policy_predrift_constructed, datasets)
+        cfg_postdrift = maybe_update_config_with_graph_subgroup_clients(
+            cfg_postdrift, postdrift_clients, graph_postdrift,
+            interv_policy_postdrift, interv_policy_postdrift_constructed, datasets
+        )
         
         # stop code now
         # sys.exit(0)
 
-        # Filter dataloaders for predrift clients
-        train_dataloaders = filter_dataloaders_by_concepts(
-            train_dataloaders, 
-            cfg_predrift,
-            predrift_clients,
-            subgraphs_concept_names,
-            datasets[0].c_info['names'],
-            path
+        # Build independent phase views from the complete loader population.
+        # A client may belong to both phases without being copied or renumbered.
+        train_dataloaders_predrift = filter_dataloaders_by_concepts(
+            list(train_dataloaders), cfg_predrift, predrift_clients,
+            subgraphs_concept_names, datasets[0].c_info["names"], path,
+        )
+        val_dataloaders_predrift = filter_dataloaders_by_concepts(
+            list(val_dataloaders), cfg_predrift, predrift_clients,
+            subgraphs_concept_names, datasets[0].c_info["names"], path,
+        )
+        train_dataloaders_postdrift = filter_dataloaders_by_concepts(
+            list(train_dataloaders), cfg_postdrift, postdrift_clients,
+            subgraphs_concept_names, datasets[0].c_info["names"], path,
+        )
+        val_dataloaders_postdrift = filter_dataloaders_by_concepts(
+            list(val_dataloaders), cfg_postdrift, postdrift_clients,
+            subgraphs_concept_names, datasets[0].c_info["names"], path,
         )
 
-        val_dataloaders = filter_dataloaders_by_concepts(
-            val_dataloaders, 
-            cfg_predrift,
-            predrift_clients,
-            subgraphs_concept_names,
-            datasets[0].c_info['names'],
-            path
+        # Keep separate test views as well: the best checkpoint may belong to
+        # either phase, independently of whether drift occurred during training.
+        per_client_testset = (
+            OmegaConf.select(cfg, "combined_datasets.other_datasets", default=None) is not None
+            or OmegaConf.select(cfg, "dataset.per_client_testset", default=False)
         )
-
-        # if there is just the pre-drift phase, also filter test dataloaders
-        if cfg.learning.subgraphs.rnd_drift > n_rounds:
-            test_dataloaders = filter_dataloaders_by_concepts(
-                test_dataloaders, 
-                cfg_predrift,
-                predrift_clients,
-                subgraphs_concept_names,
-                datasets[0].c_info['names'],
-                path
-            )
+        test_dataloaders_predrift = filter_dataloaders_by_concepts(
+            list(test_dataloaders), cfg_predrift, predrift_clients,
+            subgraphs_concept_names, datasets[0].c_info["names"], path,
+            loader_client_ids=None if per_client_testset else [1],
+        )
+        test_dataloaders_postdrift = filter_dataloaders_by_concepts(
+            list(test_dataloaders), cfg_postdrift, postdrift_clients,
+            subgraphs_concept_names, datasets[0].c_info["names"], path,
+            loader_client_ids=None if per_client_testset else [1],
+        )
 
         for i in range(len(train_dataloaders)):
             batch = next(iter(train_dataloaders[i]))
@@ -865,7 +905,7 @@ def main(cfg: DictConfig) -> None:
         timing_metrics["predrift_model_instantiation"] = t_predrift_init
         param_count_predrift = sum(p.numel() for p in init_engine.model.parameters())
         try:
-            param_count_postdrift = sum(p.numel() for p in instantiate(cfg.engine).model.parameters())
+            param_count_postdrift = sum(p.numel() for p in instantiate(cfg_postdrift.engine).model.parameters())
         except Exception:
             param_count_postdrift = param_count_predrift
         global_params = get_parameters(init_engine)
@@ -881,27 +921,21 @@ def main(cfg: DictConfig) -> None:
             # Setup configuration based on drift round
             # ------------------------------------------------------------
             if rnd < cfg.learning.subgraphs.rnd_drift:
-                # pre-drift phase: use only first n_clients info: concepts, subgraph, etc...
-                start_n_client = 0
-                #if cfg_predrift is None:
-                #    cfg_predrift = update_config_with_subgroup_clients(
-                #        cfg,
-                #        graph,
-                #        datasets,
-                #        subgraphs_concept_names,
-                #        interv_policy,
-                #        subgroup_clients=predrift_clients,
-                #    )
                 cfg_round = cfg_predrift
+                round_client_ids = predrift_clients
+                round_train_dataloaders = train_dataloaders_predrift
+                round_val_dataloaders = val_dataloaders_predrift
             else:
-                # post-drift phase: use last n_clients info: concepts, subgraph, etc...
                 if rnd == cfg.learning.subgraphs.rnd_drift:
                     print("\033[93mDrift occurred: switching to new client data distributions\033[0m")
-                if cfg.learning.subgraphs.rnd_drift>1:
-                    start_n_client = n_clients
-                else:
-                    start_n_client = 0
                 cfg_round = cfg_postdrift
+                round_client_ids = postdrift_clients
+                round_train_dataloaders = train_dataloaders_postdrift
+                round_val_dataloaders = val_dataloaders_postdrift
+
+            # Config IDs are 1-based; dataloader arrays are 0-based.
+            round_client_indices = [client_id - 1 for client_id in round_client_ids]
+            n_clients_round = len(round_client_indices)
             if rnd == cfg.learning.subgraphs.rnd_drift:
                 t_init_model = time.time()
             engine = instantiate(cfg_round.engine)
@@ -918,20 +952,22 @@ def main(cfg: DictConfig) -> None:
             # if (rnd >= cfg.learning.subgraphs.rnd_drift) and True:
             if  cfg.learning.subgraphs.rnd_drift >=1:
                 print("\033[95m[Drift Debug] Checking concept label availability (train/val) for post-drift clients\033[0m")
-                for cid in range(start_n_client, start_n_client + n_clients):
-                    _print_concept_availability("train", train_dataloaders[cid], cfg_round, cid)
-                    if val_dataloaders[cid] is not None:
-                        _print_concept_availability("val", val_dataloaders[cid], cfg_round, cid)
+                for cid in round_client_indices:
+                    _print_concept_availability("train", round_train_dataloaders[cid], cfg_round, cid)
+                    if round_val_dataloaders[cid] is not None:
+                        _print_concept_availability("val", round_val_dataloaders[cid], cfg_round, cid)
                 drift_debug_printed = True
             
             # ------------------------------------------------------------
             # local training (sequentially)
             # ------------------------------------------------------------
-            print(f"\033[93mLocal training on {n_clients} clients\033[0m") 
-            for n, cid in enumerate(range(start_n_client, start_n_client + n_clients)):
+            print(f"\033[93mLocal training on {n_clients_round} clients\033[0m")
+            for n, cid in enumerate(round_client_indices):
                 # clone global params → local model
                 update_config_from_client(cfg_round, datasets, cid)
                 local_engine = instantiate(cfg_round.engine)
+                client_id = round_client_ids[n]
+                local_engine.cid = client_id
                 if hasattr(datasets[0], 'class_weights') and datasets[0].class_weights is not None:
                     local_engine.model.class_weights = datasets[0].class_weights
                 if hasattr(datasets[0], 'concept_class_weights') and datasets[0].concept_class_weights:
@@ -944,10 +980,10 @@ def main(cfg: DictConfig) -> None:
                         local_engine,
                         global_params,
                         global_param_keys,
-                        verbose=(cid == start_n_client),
+                        verbose=(cid == round_client_indices[0]),
                     )
                     t_set_params = time.time() - t_set_params
-                    if cid == start_n_client:
+                    if cid == round_client_indices[0]:
                         print(f"\033[94m[Timing] Postdrift set_old_parameters (client {cid}): {t_set_params:.3f}s\033[0m")
                         timing_metrics["postdrift_set_old_parameters"] = t_set_params
                 else:
@@ -957,8 +993,8 @@ def main(cfg: DictConfig) -> None:
 
                 # freeze if required
                 maybe_freeze_parameters(
-                    train_dataloader = train_dataloaders[cid],
-                    y_to_freeze = True if val_dataloaders[cid].dataset.y[0]==-1 else False, # to change if we can incorporate y in train_dataloaders[cid].dataset
+                    train_dataloader = round_train_dataloaders[cid],
+                    y_to_freeze = True if round_val_dataloaders[cid].dataset.y[0]==-1 else False, # to change if we can incorporate y in round_train_dataloaders[cid].dataset
                     model=local_engine.model,
                     learning=cfg.learning.mode,
                     freezing=cfg.learning.settings.freezing,
@@ -966,27 +1002,27 @@ def main(cfg: DictConfig) -> None:
 
                 train_loader, privacy_engine = maybe_make_private(
                     local_engine,
-                    train_dataloaders[cid],
+                    round_train_dataloaders[cid],
                     cfg_round,
                     epochs=cfg.trainer.max_epochs,
                 )
 
                 # local train
-                trainer = Trainer(cfg, client_id=cid)
+                trainer = Trainer(cfg, client_id=client_id)
                 trainer.logger.log_hyperparams(parse_hyperparams(cfg)) 
                 trainer.fit(local_engine, train_loader)
                 if privacy_engine is not None:
                     spent_eps = privacy_engine.get_epsilon(getattr(local_engine, "dp_delta", None))
                     print(
-                        f"\033[96m[DP][Client {cid}] Spent ε={spent_eps:.3f} for δ={getattr(local_engine, 'dp_delta', None)}\033[0m"
+                        f"\033[96m[DP][Client {client_id}] Spent ε={spent_eps:.3f} for δ={getattr(local_engine, 'dp_delta', None)}\033[0m"
                     )
                 local_engine.model.to(cfg.device) # put back to device
-                n_samples = len(train_dataloaders[cid].dataset)
-                client_modality = getattr(train_dataloaders[cid].dataset, "modality", None)
+                n_samples = len(round_train_dataloaders[cid].dataset)
+                client_modality = getattr(round_train_dataloaders[cid].dataset, "modality", None)
                                     
                 # # local validation
-                # if val_dataloaders[cid] is not None:
-                #     avg_loss = compute_validation_loss(local_engine.model, val_dataloaders[cid], cfg)
+                # if round_val_dataloaders[cid] is not None:
+                #     avg_loss = compute_validation_loss(local_engine.model, round_val_dataloaders[cid], cfg)
                 #     history["loss_val_client"][n].append(avg_loss)
     
                 # collect weights for aggregation
@@ -1008,7 +1044,7 @@ def main(cfg: DictConfig) -> None:
             #     #global_vec = flat_trainable_params_tensor(local_engine.model, cfg.device)
 
             #     start_n_client = 0 if rnd < cfg.learning.subgraphs.rnd_drift else n_clients 
-            #     for cid in range(start_n_client, start_n_client + n_clients):
+            #     for cid in round_client_indices:
             #         # normalize client update vector
             #         true_in_out = true_in_outs[cid].float().numpy()
             #         set_parameters(local_engine, client_params[cid][0])
@@ -1113,14 +1149,19 @@ def main(cfg: DictConfig) -> None:
             local_engine = instantiate(cfg_round.engine)
             set_parameters(local_engine, global_params)
             local_engine.model.to(cfg.device)
-            for cid in range(start_n_client, start_n_client + n_clients):
-                val_metrics = trainer.validate(local_engine, val_dataloaders[cid])[0]  #{'val/c/asia': 0.0, 'val/c/bronc': 0.0, 'val/c/either': 0.0, 'val/c/lung': 0.0, 'val/c/smoke': 0.0, 'val/c/tub': 0.0, 'val/c/xray': 0.0, 'val_loss': nan}
+            for tracked_client_id in tracked_client_ids:
+                history["loss_val_client"][tracked_client_id].append(float("nan"))
+                history["y_acc_val_client"][tracked_client_id].append(float("nan"))
+
+            for client_id, cid in zip(round_client_ids, round_client_indices):
+                local_engine.cid = client_id
+                val_metrics = trainer.validate(local_engine, round_val_dataloaders[cid])[0]  #{'val/c/asia': 0.0, 'val/c/bronc': 0.0, 'val/c/either': 0.0, 'val/c/lung': 0.0, 'val/c/smoke': 0.0, 'val/c/tub': 0.0, 'val/c/xray': 0.0, 'val_loss': nan}
                 val_losses.append(val_metrics['val_loss'])
                 val_accs.append(val_metrics.get('val/y/y_accuracy', np.nan))  
                  # log per-client val metrics
-                history["loss_val_client"][cid - start_n_client].append(val_metrics['val_loss'])
-                history["y_acc_val_client"][cid - start_n_client].append(val_metrics.get('val/y/y_accuracy', np.nan))
-                sizes.append(len(val_dataloaders[cid].dataset))
+                history["loss_val_client"][client_id][-1] = val_metrics["val_loss"]
+                history["y_acc_val_client"][client_id][-1] = val_metrics.get("val/y/y_accuracy", np.nan)
+                sizes.append(len(round_val_dataloaders[cid].dataset))
 
             # log aggregated val metrics (weighted)
             w_loss = sum(l * s for l, s in zip(val_losses, sizes)) / sum(sizes)
@@ -1139,7 +1180,7 @@ def main(cfg: DictConfig) -> None:
             check_improvements = False
             if cfg.learning.subgraphs.rnd_drift > n_rounds:
                 check_improvements = True
-            elif rnd > cfg.learning.subgraphs.rnd_drift:
+            elif rnd >= cfg.learning.subgraphs.rnd_drift:
                 check_improvements = True
 
             if check_improvements:
@@ -1178,10 +1219,9 @@ def main(cfg: DictConfig) -> None:
             history["round"] = history["round"][:n_keep]
             history["loss_val_avg"] = history["loss_val_avg"][:n_keep]
             history["y_acc_val_avg"] = history["y_acc_val_avg"][:n_keep]
-            for cid in range(n_clients):
-                if cid in history["loss_val_client"]:
-                    history["loss_val_client"][cid] = history["loss_val_client"][cid][:n_keep]
-                    history["y_acc_val_client"][cid] = history["y_acc_val_client"][cid][:n_keep]
+            for client_id in tracked_client_ids:
+                history["loss_val_client"][client_id] = history["loss_val_client"][client_id][:n_keep]
+                history["y_acc_val_client"][client_id] = history["y_acc_val_client"][client_id][:n_keep]
             # save history to json
             with open("results/training_history.json", "w") as fp:
                 json.dump(history, fp, indent=2)
@@ -1214,18 +1254,66 @@ def main(cfg: DictConfig) -> None:
         ind_min_loss = np.argmin(history["loss_val_avg"])
         # best_round = history["round"][ind_min_loss]
         print(f"\033[92mBest round: {best_round} with loss {history['loss_val_avg'][ind_min_loss]:.4f}\033[0m")
-        cfg_eval = cfg_predrift if best_round < cfg.learning.subgraphs.rnd_drift else cfg
+        cfg_eval = cfg_predrift if best_round < cfg.learning.subgraphs.rnd_drift else cfg_postdrift
         local_engine = instantiate(cfg_eval.engine)
         local_engine.model.load_state_dict(torch.load(f"checkpoints/model_round_{best_round}.pth", weights_only=False, map_location="cpu"))
 
-        # Evaluate the model on the client datasets 
+        # Evaluate the phase associated with the selected checkpoint. Keep the
+        # original 1-based client ID next to every per-client test loader.
+        evaluate_predrift = best_round < cfg.learning.subgraphs.rnd_drift
+        eval_client_ids = predrift_clients if evaluate_predrift else postdrift_clients
+        eval_test_dataloaders = (
+            test_dataloaders_predrift if evaluate_predrift
+            else test_dataloaders_postdrift
+        )
+        if per_client_testset:
+            test_pairs = [
+                (client_id, eval_test_dataloaders[client_id - 1])
+                for client_id in eval_client_ids
+            ]
+        else:
+            test_pairs = [(None, eval_test_dataloaders[0])]
+
         per_loader_test_artifacts = []
         per_loader_test_weights = []
-        for testid in range(len(test_dataloaders)):
-            test_dataloader = test_dataloaders[testid]
-            trainer.test(local_engine, test_dataloader)
-            per_loader_test_artifacts.append(_collect_test_artifacts("results"))
+        per_client_test_artifacts = {}
+        checkpoint_state = local_engine.model.state_dict()
+        for client_id, test_dataloader in test_pairs:
+            for filename in TEST_RESULT_FILENAMES:
+                artifact_path = os.path.join("results", filename)
+                if os.path.exists(artifact_path):
+                    os.remove(artifact_path)
+            test_engine = instantiate(cfg_eval.engine)
+            test_engine.model.load_state_dict(checkpoint_state)
+            test_engine.cid = client_id
+            test_trainer = Trainer(cfg, client_id=client_id)
+            test_trainer.test(test_engine, test_dataloader)
+            artifacts = _collect_test_artifacts("results")
+            artifact_key = "global" if client_id is None else str(client_id)
+            per_client_test_artifacts[artifact_key] = artifacts
+            per_loader_test_artifacts.append(artifacts)
             per_loader_test_weights.append(len(test_dataloader.dataset))
+
+        with open("results/test_client_mapping.json", "w") as handle:
+            json.dump({
+                "phase": "predrift" if evaluate_predrift else "postdrift",
+                "per_client_testset": bool(per_client_testset),
+                "client_ids": [client_id for client_id, _ in test_pairs],
+            }, handle, indent=2)
+        with open("results/per_client_test_artifacts.pkl", "wb") as handle:
+            pickle.dump(per_client_test_artifacts, handle)
+        per_client_test_summary = {
+            client_id: {
+                "test/y/y_accuracy": artifacts.get("y_accuracy.pkl", {}).get("_baseline", float("nan")),
+                **{
+                    f"test/c/{name}": value
+                    for name, value in artifacts.get("c_accuracy.pkl", {}).items()
+                },
+            }
+            for client_id, artifacts in per_client_test_artifacts.items()
+        }
+        with open("results/per_client_test_metrics.json", "w") as handle:
+            json.dump(per_client_test_summary, handle, indent=2)
 
         aggregated_test_summary = _aggregate_and_save_test_artifacts(
             "results",

@@ -330,7 +330,11 @@ def update_config_from_data(cfg: DictConfig, datasets, subgraphs_concept_names, 
             if subset_concepts is None:
                 original_c_names = datasets[0].c_info['names']
                 c_info = datasets[0].c_info
-                total_clients = cfg.learning.n_clients*cfg.learning.subgraphs.get('dataset_client_multiplier', 1)
+                total_clients = cfg.learning.subgraphs.get(
+                    "n_clients_saved",
+                    cfg.learning.n_clients
+                    * cfg.learning.subgraphs.get("dataset_client_multiplier", 1),
+                )
             else:
                 #order subset_concepts according to node_order
                 if node_order is not None:
@@ -357,7 +361,11 @@ def update_config_from_data(cfg: DictConfig, datasets, subgraphs_concept_names, 
             # The list of names for all concepts (in-distribution and out-of-distribution)
             c_names_all = original_c_names
 
-            for id in range(1, total_clients+1):
+            client_ids = (
+                range(1, total_clients + 1)
+                if subset_clients is None else subset_clients
+            )
+            for id in client_ids:
                 if subset_concepts is None:
                     if len(datasets)>1:
                         dataset = datasets[(id-1) % len(datasets)]
@@ -476,6 +484,8 @@ def update_config_from_data_subgroup_clients(cfg, subgroup_clients, datasets, su
     
     if subgroup_clients is None:
         return None
+    if not subgroup_clients:
+        return copy.deepcopy(cfg)
 
     # Get concepts from subgroup clients subgraphs
     subgroup_concepts = set()
@@ -489,13 +499,15 @@ def update_config_from_data_subgroup_clients(cfg, subgroup_clients, datasets, su
     # Create a temporary cfg with filtered c_info for use with update_intervention_policy_and_graph
     subgroup_concepts_list = list(subgroup_concepts)
     cfg_predrift = copy.deepcopy(cfg)
+    with open_dict(cfg_predrift):
+        cfg_predrift.learning.n_clients = len(subgroup_clients)
     cfg_predrift = update_config_from_data(cfg_predrift, datasets, subgraphs_concept_names, subset_concepts = subgroup_concepts_list, subset_clients = subgroup_clients, node_order = node_order) 
        
     return cfg_predrift
 
 def maybe_update_config_with_graph_subgroup_clients(cfg_predrift, predrift_clients, graph_predrift,policy_predrift, interv_policy_predrift_constructed, datasets):
          
-    if predrift_clients is None:
+    if not predrift_clients:
         return cfg_predrift
     
     # Update cfg with filtered graph and policy
@@ -530,7 +542,10 @@ def maybe_update_config_with_graph_subgroup_clients(cfg_predrift, predrift_clien
     return cfg_predrift
 
 
-def filter_dataloaders_by_concepts(dataloaders, cfg_predrift, subgroup_clients, subgraphs_concept_names, all_concept_names, cache_path):
+def filter_dataloaders_by_concepts(
+    dataloaders, cfg_predrift, subgroup_clients, subgraphs_concept_names,
+    all_concept_names, cache_path, loader_client_ids=None,
+):
     """
     Filter dataloaders for clients in subgroup_clients to keep only concepts from their subgraphs.
     Uses a custom collate_fn to filter concepts dynamically during batch creation.
@@ -547,7 +562,7 @@ def filter_dataloaders_by_concepts(dataloaders, cfg_predrift, subgroup_clients, 
     """
     from src.data.utils import create_filtering_collate_fn
 
-    if cfg_predrift is None or subgroup_clients is None:
+    if cfg_predrift is None or not subgroup_clients:
         return dataloaders
     
     # Compute subgroup_concepts from subgraphs of clients in subgroup_clients
@@ -564,7 +579,8 @@ def filter_dataloaders_by_concepts(dataloaders, cfg_predrift, subgroup_clients, 
     print(f"\033[96m[filter_dataloaders] Filtering concepts for clients {subgroup_clients}\033[0m")
     print(f"\033[96m[filter_dataloaders] Keeping {len(concept_indices_to_keep)}/{len(all_concept_names)} concepts: {subgroup_concepts}\033[0m")
     
-    for cid in subgroup_clients:
+    clients_to_filter = subgroup_clients if loader_client_ids is None else loader_client_ids
+    for cid in clients_to_filter:
         loader_idx = cid - 1  # convert from 1-indexed to 0-indexed
         
         if loader_idx >= len(dataloaders):
@@ -793,7 +809,11 @@ def aggregate_graph_proposals(
     if not local_graphs:
         raise ValueError("local_graphs cannot be empty.")
     if weights is None:
-        weights = [1.0] * len(local_graphs)
+        weights = (
+            {client_id: 1.0 for client_id in local_graphs}
+            if isinstance(local_graphs, dict)
+            else [1.0] * len(local_graphs)
+        )
     if len(weights) != len(local_graphs):
         raise ValueError("weights must match local_graphs length.")
 
@@ -801,10 +821,20 @@ def aggregate_graph_proposals(
     
     selected_graphs = []
     selected_weights = []
-    
+
+    graphs_by_client = isinstance(local_graphs, dict)
+    weights_by_client = isinstance(weights, dict)
     for client in client_selection:
-        selected_graphs.append(local_graphs[client-1])
-        selected_weights.append(weights[client-1])
+        if graphs_by_client and client not in local_graphs:
+            raise KeyError(f"Missing local graph for client {client}.")
+        if weights_by_client and client not in weights:
+            raise KeyError(f"Missing local weight for client {client}.")
+        selected_graphs.append(
+            local_graphs[client] if graphs_by_client else local_graphs[client - 1]
+        )
+        selected_weights.append(
+            weights[client] if weights_by_client else weights[client - 1]
+        )
 
     
     if not selected_graphs:
@@ -2508,7 +2538,8 @@ def plot_training_metrics(history: Dict[str, Any], save_dir: str = ".") -> None:
     rounds = history["round"]
     
     # 1. Per-client validation loss plot
-    n_clients = len(history["loss_val_client"])
+    client_ids = sorted(history["loss_val_client"], key=lambda value: int(value))
+    n_clients = len(client_ids)
     fig_height = max(4, min(12, 2 * n_clients))
     fig, axes = plt.subplots(n_clients, 1, figsize=(10, fig_height), sharex=True)
     
@@ -2516,11 +2547,11 @@ def plot_training_metrics(history: Dict[str, Any], save_dir: str = ".") -> None:
     if n_clients == 1:
         axes = [axes]
     
-    for cid, ax in enumerate(axes):
-        client_losses = history["loss_val_client"][cid]
-        ax.plot(rounds, client_losses, 'o-', label=f'Client {cid}')
-        ax.set_ylabel('Validation Loss')
-        ax.set_title(f'Client {cid}')
+    for client_id, ax in zip(client_ids, axes):
+        client_losses = history["loss_val_client"][client_id]
+        ax.plot(rounds, client_losses, "o-", label=f"Client {client_id}")
+        ax.set_ylabel("Validation Loss")
+        ax.set_title(f"Client {client_id}")
         ax.grid(True, linestyle='--', alpha=0.7)
             
     axes[-1].set_xlabel('Round')
@@ -2535,9 +2566,9 @@ def plot_training_metrics(history: Dict[str, Any], save_dir: str = ".") -> None:
              linewidth=2, label='Average Validation Loss')
     
     # Optionally overlay individual client trends for comparison
-    for cid in range(n_clients):
-        client_losses = history["loss_val_client"][cid]
-        plt.plot(rounds, client_losses, '--', alpha=0.3, label=f'Client {cid}')
+    for client_id in client_ids:
+        client_losses = history["loss_val_client"][client_id]
+        plt.plot(rounds, client_losses, "--", alpha=0.3, label=f"Client {client_id}")
 
     plt.xlabel('Round')
     plt.ylabel('Validation Loss')
@@ -2555,9 +2586,9 @@ def plot_training_metrics(history: Dict[str, Any], save_dir: str = ".") -> None:
              linewidth=2, label='Average Validation Accuracy')
     
     # Optionally overlay individual client trends for comparison
-    for cid in range(n_clients):
-        client_losses = history["y_acc_val_client"][cid]
-        plt.plot(rounds, client_losses, '--', alpha=0.3, label=f'Client {cid}')
+    for client_id in client_ids:
+        client_accuracies = history["y_acc_val_client"][client_id]
+        plt.plot(rounds, client_accuracies, "--", alpha=0.3, label=f"Client {client_id}")
     
     plt.xlabel('Round')
     plt.ylabel('Validation Accuracy')
@@ -2583,8 +2614,8 @@ def build_local_graphs(client_ids, cfg, train_dataloaders, y_name, graph = None)
     n_clients_to_alter = int(perc_alterations * n_clients)
     clients_to_alter = set(random.sample(client_ids, n_clients_to_alter))
 
-    local_graphs = []
-    local_weights = []
+    local_graphs = {}
+    local_weights = {}
     for client_id in client_ids:
         loader = train_dataloaders[client_id - 1]
         node_names = cfg_local.engine.c_names_id[client_id]
@@ -2596,7 +2627,7 @@ def build_local_graphs(client_ids, cfg, train_dataloaders, y_name, graph = None)
             # Only alter graph if this client is selected
             if client_id in clients_to_alter:
                 local_graph = alterate_graph(local_graph, graph_alteration_prob)
-            local_graphs.append(local_graph)
+            local_graphs[client_id] = local_graph
         else:
             # select correct columns from train_dataloader
             cfg_local = copy.deepcopy(cfg)
@@ -2636,9 +2667,9 @@ def build_local_graphs(client_ids, cfg, train_dataloaders, y_name, graph = None)
             local_graph = complete_graph_with_llm(cfg_local, local_graph, cfg_local.dataset.name)
             local_graph, dataset = remove_problematic_edges(local_graph, train_dataloaders[client_id - 1].dataset)
             local_graph = remove_cycles(local_graph, y_index=dataset.y_index)
-            local_graphs.append(local_graph)
+            local_graphs[client_id] = local_graph
 
-        local_weights.append(len(loader.dataset))
+        local_weights[client_id] = len(loader.dataset)
     return local_graphs, local_weights
 
 def _print_concept_availability(tag, loader, cfg, cid):

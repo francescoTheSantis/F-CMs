@@ -38,7 +38,23 @@ paths = [
     #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-25/11-28-10_asia_drift3",
     #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-25/11-46-53_alarm_drift1",
     #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-25/11-54-02_alarm_drift2",
-    "/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-25/12-15-41_alarm_drift3"
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-25/12-15-41_alarm_drift3",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-25/18-43-16_chexpert_drift1",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-25/18-48-39_chexpert_drift2",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-25/19-12-21_chexpert_drift3"
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-25/20-42-53_siim_drift1",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-25/20-45-00_siim_drift2",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-25/21-26-00_siim_drift3"
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-27/01-03-06_asia_r1_steps_1",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-27/01-06-37_asia_r1_steps_2",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-27/01-16-44_asia_r1_steps_0",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-27/01-19-05_alarm_r1_steps_0",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-27/01-28-05_alarm_r1_steps_1",
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-27/01-48-42_alarm_r1_steps_2"
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-27/08-11-53_chexpert_r1_steps_0"
+    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-27/08-17-47_chexpert_r1_steps_1"
+    "/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-27/08-38-41_chexpert_r1_steps_2"
+
 ]
 
 # folder to save processed results
