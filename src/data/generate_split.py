@@ -832,7 +832,6 @@ def build_client_subgraph_ids(
     drift_add_nodes_ratio=0.5,
     client_selection_mode="all",
     client_selection_mode_postdrift=None,
-    subgraphs_reaching_task=None,
     ):
     
     if dataset_client_multiplier < 1:
@@ -848,16 +847,6 @@ def build_client_subgraph_ids(
     no_add_ids = [i for i, flag in enumerate(subgraphs_with_add_nodes) if not flag]
     if not no_add_ids:
         raise ValueError("No subgraphs without additional nodes are available.")
-
-    if subgraphs_reaching_task is not None:
-        reaching_task_ids = set(subgraphs_reaching_task)
-        first_no_add_without_task = next(
-            (subgraph_id for subgraph_id in no_add_ids if subgraph_id + 1 not in reaching_task_ids),
-            None,
-        )
-        if first_no_add_without_task is not None:
-            no_add_ids.remove(first_no_add_without_task)
-            no_add_ids.insert(0, first_no_add_without_task)
 
     n_extra_clients = n_dataset_clients - n_train_clients
     n_extra_add = int(round(n_extra_clients * drift_add_nodes_ratio))
@@ -1003,7 +992,7 @@ def _generate_subgraphs_from_cfg(cfg, graph, y_index):
 
 
 def _validate_structural_concept_coverage_ranges(
-    cfg, graph, y_index, subgraphs, subgraphs_with_add_nodes
+    cfg, graph, subgraphs, subgraphs_with_add_nodes
 ):
     """Validate drift coverage without changing the generated subgraphs."""
     coverage_ranges = cfg.learning.subgraphs.get(
@@ -1022,16 +1011,6 @@ def _validate_structural_concept_coverage_ranges(
     ]
     if not no_add_ids:
         raise ValueError("Cannot compute drift coverage: no no-add subgraphs exist.")
-
-    # Use the same priority as build_client_subgraph_ids.
-    first_no_add_without_task = next(
-        (idx for idx in no_add_ids
-         if int(y_index) not in subgraphs[f"subgraph_{idx + 1}"]),
-        None,
-    )
-    if first_no_add_without_task is not None:
-        no_add_ids.remove(first_no_add_without_task)
-        no_add_ids.insert(0, first_no_add_without_task)
 
     def covered_nodes(subgraph_ids):
         covered = set()
@@ -1053,11 +1032,6 @@ def _validate_structural_concept_coverage_ranges(
                     "drift_add_nodes_ratio", 0.5
                 ),
                 client_selection_mode=mode,
-                subgraphs_reaching_task=[
-                    idx + 1
-                    for idx in range(len(subgraphs))
-                    if int(y_index) in subgraphs[f"subgraph_{idx + 1}"]
-                ],
             )
             selected_subgraph_ids = {
                 full_ids[client_id - 1] for client_id in selected_client_ids
@@ -1228,7 +1202,6 @@ def generate_split(cfg, datasets, graph, y_index, precomputed_subgraphs=None):
             drift_add_nodes_ratio=drift_add_nodes_ratio,
             client_selection_mode=predrift_mode,
             client_selection_mode_postdrift=postdrift_mode,
-            subgraphs_reaching_task=indices_subgraphs_reaching_task,
         )
         print(
             f"Pre-drift clients ({predrift_mode}): {predrift_client_ids}\n"
@@ -1559,7 +1532,6 @@ def generate_split_with_fallback(
                 _validate_structural_concept_coverage_ranges(
                     cfg,
                     graph,
-                    y_index,
                     precomputed_subgraphs[0],
                     precomputed_subgraphs[2],
                 )
