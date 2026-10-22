@@ -212,6 +212,7 @@ def _evaluate_graph_against_truth(pred_graph, true_graph, tag, key=None):
         "hamming_cost": float(cost),
         "avg_cost": float(avg_cost),
         "differing_pairs": int(count),
+        "DiffPairs": int(count),
     }
     key = key or tag.lower().replace(" ", "_").replace("-", "_")
     return key, metrics

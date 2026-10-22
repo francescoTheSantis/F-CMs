@@ -486,22 +486,20 @@ class Predictor(pl.LightningModule):
                     # after interveening on a level of the graph, how well can we predict each child concept
                     childs = list(itertools.chain(*self.test_interv_policy[l:]))
                     for child_index in childs:
-                        if not use_shared_level_outputs:
-                            if self.c_names_all[child_index] not in c_hat_id.keys():
-                                continue
-                        elif self.learning_modality == "localized":
-                            if self.c_names_all[child_index] not in c_hat.keys():
-                                continue
+                        c_name = self.c_names_all[child_index]
                         if use_shared_level_outputs:
-                            c_name = self.c_names_all[child_index]
+                            if c_name not in c_hat:
+                                continue
                             self.test_intervention_level_c[f'level {l}/child {c_name}'].update(c_hat[c_name], c[:,child_index])
                         else:
                             if self.learning_modality not in ["centralized", "localized"]:
                                 if child_index in id_indices:
-                                    c_name = self.c_names_all[child_index]
+                                    if c_name not in c_hat_ood:
+                                        continue
                                     self.test_intervention_ood_level_c_id[f'client {client_id}'][f'level {l}/child {c_name}'].to(device).update(c_hat_ood[c_name], c[:,child_index])
                                 elif child_index in ood_indices:
-                                    c_name = self.c_names_all[child_index]
+                                    if c_name not in c_hat_id:
+                                        continue
                                     self.test_intervention_id_level_c_ood[f'client {client_id}'][f'level {l}/child {c_name}'].to(device).update(c_hat_id[c_name], c[:,child_index])
 
                         #if c_name in self.c_names_id[1]:

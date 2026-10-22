@@ -44,6 +44,7 @@ learning:
      local_graphs: from_true_graph
      perc_clients_alterations: 0.1
      graph_alteration_prob: 0.1
+     weight_mode: sample_count # sample_count or consensus
 
 engine:
   intervention_prob: 0.8

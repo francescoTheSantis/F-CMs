@@ -3256,6 +3256,7 @@ def load_exps(exps_path, n_clients=5, args=None):
                 training_modality = conf['learning']['mode']
                 rnd_drift = conf['learning'].get('subgraphs', {}).get('rnd_drift', 0)
                 n_rounds = conf['trainer'].get('max_epochs', float('inf'))
+                graph_only = int(n_rounds) == 0
                 training_modality_full = training_modality
                 if 'localized' in training_modality:
                     training_modality_full = training_modality + '_' + str(conf['client_id'])
@@ -3269,6 +3270,10 @@ def load_exps(exps_path, n_clients=5, args=None):
                     result_file = os.path.join(exp, 'results') 
                     concept_file = os.path.join(result_file, 'c_accuracy.pkl')
                     if not os.path.exists(concept_file):
+                        graph_metrics_file = os.path.join(result_file, 'graph_metrics.json')
+                        if graph_only and os.path.exists(graph_metrics_file):
+                            valid_concepts[key] = []
+                            continue
                         print(f"[load_exps] Missing concept accuracy file: {concept_file}. Skipping this experiment.")
                         missing_concept_exps.add(exp)
                         continue
@@ -3293,6 +3298,22 @@ def load_exps(exps_path, n_clients=5, args=None):
                 d['seed'] = conf['seed']
                 d['dataset'] = conf['dataset']['name']
                 d['model'] = conf['model']['name']
+                d['graph_only'] = int(conf.get('trainer', {}).get('max_epochs', -1)) == 0
+                aggregate_graph_conf = (
+                    conf.get('learning', {})
+                    .get('subgraphs', {})
+                    .get('aggregate_graph', {})
+                    or {}
+                )
+                d['graph_alteration_prob'] = aggregate_graph_conf.get(
+                    'graph_alteration_prob', np.nan
+                )
+                d['perc_clients_alterations'] = aggregate_graph_conf.get(
+                    'perc_clients_alterations', np.nan
+                )
+                d['weight_mode'] = aggregate_graph_conf.get(
+                    'weight_mode', 'sample_count'
+                )
 
                 if 'localized' in conf['learning']['mode']:
                     d['learning'] = conf['learning']['mode'] + '_' + str(conf['client_id'])
@@ -3343,11 +3364,15 @@ def load_exps(exps_path, n_clients=5, args=None):
                 # Concept results
                 concept_file = os.path.join(result_file, 'c_accuracy.pkl')
                 if not os.path.exists(concept_file):
-                    print(f"[load_exps] Missing concept accuracy file: {concept_file}. Skipping this experiment.")
-                    missing_concept_exps.add(exp)
-                    continue
-                with open(concept_file, 'rb') as file:
-                    concept_results = pickle.load(file)
+                    if d['graph_only']:
+                        concept_results = {}
+                    else:
+                        print(f"[load_exps] Missing concept accuracy file: {concept_file}. Skipping this experiment.")
+                        missing_concept_exps.add(exp)
+                        continue
+                else:
+                    with open(concept_file, 'rb') as file:
+                        concept_results = pickle.load(file)
 
                 # Select the last row of the dataframe where we test the model
                 if len(valid_concepts.get(key, [])) > 0:
@@ -3357,10 +3382,16 @@ def load_exps(exps_path, n_clients=5, args=None):
 
                 # Task results
                 task_file = os.path.join(result_file, 'y_accuracy.pkl')
-                with open(task_file, 'rb') as file:
-                    task_results = pickle.load(file)
-
-                d['task_acc'] = task_results['_baseline']
+                if os.path.exists(task_file):
+                    with open(task_file, 'rb') as file:
+                        task_results = pickle.load(file)
+                    d['task_acc'] = task_results['_baseline']
+                elif d['graph_only']:
+                    d['task_acc'] = np.nan
+                else:
+                    print(f"[load_exps] Missing task accuracy file: {task_file}. Skipping this experiment.")
+                    missing_concept_exps.add(exp)
+                    continue
 
                 # Balanced task accuracy (optional, backward-compatible)
                 balanced_task_file = os.path.join(result_file, 'y_balanced_accuracy.pkl')
@@ -3440,7 +3471,11 @@ def load_exps(exps_path, n_clients=5, args=None):
                                 return
                             d[f"{prefix}_hamming_cost"] = float(metrics_dict.get("hamming_cost", np.nan))
                             d[f"{prefix}_avg_cost"] = float(metrics_dict.get("avg_cost", np.nan))
-                            d[f"{prefix}_differing_pairs"] = float(metrics_dict.get("differing_pairs", np.nan))
+                            diff_pairs = metrics_dict.get(
+                                "DiffPairs",
+                                metrics_dict.get("differing_pairs", np.nan),
+                            )
+                            d[f"{prefix}_differing_pairs"] = float(diff_pairs)
 
                         for raw_key, metrics_dict in graph_metrics.items():
                             stage_key = stage_map.get(str(raw_key).lower())
@@ -3617,6 +3652,10 @@ def load_exps(exps_path, n_clients=5, args=None):
                 pass
 
     performance = pd.DataFrame(performance)
+
+    if performance.empty or 'dataset' not in performance.columns:
+        print("[load_exps] No valid experiments found. Returning empty DataFrame.")
+        return performance, {}
 
     # Read from the cache the c_info for each dataset
     c_info = {}

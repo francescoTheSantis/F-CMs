@@ -1,6 +1,6 @@
 from time import time
 
-from omegaconf import DictConfig
+from omegaconf import DictConfig, ListConfig
 import pytorch_lightning as pl
 from pytorch_lightning import Trainer as _Trainer_
 from pytorch_lightning.callbacks import (
@@ -150,7 +150,11 @@ class Trainer(_Trainer_):
             accelerator = "cpu"
             dev_cfg = cfg.trainer.get("devices")
             if dev_cfg in (None, "auto"):
-                devices = None           
+                devices = None
+            elif isinstance(dev_cfg, (list, tuple, ListConfig)):
+                # YAML configs often contain GPU indices such as devices: [0].
+                # On CPU, Lightning expects a device count rather than indices.
+                devices = max(1, len(dev_cfg))
             else:
                 devices = int(dev_cfg)
                 if devices <= 0:        

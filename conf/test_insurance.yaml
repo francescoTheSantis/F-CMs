@@ -50,6 +50,7 @@ learning:
      local_graphs: from_true_graph # from_true_graph / learned / none
      perc_clients_alterations: 0.1 # 1 per il test con dario e 2 clients
      graph_alteration_prob: 0.1 # 0.1 per il test con dario
+     weight_mode: sample_count # sample_count or consensus
   
 engine:
   intervention_prob: 0.8

@@ -254,12 +254,13 @@ def _print_task_label_distribution(
 
 
 
-@hydra.main(config_path="conf", config_name="test_mmist_ccrcc", version_base="1.3")
+@hydra.main(config_path="conf", config_name="test", version_base="1.3")
 def main(cfg: DictConfig) -> None:
     # various preliminaries, it set the seed for reproducibility
     torch.set_num_threads(cfg.get("num_threads", 1))
     seed_everything(cfg.get("seed"))
     os.makedirs('results', exist_ok=True)
+    graph_metrics_only = int(cfg.trainer.max_epochs) == 0
     if torch.cuda.is_available():
         device = f"cuda:{cfg.trainer.devices[0]}" 
     elif torch.backends.mps.is_available():
@@ -271,6 +272,11 @@ def main(cfg: DictConfig) -> None:
 
     # adjust config
     cfg = clean_empty_configs(cfg)
+    if graph_metrics_only and cfg.learning.mode != 'local_federated':
+        raise ValueError(
+            "trainer.max_epochs=0 is graph-metrics-only mode and currently requires "
+            "learning=local_federated."
+        )
 
     # instantiate the dataset, split into train, val, test
     # preprocess all of them and save the preprocessed dataset
@@ -704,6 +710,12 @@ def main(cfg: DictConfig) -> None:
                 if agg_graph_cfg.local_graphs is not None and agg_graph_cfg.local_graphs != "none":
                     use_graph_agg = True
 
+        if graph_metrics_only and not use_graph_agg:
+            raise ValueError(
+                "trainer.max_epochs=0 requires a causal model and "
+                "learning.subgraphs.aggregate_graph.local_graphs different from 'none'."
+            )
+
         if use_graph_agg:
             
             # build local graphs for all clients
@@ -732,13 +744,14 @@ def main(cfg: DictConfig) -> None:
             print(f"\033[94m[Timing] aggregate_graph_proposals (predrift): {t_agg_predrift:.3f}s\033[0m")
             timing_metrics["aggregate_graph_predrift"] = t_agg_predrift
 
-            maybe_plot_graph(graph_predrift, 'graph_predrift')
-            eval_res = _evaluate_graph_against_truth(
-                graph_predrift, true_graph, "aggregated pre-drift graph", key="graph_predrift"
-            )
-            if eval_res is not None:
-                k, metrics = eval_res
-                graph_eval_metrics[k] = metrics
+            if not graph_metrics_only:
+                maybe_plot_graph(graph_predrift, 'graph_predrift')
+                eval_res = _evaluate_graph_against_truth(
+                    graph_predrift, true_graph, "aggregated pre-drift graph", key="graph_predrift"
+                )
+                if eval_res is not None:
+                    k, metrics = eval_res
+                    graph_eval_metrics[k] = metrics
 
             # postdrift
             t_agg_postdrift = time.time()
@@ -754,17 +767,28 @@ def main(cfg: DictConfig) -> None:
             if cfg.learning.subgraphs.rnd_drift <= n_rounds:
                 timing_metrics["aggregate_graph_postdrift"] = t_agg_postdrift
 
-            maybe_plot_graph(graph_postdrift, 'graph_postdrift')
+            if not graph_metrics_only:
+                maybe_plot_graph(graph_postdrift, 'graph_postdrift')
             eval_res = _evaluate_graph_against_truth(
                 graph_postdrift, true_graph, "aggregated post-drift graph", key="graph_postdrift"
             )
             if eval_res is not None:
                 k, metrics = eval_res
-                graph_eval_metrics[k] = metrics
+                graph_eval_metrics[k] = (
+                    {"DiffPairs": metrics["DiffPairs"]}
+                    if graph_metrics_only else metrics
+                )
 
             if graph_eval_metrics:
                 with open(os.path.join("results", "graph_metrics.json"), "w") as fp:
                     json.dump(graph_eval_metrics, fp, indent=2)
+
+            if graph_metrics_only:
+                print(
+                    "\033[92mtrainer.max_epochs=0: saved graph DiffPairs metrics; "
+                    "skipping model instantiation, training, validation, and test.\033[0m"
+                )
+                return
 
             # update intervention policy for pre-drift clients
             interv_policy_predrift, ip_names_predrift = get_intervention_policy(graph_predrift, 
@@ -836,6 +860,7 @@ def main(cfg: DictConfig) -> None:
         global_param_keys = list(init_engine.model.state_dict().keys())
         drift_debug_printed = False
         t_start_training = time.time()
+
         for rnd in range(1, n_rounds + 1):
             print(f"\033[92m\n--> ROUND {rnd}/{n_rounds}\033[0m")
             client_params: List[Tuple[List[torch.Tensor], int]] = []
@@ -920,9 +945,11 @@ def main(cfg: DictConfig) -> None:
                 local_engine.model.to(cfg.device)
 
                 # freeze if required
+                _val_y = val_dataloaders[cid].dataset.y
+                _y_to_freeze = bool(len(_val_y) > 0 and _val_y[0] == -1)
                 maybe_freeze_parameters(
                     train_dataloader = train_dataloaders[cid],
-                    y_to_freeze = True if val_dataloaders[cid].dataset.y[0]==-1 else False, # to change if we can incorporate y in train_dataloaders[cid].dataset
+                    y_to_freeze = _y_to_freeze, # to change if we can incorporate y in train_dataloaders[cid].dataset
                     model=local_engine.model,
                     learning=cfg.learning.mode,
                     freezing=cfg.learning.settings.freezing,
@@ -1078,7 +1105,12 @@ def main(cfg: DictConfig) -> None:
             set_parameters(local_engine, global_params)
             local_engine.model.to(cfg.device)
             for cid in range(start_n_client, start_n_client + n_clients):
-                val_metrics = trainer.validate(local_engine, val_dataloaders[cid])[0]  #{'val/c/asia': 0.0, 'val/c/bronc': 0.0, 'val/c/either': 0.0, 'val/c/lung': 0.0, 'val/c/smoke': 0.0, 'val/c/tub': 0.0, 'val/c/xray': 0.0, 'val_loss': nan}
+                if len(val_dataloaders[cid].dataset) == 0:
+                    continue
+                _val_results = trainer.validate(local_engine, val_dataloaders[cid])
+                if not _val_results:
+                    continue
+                val_metrics = _val_results[0]  #{'val/c/asia': 0.0, 'val/c/bronc': 0.0, 'val/c/either': 0.0, 'val/c/lung': 0.0, 'val/c/smoke': 0.0, 'val/c/tub': 0.0, 'val/c/xray': 0.0, 'val_loss': nan}
                 val_losses.append(val_metrics['val_loss'])
                 val_accs.append(val_metrics.get('val/y/y_accuracy', np.nan))  
                  # log per-client val metrics
@@ -1259,7 +1291,7 @@ def main(cfg: DictConfig) -> None:
                     json.dump(timing_metrics, fp, indent=2)
         except Exception as e:
             print(f"\033[91m[WARN] Failed to save additional metrics: {e}\033[0m")
-    
+
         # Evaluate the model on the client datasets
         #test_losses, sizes = [], []
     #{'val/c/asia': 0.0, 'val/c/bronc': 0.0, 'val/c/either': 0.0, 'val/c/lung': 0.0, 'val/c/smoke': 0.0, 'val/c/tub': 0.0, 'val/c/xray': 0.0, 'val_loss': nan}

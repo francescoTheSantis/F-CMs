@@ -21,24 +21,7 @@ args = parser.parse_args()
 
 # List the paths containing the sweeps' results
 paths = [
-    # "outputs/multirun/2026-04-16/13-02-51_asia", #OK
-    # "outputs/multirun/2026-04-16/13-02-46_asia_s", #OK
-    # "outputs/multirun/2026-04-16/13-58-53_ins", #OK
-    # "outputs/multirun/2026-04-16/13-58-54_ins_s", #OK
-    # "outputs/multirun/2026-04-18/12-49-24_ha", #OK but skipped 1 cgm and 1 c2bm
-    # "outputs/multirun/2026-04-18/12-49-30_ha_s", #OK
-    # "outputs/multirun/2026-04-20/10-45-55_sachs", #OK
-    # "outputs/multirun/2026-04-20/10-46-16_sachs_s", #OK
-    # "outputs/multirun/2026-04-20/19-21-00_alarm", #OK
-    # "outputs/multirun/2026-04-20/19-21-16_alarm_s", #OK 
-    # "outputs/multirun/2026-04-21/11-11-20_siim", #OK but skipped seed 1 for all models/learning modes
-    # "outputs/multirun/2026-04-21/11-11-42_siim_s", #OK but skipped seed 1 for all models/learning modes
-    "outputs/multirun/2026-04-22/15-49-04_asia_bas", 
-    "outputs/multirun/2026-04-22/15-51-34_sachs_bas",
-    "outputs/multirun/2026-04-22/15-53-59_alarm_bas",
-    "outputs/multirun/2026-04-22/15-56-11_ins_bas",
-    "outputs/multirun/2026-04-22/15-59-30_hail_bas",
-    "outputs/multirun/2026-04-22/16-03-56_siim_bas",
+    "/home/admin/Federated-C2BM_rebuttal_r2/outputs/multirun/2026-07-28/08-09-04"
 ]
 
 # folder to save processed results
@@ -92,6 +75,7 @@ dataset_styles = {
     # 'nih_chest_images': {'name': 'NIH Chest X-Ray'},
     # 'cub_causal_struct': {'name': 'CUB_CAUSAL'},
     'siim_pneumothorax': {'name': 'SIIM-Pneumothorax'},
+    'cheXpert': {'name': 'CheXpert'},
     'cheXpert_multi': {'name': 'CheXpert-Multi'},
 }
 
@@ -106,10 +90,67 @@ custom_order = [
     # 'NIH Chest X-Ray',
     # 'CUB_CAUSAL',
     'SIIM-Pneumothorax',
+    'CheXpert',
     'CheXpert-Multi',
 ]
 
 apply_styles(performance, dataset_styles, model_styles, custom_order)
+
+
+########## Post-drift graph DiffPairs table ##########
+
+diffpairs_columns = [
+    "dataset",
+    "model",
+    "weight_mode",
+    "graph_alteration_prob",
+    "perc_clients_alterations",
+    "graph_postdrift_differing_pairs",
+]
+if all(column in performance.columns for column in diffpairs_columns):
+    diffpairs_data = performance[diffpairs_columns].dropna(
+        subset=["graph_postdrift_differing_pairs"]
+    )
+    if not diffpairs_data.empty:
+        group_columns = [
+            "dataset",
+            "model",
+            "weight_mode",
+            "graph_alteration_prob",
+            "perc_clients_alterations",
+        ]
+        diffpairs_stats = (
+            diffpairs_data
+            .groupby(group_columns, dropna=False)["graph_postdrift_differing_pairs"]
+            .agg(["mean", "std"])
+            .reset_index()
+        )
+        diffpairs_stats["std"] = diffpairs_stats["std"].fillna(0.0)
+        diffpairs_stats["DiffPairs"] = diffpairs_stats.apply(
+            lambda row: f"{row['mean']:.2f} ± {row['std']:.2f}",
+            axis=1,
+        )
+        diffpairs_table = diffpairs_stats[group_columns + ["DiffPairs"]]
+
+        print("\n\nPost-drift Graph DiffPairs Table:")
+        print("---------------------------------")
+        print(diffpairs_table.to_string(index=False))
+
+        diffpairs_result_file = os.path.join(
+            visualization_folder, "graph_postdrift_diffpairs.csv"
+        )
+        os.makedirs(os.path.dirname(diffpairs_result_file), exist_ok=True)
+        diffpairs_table.to_csv(diffpairs_result_file, index=False)
+    else:
+        print("[show_results] No post-drift DiffPairs results found.")
+else:
+    print("[show_results] DiffPairs columns unavailable; skipping graph table.")
+
+if "graph_only" in performance.columns:
+    performance = performance[~performance["graph_only"].fillna(False)].copy()
+    if performance.empty:
+        print("[show_results] Graph-only run: skipping accuracy, intervention, and drift plots.")
+        raise SystemExit(0)
 
 
 ########## Task & Concept Accuracy Plot ##########

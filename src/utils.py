@@ -846,30 +846,30 @@ def aggregate_graph_proposals(
                 if i >= j:  # Only consider i < j to avoid double counting
                     continue
                 
-                # Check presence of nodes in local graph
-                has_couple = (node_i in local_graph.index and node_j in local_graph.columns)
+                # A client votes only when it observes both variables and selects
+                # one unique binary relation. In particular, (1, 1) is uncertain
+                # and must not be interpreted as a no-edge vote.
+                observes_pair = (
+                    node_i in local_graph.index
+                    and node_j in local_graph.index
+                    and node_i in local_graph.columns
+                    and node_j in local_graph.columns
+                )
+                if not observes_pair:
+                    continue
 
-                
-                edge_i_j = 0
-                edge_j_i = 0
-                
-                if has_couple:
-                    edge_i_j = local_graph.loc[node_i, node_j]
-                    edge_j_i = local_graph.loc[node_j, node_i]
-                
-                # Count this client's vote for the pair (i,j)
-                if has_couple:
+                edge_i_j = local_graph.loc[node_i, node_j]
+                edge_j_i = local_graph.loc[node_j, node_i]
+                if edge_i_j == 1 and edge_j_i == 0:
                     total_weight_pairs[i, j] += client_weight
-                    
-                    if edge_i_j == 1 and edge_j_i == 0:
-                        # Vote for i->j
-                        weighted_votes_forward[i, j] += client_weight
-                    elif edge_j_i == 1 and edge_i_j == 0:
-                        # Vote for j->i
-                        weighted_votes_backward[i, j] += client_weight
-                    else:
-                        # Vote for no edge (both 0 or both 1 which is invalid, treat as no edge)
-                        weighted_votes_noedge[i, j] += client_weight
+                    weighted_votes_forward[i, j] += client_weight
+                elif edge_j_i == 1 and edge_i_j == 0:
+                    total_weight_pairs[i, j] += client_weight
+                    weighted_votes_backward[i, j] += client_weight
+                elif edge_i_j == 0 and edge_j_i == 0:
+                    total_weight_pairs[i, j] += client_weight
+                    weighted_votes_noedge[i, j] += client_weight
+                # Otherwise both entries are 1: uncertain, hence excluded.
                     
   
     # Initialize adjacency matrix based on weighted majority voting
@@ -897,14 +897,27 @@ def aggregate_graph_proposals(
             ])
             
             if tie_count > 1:
-                raise NotImplementedError("Conflict resolution for ties is not implemented.")
+                uncertain_edges.append((node_order[i], node_order[j]))
+                tied_relations = []
+                if vote_forward == max_vote:
+                    tied_relations.append("forward")
+                if vote_backward == max_vote:
+                    tied_relations.append("backward")
+                if vote_noedge == max_vote:
+                    tied_relations.append("none")
 
-            else:
-                # Use simple majority without conflict resolution
-                if vote_forward == max_vote and vote_forward > 0:
+                selected_relation = random.choice(tied_relations)
+                if selected_relation == "forward":
                     adj[i, j] = 1
-                elif vote_backward == max_vote and vote_backward > 0:
+                elif selected_relation == "backward":
                     adj[j, i] = 1
+                continue
+
+            # Use the unique weighted-majority relation.
+            if vote_forward == max_vote and vote_forward > 0:
+                adj[i, j] = 1
+            elif vote_backward == max_vote and vote_backward > 0:
+                adj[j, i] = 1
     
     # Handle cycles if DAG is required
     graph_df = pd.DataFrame(adj, index=node_order, columns=node_order, dtype=int)
@@ -914,13 +927,55 @@ def aggregate_graph_proposals(
     # Check that task node has at least one parent
     if task_node is not None:
         if task_node in graph_df.columns:
-            # Get incoming edges to task node (parents)
-            task_column = graph_df[task_node]
-            num_parents = task_column.sum()
-            
-            if num_parents == 0:
-                raise ValueError(f"Task node '{task_node}' has no parents in the aggregated graph. "
-                               f"At least one parent is required for the task node.")
+            task_idx = node_order.index(task_node)
+            if graph_df[task_node].sum() == 0:
+                candidates = []
+                for parent_idx, parent_node in enumerate(node_order):
+                    if parent_idx == task_idx:
+                        continue
+
+                    pair_i, pair_j = sorted((parent_idx, task_idx))
+                    weighted_support = (
+                        weighted_votes_forward[pair_i, pair_j]
+                        if parent_idx < task_idx
+                        else weighted_votes_backward[pair_i, pair_j]
+                    )
+                    raw_support = sum(
+                        1
+                        for local_graph in local_graphs
+                        if parent_node in local_graph.index
+                        and task_node in local_graph.index
+                        and parent_node in local_graph.columns
+                        and task_node in local_graph.columns
+                        and local_graph.loc[parent_node, task_node] == 1
+                        and local_graph.loc[task_node, parent_node] == 0
+                    )
+                    candidates.append(
+                        (float(weighted_support), raw_support, parent_idx, parent_node)
+                    )
+
+                max_weighted_support = max(c[0] for c in candidates)
+                if max_weighted_support > 0:
+                    best = [c for c in candidates if c[0] == max_weighted_support]
+                    fallback_kind = "weighted"
+                else:
+                    max_raw_support = max(c[1] for c in candidates)
+                    if max_raw_support == 0:
+                        raise ValueError(
+                            f"Task node '{task_node}' has no proposed incoming edge."
+                        )
+                    best = [c for c in candidates if c[1] == max_raw_support]
+                    fallback_kind = "unweighted"
+
+                _, _, parent_idx, parent_node = random.choice(best)
+                # The task is a sink; clearing outgoing task edges makes adding
+                # its selected parent cycle-safe.
+                graph_df.loc[task_node, :] = 0
+                graph_df.iloc[parent_idx, task_idx] = 1
+                print(
+                    f"[Graph aggregation] Task '{task_node}' had no parent; "
+                    f"selected '{parent_node}' using {fallback_kind} support."
+                )
 
     meta = {
         "weights": pd.DataFrame(total_weight_pairs, index=node_order, columns=node_order),
@@ -2570,6 +2625,123 @@ def plot_training_metrics(history: Dict[str, Any], save_dir: str = ".") -> None:
     plt.close('all')
     print(f"Training plots saved to {save_dir}/")
 
+def _compute_consensus_weights(local_graphs: list) -> list:
+    """
+    Compute consensus-based reliability weights for each client's local graph.
+
+    For every unordered pair {V_i, V_j} let K_ij be the set of clients that observe
+    both variables.  Client k's decision s_{k,ij} is the structural relation with the
+    highest binary vote: i->j, j->i, or no-edge.  If the decision is ambiguous (both
+    directed entries are 1), the pair is marked uncertain and excluded for that client.
+
+    Only pairs in P_k are considered:
+        - observed by >= 2 clients
+        - at least one client proposes a directed edge (avoids inflating agreement via
+          trivial "no edge" consensus in sparse graphs)
+
+    Agreement of client k on pair (i,j):
+        a_{k,ij} = (1 / |K_ij \\ {k}|) * sum_{ell in K_ij \\ {k}} 1[s_{ell,ij} == s_{k,ij}]
+
+    Reliability weight:
+        alpha_k = mean_{(i,j) in P_k} a_{k,ij}
+
+    If P_k is empty (no qualifying pairs), alpha_k = 1.0. A measured zero is
+    intentionally preserved because it denotes complete observed disagreement.
+
+    Parameters
+    ----------
+    local_graphs : list of pd.DataFrame
+        Binary adjacency matrices (one per client).
+
+    Returns
+    -------
+    list of float
+        One weight per client (higher = more consistent with peers).
+    """
+    n_clients = len(local_graphs)
+
+    # Collect the union of all node names
+    all_nodes_set: set = set()
+    for g in local_graphs:
+        all_nodes_set.update(g.index.tolist())
+        all_nodes_set.update(g.columns.tolist())
+    all_nodes = sorted(all_nodes_set)
+
+    # Generate all unordered pairs (i < j in sorted order)
+    pairs = [
+        (all_nodes[i], all_nodes[j])
+        for i in range(len(all_nodes))
+        for j in range(i + 1, len(all_nodes))
+    ]
+
+    def _decision(graph: "pd.DataFrame", ni: str, nj: str):
+        """
+        Return the structural decision for pair (ni, nj) in *graph*.
+        Returns 'forward' (ni->nj), 'backward' (nj->ni), 'none', or None (uncertain).
+        """
+        has_both = (
+            ni in graph.index and nj in graph.index
+            and ni in graph.columns and nj in graph.columns
+        )
+        if not has_both:
+            return None  # client does not observe this pair
+        eij = int(graph.loc[ni, nj])
+        eji = int(graph.loc[nj, ni])
+        if eij == 1 and eji == 0:
+            return "forward"
+        if eji == 1 and eij == 0:
+            return "backward"
+        if eij == 0 and eji == 0:
+            return "none"
+        return None  # both 1 → ambiguous, treat as uncertain
+
+    # Pre-compute decisions[k][pair] for every client and pair
+    decisions = [
+        {pair: _decision(local_graphs[k], pair[0], pair[1]) for pair in pairs}
+        for k in range(n_clients)
+    ]
+
+    weights: list = []
+    for k in range(n_clients):
+        agreement_scores: list = []
+
+        for pair in pairs:
+            ni, nj = pair
+
+            # K_ij: clients that have a valid (non-None) decision for this pair
+            K_ij = [ell for ell in range(n_clients) if decisions[ell][pair] is not None]
+
+            if len(K_ij) < 2:
+                continue  # need at least 2 clients
+
+            if k not in K_ij:
+                continue  # this client does not observe the pair
+
+            # At least one client in K_ij must propose a directed edge
+            any_edge = any(
+                decisions[ell][pair] in ("forward", "backward") for ell in K_ij
+            )
+            if not any_edge:
+                continue  # all clients agree on "no edge" – skip to avoid trivial inflation
+
+            decision_k = decisions[k][pair]
+            # decision_k should be non-None here (k in K_ij), but guard anyway
+            if decision_k is None:
+                continue
+
+            other = [ell for ell in K_ij if ell != k]
+            if not other:
+                continue
+
+            a_k_ij = sum(1 for ell in other if decisions[ell][pair] == decision_k) / len(other)
+            agreement_scores.append(a_k_ij)
+
+        alpha_k = float(np.mean(agreement_scores)) if agreement_scores else 1.0
+        weights.append(alpha_k)
+
+    return weights
+
+
 def build_local_graphs(client_ids, cfg, train_dataloaders, y_name, graph = None):
     
     global_graph = graph.copy() if graph is not None else None
@@ -2577,6 +2749,7 @@ def build_local_graphs(client_ids, cfg, train_dataloaders, y_name, graph = None)
     modality = cfg_local.learning.subgraphs.aggregate_graph.local_graphs
     perc_alterations = cfg_local.learning.subgraphs.aggregate_graph.perc_clients_alterations
     graph_alteration_prob = cfg_local.learning.subgraphs.aggregate_graph.graph_alteration_prob
+    weight_mode = OmegaConf.select(cfg_local, "learning.subgraphs.aggregate_graph.weight_mode", default="sample_count")
 
     # Determine which clients will have their graphs altered
     n_clients = len(client_ids)
@@ -2639,6 +2812,19 @@ def build_local_graphs(client_ids, cfg, train_dataloaders, y_name, graph = None)
             local_graphs.append(local_graph)
 
         local_weights.append(len(loader.dataset))
+
+    # Override weights with consensus-based reliability scores if requested
+    if weight_mode == "consensus":
+        print("\033[94m[build_local_graphs] Computing consensus-based client weights...\033[0m")
+        consensus_w = _compute_consensus_weights(local_graphs)
+        print(f"\033[94m[build_local_graphs] Consensus weights (raw): {consensus_w}\033[0m")
+        local_weights = consensus_w
+    elif weight_mode != "sample_count":
+        raise ValueError(
+            f"Unknown weight_mode '{weight_mode}'. "
+            "Supported values: 'sample_count' (default), 'consensus'."
+        )
+
     return local_graphs, local_weights
 
 def _print_concept_availability(tag, loader, cfg, cid):
