@@ -41,6 +41,10 @@ def get_dataset(dataset_cfg, device_cfg, seed):
     with open(c_info_path, 'wb') as f: 
         pickle.dump(dataset.c_info, f)
 
+    y_info_path = os.path.join(dataset_directory, "y_info.pkl")
+    with open(y_info_path, 'wb') as f:
+        pickle.dump(dataset.y_info, f)
+
     true_graph = dataset.load_ground_truth_graph()
     maybe_plot_graph(true_graph, 'true_graph')
     return dataset, true_graph, dataset_directory

@@ -5,34 +5,7 @@ MAX_JOBS=1
 
 commands=(
     #"python main.py --config-name=test_asia_int_s.yaml"
-    #"python main.py --config-name=test_alarm_data_preparation.yaml"
-    #"python main.py --config-name=test_asia_int.yaml"
-    #"python main.py --config-name=test_insurance_datapreparation.yaml"
-    #"python main.py --config-name=test_asia_int_s_2.yaml"
-    #"python main.py --config-name=test_asia_int_2.yaml" 
-    #"python main.py --config-name=rebuttal_r1_ablconcepts_asia_d_30.yaml"
-    #"python main.py --config-name=rebuttal_r1_ablconcepts_asia_s_30.yaml"
-    #"python main.py --config-name=rebuttal_r1_ablconcepts_asia_d_60.yaml"
-    #"python main.py --config-name=rebuttal_r1_ablconcepts_asia_s_60.yaml"
-    #"python main.py --config-name=rebuttal_r1_alarm_ablconcepts_drift_1.yaml"
-    #"python main.py --config-name=rebuttal_r1_alarm_ablconcepts_drift_2.yaml"
-    #"python main.py --config-name=rebuttal_r1_alarm_ablconcepts_drift_3.yaml"
-    #"python main.py --config-name=test_cheXpert_preparedata.yaml"
-    #"python main.py --config-name=test_alarm_data_preparation.yaml"
-    #"python main.py --config-name=test_chexpert_rnd_5.yaml"
-    #"python main.py --config-name=test_asia_rnd_100.yaml"
-    #"python main.py --config-name=test_asia_rnd_130.yaml"
-    #"python main.py --config-name=test_chexpert_rnd_10.yaml"
-    #"python main.py --config-name=test_chexpert_rnd_1000.yaml"
-    #"python main.py --config-name=test_chexpert_rnd_50.yaml"
-    #"python main.py --config-name=test_chexpert_rnd_100.yaml"
-    #"python main.py --config-name=test_chexpert_rnd_130.yaml"
-    #"python main.py --config-name=test_chexpert_rnd_1000.yaml"
-    #"python main.py --config-name=test_alarm_rnd_50.yaml"
-    #"python main.py --config-name=test_alarm_rnd_1000.yaml"
-    "python main.py --config-name=test_alarm_data_preparation.yaml"
-    "python main.py --config-name=test_alarm_swapping_premium_mild.yaml"
-    "python main.py --config-name=test_alarm_swapping_premium_severe.yaml"
+
 )
 
 running=0

@@ -1093,11 +1093,11 @@ def merge_adjacent_concept_categories(values, cardinality, swapping_factor, gene
         probability_per_pair = swapping_factor / 2
 
         if draw < probability_per_pair:
-            lower_category = 0       # unisce 0 e 1, mantenendo l'etichetta 1
+            lower_category = 0       
         elif draw < 2 * probability_per_pair:
-            lower_category = 1       # unisce 1 e 2, mantenendo l'etichetta 2
+            lower_category = 1       
         else:
-            lower_category = None    # nessuna fusione
+            lower_category = None    
 
     elif cardinality == 4:
         probability_per_pair = swapping_factor / 3

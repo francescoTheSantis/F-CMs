@@ -16,7 +16,7 @@ hydra:
       # blackbox, blackbox_multi, cbm_linear, cbm_mlp, cem, cgm, c2bm
       model: cem, c2bm #, blackbox_multi, cbm_mlp, cem, cgm #, blackbox_multi, cbm_mlp, cem, cbm_linear, cgm # c2bm, blackbox_multi, cbm_linear, cbm_mlp, cem, cgm
       learning: local_federated #, localized, centralized
-      learning.swapping_factor: 0.3,0.6,0.9
+      learning.swapping_factor: 1.0
 
 #combined_datasets:
 #  other_datasets: [fashionmnist]  # or [colormnist, fashionmnist]
@@ -51,8 +51,8 @@ learning:
      local_graphs: from_true_graph # from_true_graph / learned / none
      perc_clients_alterations: 0.1 # 1 per il test con dario e 2 clients
      graph_alteration_prob: 0.1 # 0.1 per il test con dario
-  swapping_clients: 0.3  # fraction of clients whose concept values get swapped
-  swapping_concepts: 0.3  # fraction of concepts to swap per affected client
+  swapping_clients: 0.6  # fraction of clients whose concept values get swapped
+  swapping_concepts: 0.6  # fraction of concepts to swap per affected client
   
 engine:
   intervention_prob: 0.8
