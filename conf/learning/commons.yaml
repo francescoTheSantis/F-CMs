@@ -1,0 +1,6 @@
+n_clients: 10
+annotation_assumption: 'task_included'
+subgraphs:
+  modality: 'connected_nodes'
+  concept_in_common: false
+  task_in_common: true

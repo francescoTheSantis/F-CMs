@@ -1,0 +1,25 @@
+defaults:
+  - commons
+  - _self_
+  
+mode: local_federated
+
+settings:
+  n_rounds: ${trainer.max_epochs}
+  local_epochs: 2
+  num_threads: 1
+  freezing: true
+  patience: ${trainer.patience}
+
+  mia: False
+  canary_fraction: 0.5
+  k_plus: 0.333333
+  k_min: 0.333333
+  delta: 1e-5
+  n_canaries: -1  # This will be set dynamically in utils.py based on the dataset size
+
+  sia: True
+  sia_samples_per_client: 30
+
+  dra: False
+  dra_samples_per_loader: 30

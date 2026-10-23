@@ -1,0 +1,46 @@
+defaults:
+  - default
+  - _self_
+
+# useless for the federated
+client_id: 1
+
+hydra:
+  mode: MULTIRUN
+  sweeper:
+    params:
+      seed: 1, 2, 3
+      # possible datsets are: asia, sachs, alarm, hailfinder, insurance
+      dataset: asia, sachs, alarm, insurance, hailfinder
+      # possible models are:
+      # blackbox, blackbox_multi, cbm_linear, cbm_mlp, cem, cgm, c2bm
+      model: blackbox, blackbox_multi, cbm_mlp, cem, c2bm
+      learning: local_federated
+      
+model:
+  hidden_size: 64
+
+dataset:
+  load_embeddings: false
+  load_graph: false
+  load_true_graph: true
+  batch_size: 64 # original 512, working with asia 16
+  autoencoder:
+   noise: 0.5  # for bndatasets only
+
+engine:
+  intervention_prob: 0.8
+  test_interv_noise: 0.8   # for bndatasets only
+  optim_kwargs:
+    lr: 0.001 # original 0.00075, working with asia and sachs 0.001
+
+trainer:
+  # logger: wandb
+  devices: [1]
+  max_epochs: 200 #200
+  patience: 10 #40
+
+rag:
+  verbose: false
+
+notes: test_run

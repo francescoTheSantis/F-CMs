@@ -1,0 +1,776 @@
+%%%%%%%% ICML 2026 EXAMPLE LATEX SUBMISSION FILE %%%%%%%%%%%%%%%%%
+
+\documentclass{article}
+
+% Recommended, but optional, packages for figures and better typesetting:
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage{subcaption}
+\usepackage{booktabs} % for professional tables
+
+% hyperref makes hyperlinks in the resulting PDF.
+% If your build breaks (sometimes temporarily if a hyperlink spans a page)
+% please comment out the following usepackage line and replace
+% \usepackage{icml2026} with \usepackage[nohyperref]{icml2026} above.
+\usepackage{hyperref}
+
+
+% Attempt to make hyperref and algorithmic work together better:
+\newcommand{\theHalgorithm}{\arabic{algorithm}}
+
+% Use the following line for the initial blind version submitted for review:
+% \usepackage{icml2026}
+
+% For preprint, use
+%\usepackage[preprint]{icml2026}
+
+% If accepted, instead use the following line for the camera-ready submission:
+\usepackage[accepted]{icml2026}
+
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{mathtools}
+\usepackage{amsthm}
+\usepackage{booktabs} % For \midrule, \toprule, etc.
+\usepackage[dvipsnames]{xcolor}
+\usepackage{pifont}     % for \ding symbols like \ding{56}
+\usepackage{comment}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning, fit}
+\usepackage{tabularx} % in the preamble
+\usetikzlibrary{calc} % for coordinate calculations
+\usepackage{xcolor}
+
+\definecolor{MutedBlue}{RGB}{0,90,190}
+\definecolor{MutedRed}{RGB}{200,30,0}
+
+% if you use cleveref..
+\usepackage[capitalize,noabbrev]{cleveref}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% THEOREMS
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{assumption}[theorem]{Assumption}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+
+\newcommand{\Prob}{\mathrm{P}}
+\newcommand{\mypar}[1]{\noindent\textbf{#1}}
+\definecolor{darkblue}{rgb}{0.1, 0.1, 0.65}
+\newcommand{\blue}[1]{\textcolor{darkblue}{#1}}
+
+
+% Todonotes is useful during development; simply uncomment the next line
+%    and comment out the line below the next line to turn off comments
+%\usepackage[disable,textsize=tiny]{todonotes}
+\usepackage[textsize=tiny]{todonotes}
+
+% The \icmltitle you define below is probably too long as a header.
+% Therefore, a short form for the running title is supplied here:
+\icmltitlerunning{Mixture of Concept Bottleneck Experts}
+
+\begin{document}
+
+\twocolumn[
+  \icmltitle{Mixture of Concept Bottleneck Experts}
+
+  % It is OKAY to include author information, even for blind submissions: the
+  % style file will automatically remove it for you unless you've provided
+  % the [accepted] option to the icml2026 package.
+
+  % List of affiliations: The first argument should be a (short) identifier you
+  % will use later to specify author affiliations Academic affiliations
+  % should list Department, University, City, Region, Country Industry
+  % affiliations should list Company, City, Region, Country
+
+  % You can specify symbols, otherwise they are numbered in order. Ideally, you
+  % should not use this facility. Affiliations will be numbered in order of
+  % appearance and this is the preferred way.
+  \icmlsetsymbol{equal}{*}
+
+  \begin{icmlauthorlist}
+    \icmlauthor{Francesco De Santis}{polito}
+    \icmlauthor{Gabriele Ciravegna}{ispic}
+    \icmlauthor{Giovanni De Felice}{usi}
+    \icmlauthor{Arianna Casanova}{unili}
+    \icmlauthor{Francesco Giannini}{unipi}
+    \icmlauthor{Michelangelo Diligenti}{unisi}
+    \icmlauthor{Johannes Schneider}{unili}
+    \icmlauthor{Danilo Giordano}{polito}
+    \icmlauthor{Mateo Espinosa Zarlenga}{ox}
+    \icmlauthor{Pietro Barbiero}{ibm}
+  \end{icmlauthorlist}
+
+
+  \icmlaffiliation{polito}{Polytechnic of Torino}
+  \icmlaffiliation{usi}{USI}
+  %\icmlaffiliation{centai}{CENTAI Institute}
+  \icmlaffiliation{ispic}{Intesa Sanpaolo Innovation Center}
+  \icmlaffiliation{ibm}{IBM Research}
+  \icmlaffiliation{ox}{University of Oxford}
+  \icmlaffiliation{unipi}{University of Pisa}
+  \icmlaffiliation{unili}{University of Liechtenstein}
+  \icmlaffiliation{unisi}{University of Siena}
+
+  \icmlcorrespondingauthor{Francesco De Santis}{francesco.desantis@polito.it}
+
+  % You may provide any keywords that you find helpful for describing your
+  % paper; these are used to populate the "keywords" metadata in the PDF but
+  % will not be shown in the document
+  \icmlkeywords{Machine Learning, ICML, Concept Bottleneck Models, Interpretability, XAI}
+
+  \vskip 0.3in
+]
+
+\newcommand{\xmark}{\textcolor{red}{\ding{56}}} % ✗ in red
+\newcommand{\vmark}{\textcolor{ForestGreen}{\ding{52}}} % ✓ in green
+\definecolor{Teal}{rgb}{0.0, 0.5, 0.5}
+\newcommand{\fds}[1]{\textcolor{Red}{FraDS: #1}}
+\newcommand{\gc}[1]{\textcolor{Orange}{Gab: #1}}
+\newcommand{\gio}[1]{\textcolor{Purple}{Gio: #1}}
+\newcommand{\ari}[1]{\textcolor{Blue}{Ari: #1}}
+\newcommand{\pb}[1]{\textcolor{ForestGreen}{Pie: #1}}
+\newcommand{\mez}[1]{\textcolor{Magenta}{Mat: #1}}
+\newcommand{\md}[1]{\textcolor{Teal}{MD: #1}}
+\newcommand{\fg}[1]{\textcolor{Brown}{FraG: #1}}
+\newcommand{\js}[1]{\textcolor{Cyan}{Sc: #1}}
+
+\theoremstyle{definition}
+
+% class of models
+\newcommand{\class}{Mixture of Concept Bottleneck Experts}
+\newcommand{\classacro}{M-CBEs}
+\newcommand{\classacrosingular}{M-CBE}
+% Linear method
+\newcommand{\linear}{Linear M-CBE}
+\newcommand{\linearacro}{Lin-M-CBE}
+
+% Symbolic method
+\newcommand{\symbolic}{Symbolic M-CBE}
+\newcommand{\symbolicacro}{Sym-M-CBE}
+
+% model using prior expressions
+\newcommand{\prior}{Prior-M-CBE}
+% model using mlp as expression
+\newcommand{\mlp}{MLP-M-CBE}
+% kan model
+\newcommand{\kan}{Kan-M-CBE}
+
+\newcommand{\ai}{accuracy-interpretability}
+
+\newcommand{\modelname}{Mechanistic CBMs}
+
+% old
+%\newcommand{\acro}{M-CBMs}
+%\newcommand{\acrosingular}{M-CBM}
+%\newcommand{\ie}{interpretability-vs-expressivity trade-off}
+
+\newcommand{\mc}{\mathcal }
+
+% this must go after the closing bracket ] following \twocolumn[ ...
+
+% This command actually creates the footnote in the first column listing the
+% affiliations and the copyright notice. The command takes one argument, which
+% is text to display at the start of the footnote. The \icmlEqualContribution
+% command is standard text for equal contribution. Remove it (just {}) if you
+% do not need this facility.
+
+% Use ONE of the following lines. DO NOT remove the command.
+% If you have no special notice, KEEP empty braces:
+\printAffiliationsAndNotice{}  % no special notice (required even if empty)
+% Or, if applicable, use the standard equal contribution text:
+% \printAffiliationsAndNotice{\icmlEqualContribution}
+
+
+% TODO INTRO:
+% number of experts
+% citazione del mondo LLM: citare llm expert veccho + nuovp.
+
+\begin{abstract}
+
+Concept Bottleneck Models (CBMs) promote interpretability by grounding predictions in human-understandable concepts. However, existing CBMs typically constrain their task predictor to a single expression whose functional form is set a priori, limiting both predictive accuracy and adaptability to diverse user needs. We propose \class{} (\classacro{}), a framework that generalizes existing CBMs along two dimensions: the number of expressions, referred to as experts, employed by the task predictor to map concepts to the task, and the functional form each expression takes, thus exposing an underexplored region of this design space. We investigate this region by instantiating two novel models: \linear{}, which learns a finite set of linear expressions, and \symbolic{}, which leverages symbolic regression to discover expert functions from data subject to user-specified operator vocabularies. Empirical evaluation demonstrates that varying the number of expressions and their functional form provides a robust framework for navigating the accuracy-interpretability trade-off.
+
+
+\end{abstract}
+
+\section{Introduction}
+
+In recent years, Deep Learning (DL) models have achieved remarkable performance across a wide range of tasks, yet their growing complexity and opacity~\citep{rudin2019stop,colombini2025mathematical} prevent their adoption in high-stakes domains where transparency is essential~\citep{gdpr2017,duran2021afraid,act2024eu}. 
+Concept Bottleneck Models (CBMs)~\citep{koh2020concept} have emerged as a promising approach to align models with human reasoning. CBMs decompose prediction into two stages: a \emph{concept encoder} that maps raw inputs to human-interpretable variables, called \emph{concepts} (e.g., ``\textit{round}'', ``\textit{red}''), and a \emph{task predictor} that maps these concepts into the task variable. 
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[trim=1cm
+    0.5cm 0.6cm 0.5cm, clip, width=1\linewidth]{figures/visual_abstract.pdf}
+    \caption{\textbf{Left}: The plane defined by functional form and number of experts. Different CBMs occupy distinct positions in this space, with regions highlighted in different colors. We indicate our newly proposed instantiations in red. \textbf{Right}: The red curve denotes human constraints, and the green curve denotes task constraints. The region bounded by the two curves represents the set of feasible models.}
+    \label{fig:viz_abstract}
+\end{figure}
+
+While substantial effort has been devoted to defining and learning meaningful concepts ~\citep{oikarinen2023label,dominici2025causal,de2025causally}, little attention has been paid to the design of the task predictor. 
+Indeed, most CBMs constrain the task predictor to provide predictions through a unique, global function~\citep{koh2020concept,vandenhirtz2024stochastic,ciravegna2023logic,marconato2022glancenets}, restricting expressiveness and often failing to capture the true concept-to-task generating process~\citep{mahinpei2021promises,zarlenga2022concept}. 
+A promising way to improve the expressiveness of task predictors is to use multiple specialized functions, as in Mixture of Experts (MoE) models~\citep{jacobs1991adaptive,shazeer2017outrageously}. 
+
+Traditionally, MoE models have been designed to route inputs to experts so as to maximize predictive performance under computational constraints~\citep{lepikhin2020gshard,artetxe2021efficient}. However, in an interpretability-oriented framework, this objective naturally translates into jointly optimizing predictive performance and interpretability.
+However, transposing MoEs to this new setting requires more than just expert routing; it demands explicit control over the \emph{functional form} of the experts, the class of expressions mapping concepts to targets (e.g., Boolean or linear). Since interpretability is inherently user-dependent~\citep{lipton2018mythos,miller2019explanation,gkintoni2025challenging}, fixing the functional form \emph{a priori} constrains interpretability and may unnecessarily sacrifice predictive performance, as we show in Section~\ref{sec:exp_sec}. Consequently, enabling flexible control over both the functional form and the number of experts is central for achieving the optimal \ai{} trade-off.
+
+
+\mypar{Contributions.}
+We introduce a new framework, \class{} (\classacro), which generalizes CBMs by modeling the task predictor as a mixture of specialized functions (experts) with controllable functional forms. We adopt expression trees as our modeling abstraction, for a rigorous yet flexible definition of each function. 
+We show that several existing concept-based models are special cases of our framework, while a substantial area remains unexplored (Figure~\ref{fig:viz_abstract}, Left). To address this, we propose the \linear{} model, which generalizes the linear CBM to multiple experts. 
+Beyond instantiating specific functions, \classacro{} can be specified with the set of operators the user understands  (e.g., $+, \times, \exp$).
+We demonstrate this capability with the \symbolic{} model, which leverages symbolic regression to automatically discover the optimal expert functions using user-defined operators. 
+
+We empirically validate \classacro{} on classification and regression benchmarks, showing: i) navigating the design space allows finding the intersection of human and task constraints (Figure~\ref{fig:viz_abstract}, Right), matching black-box accuracy without compromising interpretability; ii) algebraic forms ensure scalability outperforming rigid Boolean logic in high-dimensional concept spaces (up to + 65\%); iii) multiple experts compensate for incomplete concept bottlenecks or varying task logic; iv) finite discrete expressions ensure global interpretability allowing user inspection; and v) while \classacro{} adapts to any functional form requested, \symbolic{} also supports post-hoc adaptation, allowing users to modify operator vocabularies without retraining. The code to reproduce all experiments is available at \href{https://github.com/francescoTheSantis/Mixture-of-CB-Experts}{\nolinkurl{Mixture-of-CB-Experts}}.
+
+
+
+\section{Preliminaries}
+\mypar{Concept Bottleneck Models.} 
+Let $X$ and $Y$ be random variables representing the input and task, taking values in spaces $\mathcal{X}$ and $\mathcal{Y}$, respectively. We denote realizations by $x \in \mathcal{X}$ and $y \in \mathcal{Y}$.
+CBMs~\citep{koh2020concept} introduce intermediate and human-interpretable concepts $C$ mapping into $\mathcal{C}\subseteq{\mathbb{R}^k}$, that mediates the relationship between $X$ and $Y$. The model is trained to approximate the joint distribution:
+\begin{equation}
+    p(y, c \mid x) = p(y \mid c)\, p(c \mid x),
+    \label{eq:cbm_factorization}
+\end{equation}
+where $c\in\mc{C}$, $p(c \mid x)$ is the \emph{concept encoder} that predicts concepts from raw inputs, and $p(y \mid c)$ is the \emph{task predictor} that maps concepts to the task variable. This allows us to obtain a task predictor whose input is \emph{semantically transparent}, as it operates solely on the interpretable concepts.
+
+To increase the predictive accuracy of the task predictor, some concept-based models (e.g.,~\citet{zarlenga2022concept,ismail2023concept}) leak extra information from $x$, achieving higher accuracy at the
+expense of semantic transparency. 
+
+\mypar{Symbolic Regression.} Given a dataset $\{(x^{(i)}, y^{(i)})\}_{i=1}^N$, Symbolic Regression (SR) searches the space of mathematical expressions to find the function $f: \mathcal{X} \rightarrow \mathcal{Y}$ closest to the true data-generating process ~\citep{schmidt2009distilling}.  SR methods  employ heuristic search strategies, e.g. genetic algorithms, to evolve populations of expressions within a multi-objective optimization framework that jointly minimizes prediction error and expression complexity~\citep{langley1979rediscovering, langley1981bacon, koza1994genetic,cranmer2023interpretable}.
+
+\section{\class}
+\label{sec:class_of_models}
+
+This section presents \class~(\classacro), a class of models that improves upon existing CBMs in two ways: (i) by allowing flexible, user-aligned functional forms, ensuring that the task predictor can only retrieve functions the user is capable of understanding while tailoring expressiveness to the problem at hand; and (ii) by operating over ensembles of expressions (experts), enabling the task predictor to match accuracy through multiple simpler expressions or to handle inputs requiring distinct reasoning patterns.
+
+\classacro{} represents each task-predictor function as an expression tree and models it as a random variable $T$ (with realization $t$) conditioned on the input $x$. Conditioning $T$ on $X$ allows the model to dynamically select different expressions across inputs, maintaining high accuracy while preserving semantic transparency~\citep{barbiero2023,de2025,de2025causally}. Indeed, the task prediction depends on the expression tree  $t$, which operates solely on the predicted concepts $c$. This formulation induces the probabilistic graphical model (PGM) illustrated in Figure~\ref{fig:concept_exp_tree} (Left). While our framework shares structural similarities with the PGM proposed by~\citet{debot2024interpretable}, we do not restrict $T$ to represent a Boolean expression; instead, we generalize the model to accommodate arbitrary functional forms. Accordingly, the joint distribution factorizes as:
+\begin{equation}
+    p(x, c, t, y) = p(x)\, p(c \mid x)\, p(t \mid x)\, p(y \mid c, t)
+    \label{eq:joint_factorization}
+\end{equation}
+The first factor, $p(c \mid x)$, represents the \emph{concept encoder}, while $p(t \mid x)$ defines the distribution over expression trees. The final term, $p(y \mid c, t)$, is the \emph{task predictor}, which specifies the target distribution conditioned on both predicted concepts and the selected tree. 
+
+\subsection{Expression Trees in \classacro{}.}
+\label{sec:our_exp_tree}
+
+An expression tree~\citep{Mitchell1991} is a directed acyclic graph (DAG) representing a mathematical expression (Figure~\ref{fig:concept_exp_tree}, right). We define a class $\mc{T}$ of expression trees w.r.t.\ a vocabulary of operations $\mc{W}$ via admissible edge configurations $\mc{E}$ on a set of nodes $\mc{N} = \mc{V} \cup \mc{O} \cup \mc{P}$, with:
+\\
+\noindent (i) $\mc{V}$: set of \emph{\textcolor{ForestGreen}{input nodes}} instantiated with specific \textbf{concepts}.\\
+\noindent (ii)
+$\mc{O}$: set of \emph{\textcolor{MutedBlue}{operator nodes}} (e.g., $\{\times, \sin, \exp\}$) from $\mathcal{W}$.\\
+\noindent (iii )$\mc{P}$: set of \emph{\textcolor{MutedRed}{parameter nodes}} representing real numbers.
+% \end{itemize}
+
+Let $O, E, \Theta$, and $V$ denote the random variables for operators, edges, parameters, and placeholder inputs, taking values in $\mc{O}, \mc{E}, \mc{P}$, and $\mc{V}$, respectively. An expression tree is defined by the tuple $t = (o, e, \theta, v)$, where $o, e, \theta$ and $v$ represent specific realizations of these random variables. Notably, we decouple the input variable $V$ from the concepts $C$ predicted by an encoder, allowing the expression tree to selectively learn and operate on a subset of relevant concepts. We denote the space of functions representable by trees in class $\mc{T}$ as $\mc{H}(\mc{T})$. Given concept values $c$ assigned to the input variables, evaluating the tree yields a prediction $y=f_t(c)$, where $f_t$ represents the function defined by the expression tree $t$.
+
+%\mypar{Linear Functions.} 
+For instance, the set of linear functions can be represented by selecting $\mc{W} = \{+,\times\}$, where $+$ is the binary summation and $\times$ the binary multiplication, and having $O$ and $E$ only allowing a multiplication layer between pairs of input and parameter nodes, and a unique summation on top (cf. \Cref{fig:concept_exp_tree}). Each selection of $\mc{P}$ defines a different linear function. We refer to the set of expression trees whose represented functions are linear as $\mc{T}_{\text{lin}}$.
+
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[trim=0.5cm 0.3cm 0.3cm 0.3cm, clip, width=\linewidth]{figures/pgm_exp_tree.pdf}
+    \caption{\textbf{Left:} PGM representing the assumed generative process for \classacro{}. \textbf{Right:} Example of an expression tree ($T$) representing a linear expression. \textcolor{ForestGreen}{Green} nodes are placeholder variables $V$, \textcolor{MutedBlue}{blue} nodes are operators $O$ drawn from the vocabulary $\mathcal{W}$, and \textcolor{MutedRed}{red} nodes are learnable parameters $\Theta$. At inference time, each placeholder $v_i$ is instantiated with the corresponding predicted concept $c_i$.}
+    \label{fig:concept_exp_tree}
+\end{figure}
+
+\begin{figure*}[t]
+    \centering
+\includegraphics[trim=0.0cm
+    0.0cm 0cm 0.0cm, clip, width=1\linewidth]{figures/method-compressed.pdf}
+    \caption{ Overview of \classacro{}. The selector identifies the appropriate expression based on the input. Simultaneously, the Concept Encoder predicts the underlying physical concepts ($x_0, v_0, \alpha, t$) from the raw input. The architecture accommodates different user mental models by allowing functional forms to be represented as either parametric linear equations or symbolic expressions restricted to interpretable operators. The final output $y$ is obtained by executing the selected function with the predicted concepts as arguments.}
+    \label{fig:symbolic_pipeline}
+\end{figure*}
+
+\subsection{Design Choices in \classacro}
+\label{sec:design_plane}
+
+\mypar{Functional form.} Navigation through the functional form dimension is realized by performing different inferences over the generative process. For instance, the user can fix $o$, $e$, and $v$, reducing the problem to a parametric linear function where only the parameters $\theta$ are learned from data. Alternatively, one can fix only part of the structure by setting a sub-expression (specific $o$ and $e$ for a subset of nodes) while learning the remaining operators, edges and subset of concepts $v$ from data, enabling the incorporation of domain knowledge without fully specifying the expression tree. Finally, one can provide only the vocabulary $\mc{W}$ of interpretable operators while learning the entire expression tree $t$ from data, subject to the constraint that all operators belong to $\mc{W}$. Each scenario is naturally accommodated through appropriate conditioning and marginalization within our probabilistic framework.
+
+\mypar{Number of Experts.} Models based on a finite set of prototypes are often considered a strict requirement to ensure global interpretability~\cite{rudin2019stop,rudin2022interpretable}. Indeed, in the proposed framework we consider a finite set of expression trees, allowing the task predictor to be inspected and validated by the user in finite time — along with other important properties discussed in Appendix~\ref{app:global_interpretability}. To realize this, we model $p(t\mid x)$ as a mixture obtained by marginalizing over $M$ discrete indices:
+\begin{equation}
+    p(t \mid x) = \sum_{m=1}^{M} p(t\mid m)\, p(m\mid x),
+    \label{eq:tree_mixture}
+\end{equation}
+
+where $p(m\mid x)$, called the \emph{selector},  is a learnable distribution that routes each input $x$ to a specific index $m$~\citep{debot2024interpretable}. Given Eq.~\ref{eq:tree_mixture}, multiple expression trees $t$ might be associated to the same index $m$, ultimately reducing the interpretability of the final prediction~\citep{breiman2001random,meinshausen2010node}. Therefore, to ensure that each index $m$ corresponds to a unique expression tree, $p(t \mid m)$ is modeled as a degenerate distribution that places all its probability mass on the $m$-th expression tree, $\delta_t(t_m)$. Hence, given a realization $m$, there is exactly one expression tree $t_m$ associated with it.
+By varying $M$, we adjust the number of experts, balancing  expressiveness (obtained with high values of $M$) and interpretability (obtained by lower values of $M$).
+Under the above assumptions \cref{eq:joint_factorization} can be rewritten in conditional form as:
+\begin{align}
+    %\small
+    p(y,c\mid x) = p(c\mid x) \sum_{m=1}^M p(m\mid x)\, p(y\mid c,t_m) \ .
+    \label{eq:memory_factorization}
+\end{align}
+
+\mypar{Expressiveness-Interpretability trade-off. }
+The flexibility on the functional form allows  \classacrosingular{s} to connect with different variants of the universal approximation theorem \cite{cybenko1989approximation}. 
+Moreover, $\mc{T}$ and the number of experts $M$ play a crucial role in calibrating the trade-off between the expressiveness and the complexity of the functions represented by any expert, as we demonstrate in the following.
+
+\begin{proposition}
+\label{theo:uni_approximation}
+(1) Let $\mc{T}'=\{t\in\mc{T}:o\in\{+,\times,\sigma\}\}$, being $\sigma$ a unary non-polynomial operation. Then for each continuous function $f$ and $\epsilon>0$ there exists an \classacrosingular{} $f^*$ over $\mc{T}'$ with $M=1$ experts, such that $\|f-f^*\|_\infty<\epsilon$.
+%%%%%%
+(2) 
+Let $\mc{T}_{\text{lin}}$ denote the set of expression trees whose represented functions are linear. 
+For each continuous function $f$ and $\epsilon>0$, there exists a certain $M>0$ and  an \classacrosingular{} $f^*$  over $\mc{T}_{\text{lin}}$ with $M$ experts, such that  $\|f-f^*\|_\infty<\epsilon$. 
+\end{proposition}
+See Appendix~\ref{app:uni_approximation} for a proof.
+
+Clearly, to approximate a function with only linear experts, $M$ cannot be fixed a priori, but any function may require a different one. Next, we highlight how the approximation error can be bound given a set of polynomial experts.
+
+\begin{proposition}
+\label{theo:bound}
+Let $\Omega \subseteq [a, b]^n$ be a convex finite domain, $f:\Omega \rightarrow \mathbb{R}$ a function of class $C^\infty$, and $\Omega$ be partitioned into $M$ non-overlapping subspaces with equal measure, being $I_m$ the indicator function of the $m$-th subspace.
+Given the space of expressions trees computing polynomial functions $\mathcal{T}_p$, there exists a selection of polynomials $f_t \in \mathcal{H}(\mathcal{T}_p), t=1, \dots, M$ with maximum degree $k$, such that their composition $f^\star(x) = \displaystyle\sum_{t=1}^{M} f_t(x) \cdot I_t(x)$ approximates $f$ with error:
+\[
+Error_{\text{max}} = ||f - f^\star||_\infty \le C \cdot \frac{(b-a)^{k+1}}{{M}^{\frac{k+1}{n}}} \cdot ||f^{(k+1)}|| \ ,
+\]
+where $C$ is a fixed constant, $||f^{(k+1)}||$ is a Sobolev norm measuring how regular the target function is in terms of its $k+1$-th partial derivative.
+\end{proposition}
+See Appendix~\ref{app:approximation_proof} for a proof.
+
+Interestingly, \Cref{theo:bound} provides an estimation of the approximation errors for the general case of polynomial experts. For instance, assuming the experts are linear $(k=1)$ the approximation error is bound by
+$C \cdot \frac{(b-a)^{2}}{{M}^{\frac{2}{n}}} \cdot ||f^{(2)}||$.
+This means that the error is low if the target function $f$ is close to linear, e.g., $||f^{(2)}|| \approx 0$, and that it can be arbitrarily lowered by increasing the number of experts $M$.
+%
+We also notice that \Cref{theo:bound} assumes experts are selected from equal-measure subspaces, which corresponds to having each expert assigned to similar portion of the data in the empirical distribution. Even if beyond the scope of this paper, this property could be enforced via an appropriate regularization mechanism in the selector.
+
+\section{Instantiations of \classacrosingular}
+\label{sec:new_models}
+\classacro{} encompass a broad spectrum of CBM architectures, including existing concept-based methods that can be interpreted as particular choices within our unified framework. For a mapping between specific choices in our framework and existing CBMs, we refer to Appendix~\ref{app:existing_cbms}. 
+
+Beyond capturing existing models, \classacro{} enables the creation of CBMs that explore previously unconsidered configurations. 
+These instances model $p(t \mid x)$ as a mixture of expression trees (\cref{eq:tree_mixture}), ensuring predictive accuracy while maintaining global interpretability. 
+For instance, models employing linear functions with more than one expert have yet to be defined; at the same time, functional forms different from linear or Boolean expressions have yet to be considered. To fill this gap, we first propose a model fixing the \emph{structure} ($o$, $e$, $v$) of the expression tree to a parametric linear form over all concepts, while learning only its parameters. Second, we consider a scenario in which the user aims to discover the structure of an expression while retaining control by restricting the vocabulary to a set of known, admissible operators $\mc{W}$. Under this setting, the functional form is fully determined by the chosen operators $\mc{W}$. Figure~\ref{fig:symbolic_pipeline} illustrates both instantiations.
+
+\mypar{\linear{} (\linearacro).}
+Our first instantiation extends the standard CBM~\citep{koh2020concept} to accommodate a mixture of specialized linear expressions while retaining its original functional form. \linearacro{} restricts the expression tree to a linear structure but permits selection from a finite set of $M$ distinct linear expressions. 
+The conditional distribution in \cref{{eq:memory_factorization}} can be rewritten as:
+\begin{equation}
+\small
+\label{eq:lin_factorization}
+    %p(y,c \mid x, o, e) =
+    p(y,c \mid x) =
+    p(c\mid x)\,\sum_{m=1}^{M} p(m\mid x)\, p(y\mid c, o_l,e_l,v,\theta_m) \ ,    
+\end{equation}
+where $o_l$ and $e_l$ are fixed realizations defining a linear structure, and $v$ instantiates the function over all concepts. For example, in a regression task $p(y \mid c, o_l,e_l,v,\theta_m) = \mathcal{N}\big(y; f_{(o_l,e_l,v)}(c, \theta_m), \sigma^2\big)$, where $\sigma^2$ represents the variance, $f_{(o_l,e_l,v)}(c; \theta_m) = w_m^\top c + b_m$ and $\theta_m = (w_m, b_m)$. The model selects among these $M$ expressions based on $p(m \mid x)$, allowing flexibility in how concepts are combined to make predictions while maintaining a linear structure.
+
+\mypar{\symbolic{} (\symbolicacro{}).} Beyond specifying the expression tree, a user can constrain the expression by only defining the vocabulary $\mathcal{W}$ of interpretable operators. The conditional distribution retains the structure of \cref{eq:memory_factorization}.
+Learning the expression trees can be approached in two ways. The first uses differentiable symbolic regression methods~\citep{martius2016extrapolation} to learn each $t_m$ end-to-end with the selector and concept encoder. The second approach distills symbolic expressions from placeholder differentiable black-boxes~\citep{alaa2019demystifying,cranmer2020discovering,liu2025kan}. Specifically, the latter approach decouples learning into three stages: (i) jointly training the concept encoder, selector, and placeholder black-box predictors (e.g., MLPs), allowing the data to be partitioned into $M$ mechanism-specific subsets; (ii) applying symbolic regression to each subset to recover the corresponding expression tree $t_m$; and (iii) replacing the placeholders with the extracted symbolic expressions and fine-tuning the expression parameters $\theta_m$ end-to-end with the concept encoder and selector. This decoupled approach enables user adaptability: after initial training, different users can specify their own requirements to obtain expression trees aligned with their domain expertise, without retraining the encoder or selector. For this reason, we adopt this second strategy. To distill symbolic expressions from the placeholder black-box predictors, we use the multi-population evolutionary algorithm provided by PySR~\citep{cranmer2023interpretable}. The operator set $\mathcal{W}$ is entirely determined by the user; to maintain interpretability, users can eliminate operators deemed inappropriate for specific concepts (e.g., removing $\exp$ if an exponential relationship is implausible for the domain at hand). In our experiments, we use $\mathcal{W} = \{+, -, \times\}$ for classification tasks and $\mathcal{W} = \{+, -, \times, \sin, \cos, \exp, \log, \tan, \tanh, x^2, x^3, \sqrt{\cdot},\, (\cdot)^{-1}\}$ for regression tasks. An ablation comparing with KANs~\citep{liu2025kan} is provided in Appendix~\ref{app:sr_ablation}.
+
+\subsection{Training Objective}
+Let $\mathcal{D} = \{(x^{(i)}, c^{(i)}, y^{(i)})\}_{i=1}^N$ be a concept-annotated dataset of size $N$. Following the factorization in \cref{eq:lin_factorization}, we train \linearacro{} by maximizing the corresponding log-likelihood:
+\begin{eqnarray*}
+    \mathcal{L} &=& \sum_{i=1}^N \Big[
+        \log p(c^{(i)} \mid x^{(i)}) + \\
+        &+& \log \sum_{m=1}^M p(m \mid x^{(i)})\, p(y^{(i)} \mid c^{(i)}, o, e, v, \theta_m) 
+    \Big],
+\end{eqnarray*}
+where the first term corresponds to the concept prediction loss, and the second term corresponds to the task prediction loss. As previously noted, $o=o_l \text{ and }e=e_l$ specifies a linear structure. 
+For \symbolicacro{}, the first training stage jointly learns the concept encoder, selector, and a set of placeholder predictors by optimizing the same objective, where the predictors are implemented as MLPs with different operator and edge configurations $(o,e)$. In the second stage, the training data assigned to each expression is used to recover a symbolic expression tree via symbolic regression. In the final stage, the learned symbolic expressions replace the placeholders, and their parameters, $\theta_m$, are fine-tuned end-to-end with the concept encoder and selector. Further training details are provided in Appendix~\ref{app:training}.
+
+\section{Experimental Results}
+\label{sec:exp_sec}
+
+\begin{figure*}[ht]
+    \centering
+    \includegraphics[width=1\textwidth]{figures/pareto_front.pdf}
+    \caption{The x-axis denotes model complexity, measured as the total number of nodes across all expression trees used by the task predictor. The y-axis reports MAE for regression tasks (top) and error rate for classification tasks (bottom). For multi-expert models, multiple points are shown corresponding to different numbers of experts (1–5). The dotted curve indicates the Pareto frontier, while the shaded region marks dominated solutions. \prior{} is excluded from the Pareto frontier as it relies on ground-truth expressions. CEM and BlackBox are plotted as horizontal lines, since their label-predictor complexity is undefined (they do not operate on concept predictions). Error bars indicate $95\%$ confidence intervals over five random seeds.
+    }
+    \label{fig:pareto_front}
+\end{figure*}
+
+We empirically validate the benefits of exploring the design plane. Our experiments assess four key properties of interpretable models: (i) \textbf{Accuracy vs.\ Interpretability} (\Cref{sec:exp_acc}): whether changing both functional form and number of experts improves the \ai{} trade-off; 
+(ii) \textbf{Intervenability} (\Cref{sec:exp_int}): whether mechanism-aligned predictors respond more effectively to human interventions on concepts; 
+and (iii) \textbf{Adaptability} (\Cref{sec:exp_adapt}): whether the proposed framework can accommodate user-specified constraints without retraining the full model.  
+
+
+\mypar{Datasets.}
+We evaluate on four synthetic and five real-world datasets, covering classification and regression with both categorical and continuous concepts. \emph{Synthetic}: \textbf{MNIST-Arithm}, a modified version of MNIST~\citep{lecun2010} with digit pairs separated by an arithmetic operator to predict; \textbf{dSprites-Exp}, a variant of dSprites~\citep{dsprites17} where the target is an exponential function of the object’s coordinates; and \textbf{Pendulum}~\citep{yang2020}, a dataset of pendulum images with the task of predicting the pendulum's x-axis position. 
+For real-world data, we use \textbf{MAWPS}~\citep{koncel2016mawps}, a dataset containing simple math problems in a textual form, \textbf{AWA2}~\citep{xian2017}, a classification dataset with 50 animal classes and 85 concepts, and \textbf{CUB-200}~\citep{he2019fine}, a bird classification dataset with 200 species and 112 concepts. Following~\citet{zarlenga2025avoiding}, we also evaluate incomplete versions of these datasets to study performance under missing concepts. Finally, to assess settings without concept annotations, we apply the label-free method of~\citet{oikarinen2023label} to \textbf{CIFAR-10}~\citep{krizhevsky2009}. Full dataset details are provided in Appendix~\ref{app:datasets}.
+
+\mypar{Baselines.}
+For our evaluation, we compare several concept-based architectures: \textbf{CBM}~\citep{koh2020concept} (equivalent to \linear{} with $M{=}1$); \textbf{CEM}~\citep{zarlenga2022concept} with a non-interpretable predictor; locally interpretable \textbf{DCR}~\citep{barbiero2023} and \textbf{LICEM}~\citep{de2025}; and globally interpretable \textbf{CMR}~\citep{debot2024interpretable}. Logic-based baselines (CMR, DCR) are omitted in regression tasks because they assume discrete concepts and outputs. We also include a standard \textbf{Blackbox} DNN as an accuracy upper-bound, and we evaluate two other instances of our framework: \textbf{\prior{}}, which uses ground-truth expressions when available, and \textbf{\mlp{}}, which uses a mixture of MLPs. CMR and \classacro{} are tested with 1-5 experts. Additional details in Appendix~\ref{app:implementation_details}.
+
+
+\mypar{Metrics.}
+For \emph{accuracy}, we evaluate performance using the Mean Absolute Error (MAE) for regression and error rate ($100{-}\text{Accuracy}\%$) for classification. 
+For \emph{interpretability}, guided by the principle that brevity facilitates human comprehension \citep{miller1956magical, narayanan2018humans}, and assuming individual symbols are interpretable by the user, we assess complexity via standard metrics from symbolic regression: node count, maximum depth, and the number of variables and operators \citep{smits2005pareto}. Figure~\ref{fig:pareto_front} represents complexity as the total number of nodes in the expression tree. Further results and additional details are reported in Appendix~\ref{app:complexity}. When the number of expression trees is higher than one, the complexities are summed across all expression trees. For \emph{intervenability}, we follow~\citet{koh2020concept,zarlenga2022concept} and measure task error as a function of the fraction of concepts replaced with ground-truth values. 
+To evaluate the \emph{adaptability} of the proposed model, we compare the performance of \symbolicacro{} when employing different operator sets.
+We note that, beyond model complexity, complementary proxies of interpretability can be derived from: intervenability, as it reveals how much and how well the task predictor leverages concepts~\citep{koh2020concept}; and from adaptability, since a compact expression tree is not sufficient for interpretability if it contains symbols that are unintelligible to the user.
+% 
+
+\subsection{Accuracy vs. Interpretability}
+\label{sec:exp_acc}
+
+We evaluate whether changing the number of functions, along with their complexity, improves the \ai{} trade-off. Figure~\ref{fig:pareto_front} summarizes our findings, while detailed results, including those for other complexity metrics and concept accuracy, are provided in Appendix~\ref{app:detailed_results}.
+
+\mypar{Exploring \classacro{} design space allows finding the best trade-offs (Figure~\ref{fig:pareto_front}).}
+Our results demonstrate that no single architectural choice is universally superior; rather, only exploring the \classacro{} design space guarantees finding the most accurate and interpretable model for the task at hand. According to the dataset, we find that relaxing functional constraints with \symbolic{} enables the discovery of compact, high-accuracy expressions that dominate the Pareto frontier, particularly in regression tasks (e.g., on Pendulum). Conversely, for high-dimensional classification tasks, instantiating the framework with \linear{} experts provides a robust balance, offering competitive accuracy with low complexity. This highlights that explicit control over the number of experts and functional form is key for finding the best \ai{} trade-off.
+
+\mypar{Scalability challenges for Boolean functional forms (Figure~\ref{fig:pareto_front}, bottom).} 
+Instantiations employing Boolean expressions (e.g., recovering CMR, DCR) perform well when concept sets are small (e.g., AWA2-Incomplete and CUB200-Incomplete), offering good accuracy and very low complexity. However, they degrade substantially as the number of concepts increases, reaching near-$100\%$ error on CUB200 and CIFAR10 where concepts exceed 100. We attribute this to the rigid nature of purely conjunctive rules: when predictions rely on formulas like $c_1 \land \ldots \land c_k$, a single mispredicted concept invalidates the entire rule. This failure mode becomes increasingly critical as $K$ grows (see Appendix~\ref{app:concept_size_ablation} for an ablation on concept size). In contrast, instantiations like \linearacro{} and \symbolicacro{} maintain robust performance across all concept set sizes. Moreover, these flexible forms naturally adapt to continuous concepts and targets, as demonstrated in the regression tasks.
+
+\mypar{Black-box task predictors are generally Pareto-dominated (Figure~\ref{fig:pareto_front}).} Employing unconstrained MLPs as task predictors is rarely optimal. \classacro{} instantiations with structured functional forms (e.g., \linearacro{}, \symbolicacro{}) frequently match or exceed MLP accuracy on both classification and regression tasks, while being substantially less complex. Consequently, black-box predictors sporadically appear on the Pareto front, demonstrating that over-parameterized predictors are suboptimal when the functional form aligns well with the underlying task.
+
+\mypar{Multiple experts compensate for incomplete concepts and variable task logic (Figure~\ref{fig:pareto_front}).} Finally, we analyze the dimension of expert cardinality. We find that increasing the number of experts ($M>1$) is critical in two key scenarios: first, when concept sets are incomplete (AWA2-Incomplete, CUB200-Incomplete), selecting among multiple functions recovers predictive performance; second, when the concept-to-task relationship varies across the input space (e.g., MAWPS), multiple experts allow the model to adapt to local semantic contexts. This highlights that exploring expert cardinality is also vital to ensure model performance.
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=0.9\columnwidth]{figures/has_underparts_color_brown_Crested_Auklet.pdf}
+    \caption{Weight distributions for the concept ``has underparts color brown'' toward class ``Crested Auklet'', comparing LICEM (blue) and \linearacro{} (orange, memory size $= 2$).}
+    \label{fig:verifiability}
+\end{figure}
+
+\mypar{Finite number of experts allows global interpretability. (Figure~\ref{fig:verifiability})} Models generating input-dependent parameters (LICEM and DCR) produce a distinct expression tree for each sample. This implies an \emph{infinite} model complexity, as each input corresponds to a new expression tree, making global inspection of the model infeasible. In contrast, \classacro{} learn from a \emph{finite} set of expressions, which can be fully inspected and verified in finite time.
+As shown in Figure~\ref{fig:verifiability},  LICEM produces a continuous distribution of weights around zero, reflecting its unconstrained and non-discrete parameterization. By contrast, when constrained to two parameter sets, the \linear{} model selects between two discrete weight configurations, resulting in a decision process that a human can directly inspect.
+
+
+\subsection{Intervenability}
+\label{sec:exp_int}
+
+\input{tables/ted_main}
+
+CBMs allow humans to interact with the model by modifying the concept predictions. We evaluate the model's response to interventions by replacing predicted concepts with ground-truth values and by progressively increasing the fraction of corrected concepts. To simulate realistic conditions, we mildly perturb the input as $\tilde{x} = 0.9\cdot x + 0.1\cdot \epsilon$, where $\epsilon \sim \mathcal{N}(0, I)$. We further assess the responsiveness to interventions under stronger perturbations in Appendix~\ref{app:noisy_interventions}.
+
+
+\begin{figure*}[ht]
+    \centering
+    \includegraphics[width=1\textwidth]{figures/pareto_int.pdf}
+    \caption{Effect of interventions on model performance. MAE (top) and error rate (bottom) as a function of intervention probability $p_{\text{int}}$. Shaded areas show $95\%$ confidence intervals over 5 seeds. For models with multiple experts, we use the configuration at the \emph{Pareto knee}. The knee point is identified using the maximum distance to chord method: the point with maximum perpendicular distance to the line connecting the best complexity and best accuracy extremes, representing the optimal trade-off.}
+    \label{fig:interventions}
+\end{figure*}
+
+\mypar{Symbolic predictors align and discover true mechanisms (Figure~\ref{fig:interventions}, top, Table~\ref{tab:ted_main}).}
+On regression tasks, \symbolicacro{} displays near-ideal intervenability: the MAE drops sharply to zero as the intervention probability approaches unity ($p_{\text{int}} \to 1$). This intervention response stems from \symbolicacro{}'s ability to recover expressions that closely approximate the true concept-to-task function, (e.g., on Pendulum, $8.00 * \text{sin}(\theta) + 10.00$). Table~\ref{tab:ted_main} confirms that \symbolicacro{} consistently achieves the lowest Tree Edit Distance (TED) to ground-truth expressions. The expressions learned by the methods are reported in Appendix~\ref{app:explanations}.
+
+\mypar{Mixture of linear predictors excel on classification (Figure~\ref{fig:interventions}, bottom).}
+On classification tasks, \linearacro{} emerges as the globally interpretable model most responsive to interventions. This is likely because the concept-to-task mapping in these datasets is closer to a mixture of linear functions, making \linearacro{} more aligned with the true underlying mapping and therefore more responsive to corrections.
+
+\subsection{Adaptability}
+\label{sec:exp_adapt}
+
+\input{tables/adaptability}
+While \classacro{} allow users to instantiate any interpretable functional form (e.g., linear, polynomial), \symbolic{} also supports post-hoc customization \emph{without retraining}.
+Once the encoder and expert selector are trained, users can modify their operator vocabulary $\mathcal{W}$ to generate tailored symbolic expressions on demand. This enables switching from expert-level trigonometric forms to student-level simple polynomials, using the same learned representations.  
+
+\mypar{\symbolicacro{} allows post-hoc adaptation to different users (Table~\ref{tab:adaptability}).}
+We demonstrate this by distilling functions for three simulated user profiles: $\mathcal{W}=\{+,-\}$ (Small); $\mathcal{W}=\{+,-,\times\}$ (Medium); and an extended set including transcendental operators (Complete). The results for \emph{Pendulum} and \emph{MAWPS} confirm that \symbolicacro{} adapts to these diverse constraints, demonstrating greater flexibility than other models. 
+
+\section{Related works}
+
+Concept-based XAI (C-XAI)~\citep{kim2018interpretability,poeta2023concept} emerged to address the limited interpretability of standard attribution methods for laypeople~\citep{rudin2019stop, kim2023help}, by interpreting intermediate model representations via human-understandable concepts. Concept Bottleneck Models (CBMs)~\citep{koh2020concept} extend this approach by explicitly training models to align with human semantics. Still, CBMs face significant issues: reduced accuracy compared to unrestricted models~\citep{debot2024interpretable}, limited global interpretability~\citep{barbiero2023,de2025}, and costly concept annotations~\citep{oikarinen2023label,debole2025if}. Our work addresses the first two trade-offs by combining multiple task predictors with user-defined functional forms to balance accuracy and transparency, while experimentally demonstrating compatibility with label-efficient methods~\citep{oikarinen2023label}.
+
+The works most closely related to ours route samples to mixtures of interpretable predictors~\citep{pradier2021preferential,ismailinterpretable,debot2024interpretable}. However, all of these works fix the functional form a priori. Additionally, \citet{pradier2021preferential} and \citet{ismailinterpretable} apply predictors directly to raw inputs rather than concepts, while \citet{debot2024interpretable} restricts predictors to Boolean expressions over concepts. \classacro{} extends this line of work by exposing the functional form as a flexible, user-controlled design choice, rather than committing to a fixed form at design time.
+
+In the context of XAI, Symbolic Regression (SR) is increasingly used to replace opaque models with explicit mathematical expressions~\citep{dong2025recent}. These efforts fall into two categories: intrinsic approaches that embed symbolic operators directly into architectures~\citep{sahoo2018learning, biggio2021neural}, and post-hoc approaches that approximate black-boxes with symbolic surrogates~\citep{alaa2019demystifying, bendinelli2023controllable}. While these methods effectively balance approximation error and expression complexity~\citep{langley1979rediscovering, langley1981bacon, koza1994genetic}, they operate over tabular data rather than raw inputs such as images.
+
+% they fundamentally assume a \emph{single global equation}, failing to capture context-dependent reasoning. Moreover, to our knowledge, no prior work adapts SR to operate on top of concept-based representations.
+
+\section{Conclusion}
+
+We introduced \classacro{}, a unified framework that generalizes CBMs by enabling control over two key dimensions of the task predictor: the number of experts and their functional form. Our framework subsumes existing concept-based methods while exposing a largely unexplored two-dimensional space, enabling two novel instantiations: \linear{} and \symbolic{}. Empirical results demonstrate that navigating this space is essential for optimal accuracy-interpretability trade-offs: algebraic forms outperform Boolean logic in high-dimensional spaces (up to +65\% accuracy), multiple experts compensate for incomplete concepts, and \symbolicacro{} recovers ground-truth expressions with superior intervention responsiveness. \classacro{} establishes a principled approach for developing interpretable models that adapt to both task requirements and diverse user needs.
+
+\mypar{Limitations.} While individual expert functions in \classacro{} are interpretable by design, the selector network $p(m \mid x)$ that routes inputs to experts operates as a black-box, limiting transparency about when and why a particular expert is selected. Additionally, \symbolicacro{} relies on heuristic search methods that are computationally intensive, particularly for large operator vocabularies or high-dimensional concept spaces. Finally, the number of experts $M$ must be specified as a hyperparameter, requiring users to balance expressiveness and interpretability through model selection.
+
+
+
+\section*{Acknowledgements}
+% If a paper is accepted, the final camera-ready version can (and usually should)
+% include acknowledgements.  Such acknowledgements should be placed at the end of the section, in an unnumbered section that does not count towards the paper
+% page limit. Typically, this will include thanks to reviewers who gave useful
+% comments, to colleagues who contributed to the ideas, and to funding agencies
+% and corporate sponsors that provided financial support.
+
+%%%% PIETRO B.
+PB acknowledges support from the SNSF, through the project ``IMAGINE'' (grant ID 224226), from the Hasler Foundation, through the project ``Towards Scalable Multimodal Causal Deep Learning'' (grant ID 2024-05-15-70), 
+and from the Research Foundation Flanders, through the project ``Relational Concept-Based Models'' (grant ID G033625N). 
+%%%% GIOVANNI D.F.
+GDF acknowledges support by the Swiss National Science Foundation (SNSF) through the grant 205121\_197242 for the project “PROSELF: Semi-automated Self-Tracking Systems to Improve Personal Productivity”, and by the Hasler Foundation through the project ``Towards Scalable Multimodal Causal Deep Learning'' (grant ID 2024-05-15-70). 
+%%%% ARIANNA C., JOHANNES S.
+AC and JS acknowledge support from FFF of the University of Liechtenstein grant lbs\_25\_13.
+%%%% FRANCESCO G.
+FG has been supported by the European Union – Horizon 2020 Program under the scheme “INFRAIA-01-2018-2019 – Integrating Activities for Advanced Communities”, Grant Agreement n.871042, “SoBigData++: European Integrated Infrastructure for Social Mining and Big Data Analytics” (http://www.sobigdata.eu).
+This work has been partially supported by the Italian Project Fondo Italiano per la Scienza FIS00001966 ``MIMOSA'', and by the European Community Horizon~2020 programme under the funding schemes G.A. 101120763 ``TANGO'.
+%%%% MICHELANGELO D.
+This work has also been supported by the EU Framework Program for Research and Innovation Horizon under the Grant Agreement No 101073307 (MSCA-DN LeMuR).
+
+
+
+\section*{Impact Statement}
+% The broader societal implications of this work are largely positive. By providing a framework that allows users to align a model’s reasoning with their own mental models, \classacro{} democratizes access to AI across diverse expertise levels—ranging from domain experts requiring sophisticated mathematical expressions to non-specialists who prefer simpler formulations. From an ethical standpoint, our framework addresses a critical gap in responsible AI deployment. By ensuring that model predictions are grounded in inspectable, finite sets of interpretable expressions.
+
+The societal implications of this work are predominantly positive. By enabling users to align model predictive mechanisms with computations they may interpret, \classacro{} democratizes access to AI across varying expertise levels, from domain specialists utilizing complex mathematical expressions to lay users favoring simplified formulations. Ethically, our framework advances responsible AI deployment by ensuring predictions remain grounded in finite, inspectable sets of interpretable expressions.
+
+
+
+
+
+% In the unusual situation where you want a paper to appear in the
+% references without citing it in the main text, use \nocite
+%\nocite{langley00}
+
+\bibliography{main}
+\bibliographystyle{icml2026}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% APPENDIX
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\newpage
+\appendix
+\onecolumn
+
+\section{Global Interpretability}
+\label{app:global_interpretability}
+
+In this appendix, we highlight the properties that \classacro{} gain by committing to a finite, fixed set of expressions, and contrast them with models whose task predictor has an interpretable form but generates a distinct expression for each input — which translates to an infinite memory of expressions in our framework — such as \textbf{LICEM}~\citep{de2025} and \textbf{DCR}~\citep{barbiero2023}. This precludes any form of global model inspection. While \classacro{} also provide instance-level explanations by routing each input to one of $M$ fixed expressions, they additionally preserve \emph{global} interpretability through their finite expression set. This distinction leads to four concrete advantages.
+
+\begin{itemize}
+    \item \textbf{Reasoning shortcuts}. Since models with an infinite expression memory admit many valid explanations per sample, they are not identifiable. This means they can discover equations that are mathematically valid but semantically meaningless. \classacro{}, by contrast, learn a fixed set of expressions that can be collectively evaluated for semantic consistency.
+    \item \textbf{Verifiability}. The decision mechanisms of models with an infinite expression memory cannot be inspected without a specific input sample~\citep{debot2024interpretable}. In contrast, \classacro{}' finite set of expressions allows a human to verify all reasoning paths before deployment.
+    \item \textbf{Knowledge Integration}. Models with an infinite expression memory lack a selector over a discrete expression set: since a different expression is produced for each input, there is no fixed formula that users can define or inject a priori. \classacro{} address this directly, as demonstrated by \prior{}, which can incorporate user-defined expressions into the fixed expression set.
+    \item \textbf{Robustness}. An infinite expression memory increases the amount of information leaking from the input and bypassing the concept encoder. This results in worse intervention responsiveness under Out-Of-Distribution (OOD) inputs. We empirically validate this property in a dedicated experiment shown in Appendix~\ref{app:noisy_interventions}.
+\end{itemize}
+
+
+\section{Proof of Proposition~\ref{theo:uni_approximation}}
+\label{app:uni_approximation}
+\begin{proof}
+    The claims are straight consequences of existing universal approximation theorems. In particular, $(1)$ follows from the fact that an MLP (that can be represented as an expression tree with $+$ and $\times$ among operation nodes and $\sigma$ activation functions) with a single hidden layer is a universal approximator if and only if its activation function is non-polynomial \citep{leshno1993multilayer}. On the other hand, $(2)$ is a consequence of the classic result in mathematical analysis that any continuous function can be approximated by a piecewise linear function     \cite{schumaker2007spline}.
+\end{proof}
+
+
+\section{Proof of Proposition~\ref{theo:bound}}
+\label{app:approximation_proof}
+\begin{proof}
+The result follows from standard approximation bounds developed for numerical finite methods and interpolation methods with multivariate polynomials \citep{mossner2009error}. The bound is generally defined to be:
+\begin{equation}
+||f - f^\star||_\infty \le C \cdot h^{k+1} \cdot ||f^{(k+1)}|| \ ,
+\label{eq:spline_bound} 
+\end{equation}
+where $h$ is the grid size over the input dimensions. By assuming a regular spacing so that the $M$ splines cover $M$ subspaces with equal measure over $[a,b]^n$, we can determine $h = \frac{b-a}{\sqrt[n]{M}}$. Replacing the estimation of the value of $h$ into \Cref{eq:spline_bound} completes the proof.
+
+%where $h$ is the grid size over the input dimensions. By assuming a regular spacing so that the $n_M$ splines cover $n_M$ subspaces with equal measure, we can determine $h = \frac{b-a}{\sqrt[N]{n_M}}$. Replacing the estimation of the value of $h$ into \Cref{eq:spline_bound} completes the proof.
+\end{proof}
+
+
+\section{Out-of-the-box \classacro{}}
+\label{app:existing_cbms}
+
+\classacrosingular{} characterize a wide range of CBMs architectures, including existing concept-based methods that correspond to specific inference choices within our generalized framework. In all methods discussed below, the operator set $o$ and expression tree structure $e$ are fixed by the model class; we therefore condition on $(o,e)$ and focus on how the parameters $\theta$ are modeled.
+
+\mypar{CBM.} The original CBM~\citep{koh2020concept} fixes the expression tree to a linear function over concepts and learns a single set of global parameters shared across all samples. In our framework, this corresponds to approximating \(p(\theta \mid x)\) with a delta distribution that places all its mass on a single, input-independent parameter value $\theta$, where \((o,e)\) define a linear expression (i.e., \(o = \{+, \times\}\) with appropriate edges).  We omit $v$ to simplify the notation since all available concepts are used. The conditional distribution induced by the CBM can be expressed as $p(y, c \mid x; o, e) = p(y \mid c; o, e, \theta)\, p(c \mid x)$. For a regression task, the task predictor is modeled as a Gaussian: $p(y \mid c; o, e, \theta) = \mathcal{N}\big(y; f_{(o,e)}(c;\theta), \sigma^2\big)$, where the mean is a linear function of the concepts: $f_{(o,e)}(c;\theta) = \theta^\top c + b$, with $\theta = w$ representing the weights on the concepts, $b$ the bias term, and $\sigma^2$ denoting the variance of the Gaussian noise.
+
+\textbf{CMR. } CMR~\citep{debot2024interpretable} instead constrains the expression tree to Boolean formulas and restricts
+parameters to a finite discrete set. Each concept can appear positively $(+1)$, negated $(-1)$, or be
+absent $(0)$ from the formula. CMR learns a memory of $M$ parameter configurations
+$\{\theta_1, \ldots, \theta_M\}$ and models $p(\theta \mid x) = \sum_{m=1}^{M} p(m\mid x)\, p(\theta\mid m)$.
+
+In the limiting case $M \to \infty$, the distribution is no longer discretized but instead produces sample-specific parameters. Both \textbf{LICEM}~\citep{de2025} and \textbf{DCR}~\citep{barbiero2023} correspond to this limiting case, differing only in the structure enforced by $(o,e)$. LICEM constrains the expression tree's structure to represent a linear equation, while DCR constrains it to represent a Boolean expression.
+
+
+\section{Symbolic predictor ablation}
+\label{app:sr_ablation}
+
+We compare \symbolicacro{} with \kan{}, an alternative instantiation that uses Kolmogorov-Arnold Networks~\citep{liu2025kan}.
+
+\input{tables/sr_ablation_mae}
+
+Table~\ref{tab:ablation_task_performance} shows that both models achieve comparable MAE, with \kan{} obtaining slightly lower errors on all datasets except MNIST-Arith.
+
+\begin{figure*}[ht]
+    \centering
+    \includegraphics[width=0.9\textwidth]{figures/sr_ablation_int.pdf}
+    \caption{Effect of interventions on model performance. MAE as a function of intervention probability $p_{\text{int}}$. Shaded areas show $95\%$ confidence intervals over 5 seeds.}
+    \label{fig:ar_ablation_interventions}
+\end{figure*}
+
+Figure~\ref{fig:ar_ablation_interventions} demonstrates that \kan{} exhibits strong responsiveness to interventions, achieving MAE values at $p_{\text{int}}\approx 1.0$ comparable to \prior{}.
+
+\input{tables/complexity_sr_ablation}
+
+However, despite achieving competitive predictive accuracy and intervention responsiveness, \kan{} produces expressions with substantially higher complexity (Table~\ref{tab:sr_ablation_complexity_node_count}) compared to other methods. This stems from the KAN training procedure: the model first learns network activations (splines), then applies sparsification, and finally adds affine parameters to each spline (e.g., transforming an activation $g(x)$ into $a \cdot g(b\cdot x + c) + d$), resulting in considerably larger expressions. The compactness of expressions extracted from KAN networks depends critically on multiple hyperparameters, including entropy regularization for sparsification, pruning strength, and the symbolic substitution process that replaces activations with mathematical symbols. This increased complexity makes \kan{} more difficult to tune in practice while yielding inferior performance in terms of expression size and, ultimately, alignment with ground-truth mechanisms, as shown in Table~\ref{tab:sr_ablation_ted_metrics}. We emphasize that this does not imply KANs are inherently inferior; rather, we found them more challenging to train and tune compared to the genetic programming-based symbolic regression approach implemented in PySR~\citep{cranmer2023interpretable}.
+
+\input{tables/ted_sr_ablation}
+
+
+\section{Training details}
+\label{app:training}
+
+All model variants share a common training framework implemented in PyTorch Lightning. We use \textit{AdamW} as the optimizer with dataset-specific learning rates (ranging from $10^{-4}$ to $10^{-1}$) and a \textit{ReduceLROnPlateau} scheduler that decreases the learning rate by a factor of $\gamma = 0.5$ when the validation loss fails to improve for $25$ consecutive epochs. Early stopping is applied with a patience of $50$. Training proceeds for a maximum of $600$ epochs. To minimize leakage~\citep {marconato2022glancenets}, all the concept-based methodologies are trained in a disjoint manner~\citep{koh2020concept}: the task predictor uses ground-truth concept labels during training. In addition to that, when the concepts are binary, we apply hard thresholding.
+
+The total loss is a weighted combination of concept and task prediction losses:
+\begin{equation}
+    \mathcal{L}_{\text{total}} = \lambda_c \mathcal{L}_{\text{concept}} + \lambda_y \mathcal{L}_{\text{task}}
+\end{equation}
+where $\lambda_c = 1.0$ and $\lambda_y = 0.1$ across all models. For classification tasks, we use binary cross-entropy for concept prediction and cross-entropy for task prediction. For regression tasks, mean squared error is employed for both. In all methodologies, sparsity is promoted by tuning the respective hyperparameters in order to maximize the \ai{} trade-off. Nevertheless, for the methodologies we proposed, we followed a multi-stage pipeline.
+
+For all the methodologies using a mixture of experts, we employ a selector implemented as an MLP with output size equal to the number of experts. During training, we employ a \textit{Gumbel-Softmax}~\citep{jang2016categorical} to sample an index according to the distribution produced by the selector $p(m \mid x)$ for the specific sample. We gradually reduce the temperature $\tau$ of the \textit{Gumbel-Softmax} from $\tau=2$ to $\tau=0.05$ following a cosine decay. This schedule ensures that the selection distribution becomes increasingly peaked as training progresses. At test time, a single expression index $m$ is sampled from $p(m \mid x)$, and the prediction is computed using only the selected expression.
+
+\mypar{\linearacro{}. }
+Training proceeds in two stages. The first stage trains all components (concept encoder, selector, and linear memory) end-to-end with $\ell_1$ regularization on weight matrices ($\lambda_1 = 10^{-5}$) and $\ell_2$ regularization on bias terms. Upon initial convergence, the second stage applies hard thresholding: weights with absolute values below $\tau = 10^{-6}$ are set to zero and frozen. The remaining non-zero parameters are then fine-tuned for up to 600 additional epochs, promoting sparse, more interpretable linear equations.
+
+\mypar{\symbolicacro{}.}
+Training follows a three-stage pipeline. In the first stage, the complete model is trained with black-box neural network predictors (MLPs) using the shared training configuration. Upon convergence, the symbolic regression phase begins: predictions are collected from the trained model on the entire training set. PySR then discovers symbolic equations for each placeholder blackbox independently, fitting equations using the subset of data points selected by the selector for that specific placeholder blackbox. The symbolic regression search uses the following configuration: 40 populations of size 60 evolve for 100 iterations with 380 cycles per iteration. For classification tasks, operators are restricted to $\{+, -, \times\}$ with maximum equation complexity $5 \times k$ (where $k$ is the number of concepts). For regression tasks, the operator set is expanded to include $\{\sin, \cos, \exp, \log, \tan, \tanh, x^2, x^3, \sqrt{x}, x^{-1}\}$ with maximum complexity 40. Discovered equations are substituted into the model as symbolic predictor modules with trainable numeric parameters (exponents remain fixed).
+
+In the third stage, the entire model is fine-tuned with the symbolic predictor for up to 600 epochs. To account for the reduced parameter count, the learning rate is increased by a factor of $5$ relative to the initial training phase. Only the numeric parameters in the symbolic equations and the upstream networks (concept encoder and selector) are trainable; the structural form of the equations remains fixed.
+
+\section{Implementation details}
+\label{app:implementation_details}
+\subsection{Baselines}
+\label{app:baselines}
+
+This section provides implementation details for all methods. We implemented all concept-based baselines using the PyC library~\citep{pycteam2025concept}. To ensure computational efficiency, all models operate on pre-computed embeddings rather than raw inputs. We employ pre-trained backbones: \texttt{facebook/dinov2-base} for high-resolution images, \texttt{ResNet18} for low-resolution images, and \texttt{google/flan-t5-large} for textual data. Unless otherwise specified, all networks use LeakyReLU activations with a default hidden dimensionality of $64$ (adjusted per dataset). Complete hyperparameter configurations are provided in the supplementary materials.
+
+The \textbf{Blackbox} baseline is a single hidden-layer MLP mapping embeddings directly to task predictions. \textbf{CBM}~\citep{koh2020concept} follows the standard architecture with a linear task predictor. \textbf{CEM}~\citep{zarlenga2022concept} uses concept embeddings of dimensionality $16$ with an MLP as task predictor. \textbf{DCR}~\citep{barbiero2023}, \textbf{LICEM}~\citep{de2025}, and \textbf{CMR}~\citep{debot2024interpretable} all use concept embeddings of dimensionality $16$. Both CEM and LICEM are adapted to continuous concepts following~\citet{ismail2024concept}. Specifically, in order to preserve responsiveness to interventions, the concept embedding $\hat{c}$ of each concept is multiplied by the respective concept prediction.
+
+
+\subsection{Proposed methods}
+\label{app:proposed_methods}
+
+We implement three variants of our \classacro{} framework, each employing different symbolic reasoning strategies over learned concept representations.
+
+All variants share a common architecture consisting of: (i) a concept encoder, (ii) a selector network that produces a probability distribution over $M$ expressions (experts), and (iii) a task predictor that executes the selected expression. The models differ primarily in how the expressions are obtained and parameterized.
+
+\mypar{\prior{}.}
+Symbolic equations are provided as SymPy expressions. Each memory slot contains a fixed equation $f_m$ whose structure and parameters remain frozen. 
+
+
+\mypar{\mlp}
+In \mlp{} each expert is an MLP with $1$ hidden layer with hidden size set as specified in Section~\ref{app:baselines}. We apply an L1 regularization to the parameters of each MLP. This loss term is multiplied by $1e-5$ and added to the loss.
+
+\mypar{\kan.}
+In \kan{}, each expert in the mixture is implemented using a KAN. The architecture is specified by a width vector $\mathbf{w}$, which varies based on the task. We use a deeper architecture: $\mathbf{w} = [n_c, n_c+1, n_c+1, 1]$, where $n_c$ is the number of concepts. Each edge $(i,j)$ between layers is parameterized by a univariate B-spline function $\phi_{i,j}: \mathbb{R} \rightarrow \mathbb{R}$ with 5 grid points and cubic basis functions ($k=3$). KANs inherently learn smooth, interpretable functions and support automatic symbolic conversion. During training, we apply KAN-specific regularization to encourage sparsity. We set the hyperparameter related to this sparsity to $\lambda_{\text{sparsity}}=0.001$. After the first training, each KAN expert is pruned and each spline is substitute with the symbol in $\{+,-,\times,\sin, \cos, \exp, \log, \tan, \tanh, x^2, x^3, \sqrt{x}, x^{-1}, x^{-2}\}$ the best fit the spline
+
+\mypar{\linearacro{}.}
+Each memory slot stores a weight matrix $W_m$ and bias vector $b_m$. We apply $\ell_1$ regularization on weights with coefficient $\lambda_1 = 10^{-5}$ and hard thresholding with $\tau = 10^{-6}$ after initial training.
+
+\mypar{\symbolicacro{}.}
+We use PySR~\citep{cranmer2023interpretable} with 40 populations of size 60, 100 iterations, and 380 cycles per iteration. For classification: operators $\{+, -, \times\}$, maximum complexity $5 \times k$ (where $k$ is the number of concepts). For regression: additional operators $\{\sin, \cos, \exp, \log, \tan, \tanh, x^2, x^3, \sqrt{x}, x^{-1}, x^{-2}\}$, maximum complexity 40. Discovered equations are converted to SymPy expressions with trainable parameters.
+
+
+\section{Complexity metrics}
+\label{app:complexity}
+
+To evaluate the complexity of the symbolic expressions discovered, we employ several metrics that quantify different structural properties of the expression trees. Using the notation from Section~\ref{sec:our_exp_tree}, we additionally denote by $T_n$ the subtree rooted at node $n \in N$, by $N_{T_n}$ its node set, and by $d(n)$ the depth of $n$ (i.e., the path length from the root to $n$). For multi-mechanism predictors with $M$ expression trees $\{T^{(1)}, \ldots, T^{(M)}\}$, we report aggregate metrics summed across all trees. Using this notation, the complexity metrics are defined as follows:
+
+\begin{itemize}
+    \item \textbf{Node count}: The total number of elements in the expression tree: $\text{NodeCount}(T) = |N| = |V| + |O| + |\Theta|$. This is the default complexity metric employed in the PySR library~\citep{cranmer2023interpretable}.
+
+    \item \textbf{Tree depth}: The maximum nesting level of operations, reflecting the hierarchical complexity of the expression: $\text{Depth}(T) = \max_{n \in N} d(n)$.
+
+    \item \textbf{Expression complexity}: The sum of subtree sizes across all nodes, which penalizes deeply nested structures more heavily than shallow ones~\citep{keijzer2007crossover,smits2005pareto}: $\text{ExprComplexity}(T) = \sum_{n \in N} |N_{T_n}|$.
+
+    \item \textbf{Total variables}: The number of unique concept variables appearing in the expression: $\text{TotalVars}(T) = |V|$. Note that the same concept $c_k$ may appear multiple times in the tree; this metric counts unique variables, not occurrences.
+
+    \item \textbf{Total operations}: The count of operator nodes in the tree: $\text{TotalOps}(T) = |O|$. Since operators correspond to internal (non-leaf) nodes, this equals the number of non-terminal nodes in $T$.
+
+    \item \textbf{Weighted node count}: A variant of node count that assigns different weights to operators based on their complexity. Let $w: \mathcal{O} \to \mathbb{R}^+$ be a weight function, where basic arithmetic operators $\{+, -, \times, \div\}$ receive unit weight $w(o) = 1$, while transcendental functions (e.g., $\sin$, $\cos$, $\exp$, $\log$) receive weight $w(o) = 2$. Variables and constants receive unit weight. The weighted node count is $\text{WeightedCount}(T) = |V| + |\Theta| + \sum_{o \in O} w(o)$. This metric favors expressions composed of simpler primitives.
+\end{itemize}
+
+
+\section{Concept Size ablation}
+\label{app:concept_size_ablation}
+
+In this section, we investigate why Boolean functional forms fail to scale with the number of concepts. To systematically study this phenomenon, we evaluate \linearacro{} and concept-based baselines (CBM, CMR, DCR, LICEM) on CUB200 and CIFAR10 datasets, both of which feature concept bottlenecks with more than 100 concepts. We systematically vary the bottleneck size by randomly subsampling different subsets of concepts from the original set. For each bottleneck size, we train all models on the resulting modified dataset and evaluate their performance. This process is repeated across multiple bottleneck sizes to observe how model accuracy changes as a function of the number of available concepts. For \linearacro{} and CMR, we set the number of experts to $2$. 
+
+As shown in Figure~\ref{fig:concept_size_ablation}, models employing Boolean functional forms (CMR, DCR) exhibit a clear degradation in accuracy as the concept bottleneck size increases. This behavior strengthens our hypothesis that conjunctive Boolean rules become increasingly brittle with larger concept sets: the probability of mispredicting at least one concept grows with dimensionality, causing the entire logical formula to fail. In contrast, models with more flexible functional forms (\linearacro{}, CBM, LICEM) demonstrate improved accuracy as the bottleneck size increases. These architectures benefit from the additional task-relevant information provided by larger concept sets, as their continuous aggregation mechanisms are more robust to individual concept prediction errors.
+
+\begin{figure*}[ht]
+    \centering
+    \includegraphics[width=0.8\textwidth]{figures/concept_size_ablation.pdf}
+    \caption{Effect of concept bottleneck size on model accuracy for CUB200 (left) and CIFAR10 (right). The x-axis shows the percentage of selected concepts, and the y-axis reports accuracy. For task predictors with Boolean functional forms (CMR, DCR), accuracy decreases as more concepts are included, while models with flexible functional forms (\linearacro{}, \symbolicacro{}) improve as bottleneck size increases. Error bars indicate $95\%$ confidence intervals over 5 seeds.}
+    \label{fig:concept_size_ablation}
+\end{figure*}
+
+
+
+\section{Interventions under Noisy Inputs}
+\label{app:noisy_interventions}
+
+One advantage of intervenable models is that they can be actively corrected when deployed in real-world environments subject to OOD shifts. Nevertheless, recent works~\citep{zarlenga2025avoiding,de2025v} have shown that concept-based architectures that allow residual input information to bypass the concept bottleneck suffer a significant degradation in terms of responsiveness to interventions under OOD inputs — i.e., they cannot recover predictive accuracy on the downstream task even if we replace the concept predictions with the corresponding ground-truth values.
+
+In this appendix, we assess intervention robustness under a noisy input regime on all regression datasets (MNIST-Arithm, dSprites-Exp, Pendulum, MAWPS), as these are the only datasets for which the true concept-to-task mechanisms are known, allowing us to understand whether a task predictor whose functional form is closer to the true concept-to-task mapping is also more responsive to interventions in OOD settings. Since CMR and DCR assume discrete concepts and outputs, they are inapplicable to regression tasks and are therefore excluded; results are shown for all remaining models. Specifically, we corrupt the input $x$ as $\tilde{x} = 0.5\cdot x + 0.5\cdot \epsilon$, where $\epsilon \sim \mathcal{N}(0, I)$. As half of the information in $\tilde{x}$ is pure Gaussian noise, this provides a challenging setting in which the concept encoder must operate on heavily degraded inputs. We then measure task performance as ground-truth interventions are progressively applied, following the same protocol as in Section~\ref{sec:exp_int}.
+
+
+Figure~\ref{fig:interventions_ood} reveals how both the functional form and the number of experts affect intervention responsiveness. With respect to functional form, aligning the task predictor with the true underlying concept-to-task mechanism enables the model to recover predictive performance through ground-truth interventions, as demonstrated by \prior{} and \symbolicacro{}. A finite set of experts, on the other hand, limits the amount of input leakage that can bypass the concept bottleneck. This leakage is unconstrained in models with continuous parameterization such as LICEM, which exhibits a high MAE ($\approx 100$) in the absence of interventions and struggles to recover predictive performance even when all concepts are corrected ($p_{\text{int}}=1$).
+
+\begin{figure*}[ht]
+    \centering
+    \includegraphics[width=0.9\textwidth]{figures/interventions_ood.pdf}
+    \caption{Effect of interventions on model performance under heavily noisy inputs ($\tilde{x} = 0.5\cdot x + 0.5\cdot \epsilon$, $\epsilon \sim \mathcal{N}(0,I)$). MAE as a function of intervention probability $p_{\text{int}}$ across all regression datasets. Shaded areas show $95\%$ confidence intervals over 5 seeds. For models with multiple experts, the number of experts is set to match the true number of concept-to-task mechanisms in each dataset.}
+    \label{fig:interventions_ood}
+\end{figure*}
+
+
+\section{Datasets details}
+\label{app:datasets}
+
+\subsection{Synthetic Datasets}
+
+\mypar{MNIST-Arithm} The MNIST dataset \citep{lecun2010} is a widely used benchmark consisting of grayscale images of handwritten digits. It contains 60,000 training examples and 10,000 test examples, sampled from the same distribution, with each image annotated by its corresponding digit label. MNIST-Arithm is derived from MNIST through the following procedure. First, we specify the total number of images to generate (in our experiments, 100000).  Each generated image is created by randomly sampling two images from MNIST, extracting their digit labels, and combining them into a new image separated by an arithmetic operation (addition, subtraction, multiplication, or division). Correspondingly, each image is annotated with: (i) two concept variables representing the digits contained in the image, and (ii) a task variable corresponding to the result of the arithmetic operation. Then, the resulting dataset is split into training (70\%), validation (10\%), and test (20\%) sets. Finally, each image is preprocessed using a pre-trained \texttt{facebook/dinov2-base} model with default Hugging Face weights.
+
+\mypar{dSprites-Exp} The dSprites dataset~\citep{dsprites17} is a widely used dataset containing 737280 images of 2D white shapes on a black background generated from 6 ground truth independent latent factors: color, shape, scale, rotation, and x and y positions of a sprite. dSprites-Exp dataset is derived from dSprites through the following procedure. First, we specify the total number of images to generate (in our experiments, 100,000). Each generated image is sampled from the original dataset and it is labeled with original latent factors, which serve as our concepts, except for color, which is omitted since it is constant (``white''). 
+Next, a target variable is defined for each sample as $\text{target} = \exp\Big(\sin(2 \pi \, \text{x\_position}) + \cos(2 \pi \, \text{y\_position})\Big)$. Then, the resulting dataset is split into training (70\%), validation (10\%), and test (20\%) sets. 
+Finally, all images are preprocessed using a pre-trained \texttt{facebook/dinov2-base} model with default weights from Hugging Face.
+
+\mypar{Pendulum} Pendulum is a synthetic dataset originally introduced in~\citet{yang2020}. It consists of $\sim$7k generated images of a swinging pendulum with a moving light source. The positions of the illumination source and the pendulum angle relative to the vertical determine the position and length of the pendulum’s shadow on a horizontal plane. We consider a subset of $100000$ images from the original dataset, obtained by sampling $100$ pendulum angles ranging from $-200^\circ$ to $200^\circ$ and $1000$ light source angles between $60^\circ$ and $140^\circ$ (where the light source angle is defined as the angle between the line connecting the pendulum’s center of rotation to the center of the light bulb and the pendulum’s vertical line). As concepts, we use the radiant representation of the angles, and as a target, we consider the $x$-position of the pendulum ball, to avoid overly complex ground-truth mechanisms. The dataset is then split into training ($70\%$), validation ($10\%$), and test ($20\%$) sets.
+All images are finally preprocessed using the pre-trained \texttt{facebook/dinov2-base} model with default weights from Hugging Face.
+
+\subsection{Real-world Datasets}
+
+\mypar{AWA2. } This dataset is the Animals with Attributes 2 dataset \citep{xian2017}, consisting of RGB images depicting one of 50 animal species. Each image is annotated with a species label and 85 numeric attributes, which we treat as concept labels, while the species serves as the target in our classification problem. Following prior work \citep{alaa2019demystifying}, we generate train-validation-test splits using a random 60\%–20\%–20\% partition. During training, samples are randomly cropped and flipped. Finally, all images are preprocessed using the pre-trained \texttt{facebook/dinov2-base} model with default weights from Hugging Face.
+
+
+\mypar{AWA2-Incomplete. } This dataset is derived from Animals with Attributes 2 \citep{xian2017}, following the same procedure as AWA2, with the only difference that we consider only a subset of the 85 concepts. Specifically, we retain the following concepts: ``black'', ``gray'', ``stripes'', ``hairless'', ``flippers'', ``paws'', ``plains'', ``fierce'', ``solitary''.
+
+\mypar{CUB-200. } This dataset is  the Caltech-UCSD Birds-200-2011 dataset~\citep{he2019fine}. 
+Specifically, each sample consists of an RGB image of a bird annotated with one of 200 species and 312 binary attributes. In our experiments, we adopt the $112$ bird attributes selected in \citep{koh2020concept} as binary concept annotations and use bird species as the downstream classification task. All images are preprocessed, and the dataset is then split following the same procedure described in \citet{zarlenga2022concept}. Finally, all images are encoded using the pre-trained \texttt{facebook/dinov2-base} model with the default Hugging Face weights.
+
+\mypar{CUB-200-Incomplete. } This dataset is a subset of CUB-200 where we select the following concepts: ``has\_bill\_shape'', ``has\_head\_pattern'', ``has\_breast\_color'', ``has\_bill\_length'', ``has\_wing\_shape'', ``has\_tail\_pattern'', ``has\_bill\_color''.
+\mypar{CIFAR-10. } The original dataset~\citep{krizhevsky2009} contains 60,000 RGB images, each belonging to one of 10 object categories. Following prior work of \citet{oikarinen2023label}, we annotate each sample with a set of binary concepts. We adopt the original train-test split, reserving $10\%$ of the training set for validation. Finally, all images are encoded using the pre-trained \texttt{google/vit-base-patch32-224-in21k} model with the default Hugging Face weights.
+
+\mypar{MAWPS.} 
+Is a benchmark dataset for evaluating models on \textit{math word problem solving} \citep{koncel2016mawps}. It contains $\sim3.3K$ English arithmetic and simple algebra problems, each annotated with a ground-truth equation and solution. We filter out samples whose concept-to-task expression is too rare, retaining only those belonging to the 4 most frequent expression templates. To increase the size of the training split, we augment it by replacing the numeric values (digits) appearing in each mathematical formula with new random values, and computing the corresponding task label by evaluating the formula over the augmented concept values.
+
+
+\section{Learned Expressions}
+\label{app:explanations}
+
+This section presents the symbolic expressions learned by \linearacro{} and \symbolicacro{} across experimental datasets. For regression tasks (Table~\ref{tab:equations_regression}), we set the number of experts $M$ equal to the number of underlying mechanisms mapping concepts to task outputs.
+
+For classification tasks (Table~\ref{tab:equations_classification}), due to space constraints, we only report results for CUB200-Incomplete and AWA2-Incomplete, as these datasets have a reduced number of concepts, making the expressions more compact and interpretable. These expressions provide concrete examples of how \classacro{} instantiations translate concept predictions into task predictions.
+
+\input{tables/equations_regression}
+
+\input{tables/equations_classification}
+
+
+\section{Detailed Results}
+\label{app:detailed_results}
+
+\subsection{Task accuracy and complexity}
+In this section, we provide detailed experimental results (\cref{tab:classification_awa2,tab:classification_cub,tab:classification_cifar10,tab:regression_dsprites_pendulum,tab:regression_mnist_mawps}) showing the accuracy, MAE, and all complexity metrics for the various methods across different datasets. Additionally, since there are as many Pareto frontiers as there are complexity metrics, each table includes a column representing the number of times a model appeared on the Pareto frontier.
+
+\input{tables/classification_complexities}
+
+\input{tables/regression_complexities}
+
+\subsection{Concept accuracy}
+
+In this subsection, we report the concept prediction performance for all methods across the different datasets (Table~\ref{tab:concept_metrics}). Specifically, we show the concept accuracy for datasets having binary concepts, and MAE and MSE for datasets having continuous concepts.
+
+\input{tables/concept_accuracy}
+
+
+\end{document}

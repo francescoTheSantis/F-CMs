@@ -1,0 +1,217 @@
+import torch
+from torchmetrics import Metric
+from torchmetrics.utilities.checks import _check_same_shape
+import numpy as np
+
+
+class BalancedClassificationAccuracy(Metric):
+    """
+    Balanced Classification Accuracy: mean of per-class recall.
+    A trivial majority-class predictor scores 50% (for binary) instead of the
+    majority fraction, making it much more informative on imbalanced datasets.
+    """
+    def __init__(self, num_classes: int = 2):
+        super().__init__()
+        self.num_classes = num_classes
+        self.add_state("correct_per_class",
+                       default=torch.zeros(num_classes), dist_reduce_fx="sum")
+        self.add_state("total_per_class",
+                       default=torch.zeros(num_classes), dist_reduce_fx="sum")
+
+    def update(self, preds: torch.Tensor, target: torch.Tensor):
+        if torch.isnan(preds).any() or torch.isnan(target).any():
+            return
+        if len(preds.shape) > 2:
+            preds = preds.mean(dim=-1)
+        preds = preds.argmax(dim=-1)
+        target = target.flatten().long()
+        _check_same_shape(preds, target)
+        for cls in range(self.num_classes):
+            mask = target == cls
+            self.correct_per_class[cls] += preds[mask].eq(cls).sum()
+            self.total_per_class[cls] += mask.sum()
+
+    def compute(self):
+        recalls = []
+        for cls in range(self.num_classes):
+            if self.total_per_class[cls] > 0:
+                recalls.append(self.correct_per_class[cls].float()
+                               / self.total_per_class[cls])
+        if len(recalls) == 0:
+            return torch.tensor(0.0)
+        return torch.stack(recalls).mean()
+
+
+class ClassificationAccuracy(Metric):
+    """
+    Classification Accuracy is a standard metric that measures the proportion of correct predictions
+    made by the model.
+    """
+    def __init__(self):
+        super().__init__()
+        self.add_state("correct", default=torch.tensor(0), dist_reduce_fx="sum")
+        self.add_state("total", default=torch.tensor(0), dist_reduce_fx="sum")
+
+    def update(self, 
+               preds: torch.Tensor, 
+               target: torch.Tensor):
+        # check if both preds and target are not nan
+        if torch.isnan(preds).any() or torch.isnan(target).any():
+            self.correct += 0
+            self.total += 1
+        else:
+            # Manage Monte Carlo approximation tensor
+            if len(preds.shape)>2:
+                preds = preds.mean(dim=-1)
+            preds = preds.argmax(dim=-1)
+            target = target.flatten().long()
+
+            # Masked targets are encoded as -1 and should not contribute to accuracy.
+            valid_mask = target != -1
+            if valid_mask.sum() == 0:
+                return
+
+            preds = preds[valid_mask]
+            target = target[valid_mask]
+            _check_same_shape(preds, target)
+            correct = preds.eq(target).sum()
+            self.correct += correct
+            self.total += target.numel()
+
+    def compute(self):
+        if self.total == 0:
+            return torch.tensor(float("nan"), device=self.correct.device)
+        return self.correct.float() / self.total
+
+
+
+def residual_concept_causal_effect(cace_metric_before, cace_metric_after):
+    """
+    Compute the residual concept causal effect between two concepts.
+    Args:
+        cace_metric_before: ConceptCausalEffect metric before the do-intervention on the inner concept
+        cace_metric_after: ConceptCausalEffect metric after do-intervention on the inner concept
+    """
+    cace_before = cace_metric_before.compute()
+    cace_after = cace_metric_after.compute()
+    return cace_after / cace_before
+
+
+class ConceptCausalEffect(Metric):
+    """
+    Concept Causal Effect (CaCE) is a metric that measures the causal effect between concept pairs
+    or between a concept and the task.
+    NOTE: only works on binary concepts.
+    """
+    def __init__(self):
+        super().__init__()
+        self.add_state("preds_do_1", default=torch.tensor(0.), dist_reduce_fx="sum")
+        self.add_state("preds_do_0", default=torch.tensor(0.), dist_reduce_fx="sum")
+        self.add_state("total", default=torch.tensor(0), dist_reduce_fx="sum")
+
+    def update(self, 
+               preds_do_1: torch.Tensor, 
+               preds_do_0: torch.Tensor):
+        _check_same_shape(preds_do_1, preds_do_0)
+        # expected value = 1*p(output=1|do(1)) + 0*(1-p(output=1|do(1))
+        self.preds_do_1 += preds_do_1[:,1].sum()
+        # expected value = 1*p(output=1|do(0)) + 0*(1-p(output=1|do(0))
+        self.preds_do_0 += preds_do_0[:,1].sum()
+        self.total += preds_do_1.size()[0]
+
+    def compute(self):
+        return (self.preds_do_1.float() / self.total) - (self.preds_do_0.float()  / self.total)
+
+
+
+
+def edge_type(graph, i, j):
+    if graph[i,j]==1 and graph[j,i]==0:
+        return 'i->j'
+    elif graph[i,j]==0 and graph[j,i]==1:
+        return 'i<-j'
+    elif (graph[i,j]==-1 and graph[j,i]==-1) or (graph[i,j]==1 and graph[j,i]==1):
+        return 'i-j'
+    elif graph[i,j]==0 and graph[j,i]==0:
+        return '/'
+    else:
+        raise ValueError(f'invalid edge type {i}, {j}')
+
+# graph similairty metrics
+def hamming_distance(first, second):
+    """Compute the graph edit distance between two partially direceted graphs"""
+    first = first.loc[[row for row in first.index if '#virtual_' not in row],
+                      [col for col in first.columns if '#virtual_' not in col]]
+    first = torch.Tensor(first.values)
+    second = second.loc[[row for row in second.index if '#virtual_' not in row],
+                        [col for col in second.columns if '#virtual_' not in col]]
+    second = torch.Tensor(second.values)
+    assert (first.diag() == 0).all() and (second.diag() == 0).all()
+    assert first.size() == second.size()
+    N = first.size(0)
+    cost = 0
+    count = 0
+    for i in range(N):
+        for j in range(i, N):
+            if i==j: continue
+            if edge_type(first, i, j)==edge_type(second, i, j): continue
+            else:
+                count += 1
+                # edge was directed
+                if edge_type(first, i, j)=='i->j' and edge_type(second, i, j)=='/': cost += 1./4.
+                elif edge_type(first, i, j)=='i<-j' and edge_type(second, i, j)=='/': cost += 1./4.
+                elif edge_type(first, i, j)=='i->j' and edge_type(second, i, j)=='i-j': cost += 1./5.
+                elif edge_type(first, i, j)=='i<-j' and edge_type(second, i, j)=='i-j': cost += 1./5.
+                elif edge_type(first, i, j)=='i->j' and edge_type(second, i, j)=='i<-j': cost += 1./3.
+                elif edge_type(first, i, j)=='i<-j' and edge_type(second, i, j)=='i->j': cost += 1./3.
+                # edge was undirected
+                elif edge_type(first, i, j)=='i-j' and edge_type(second, i, j)=='/': cost += 1./4.
+                elif edge_type(first, i, j)=='i-j' and edge_type(second, i, j)=='i->j': cost += 1./4. 
+                elif edge_type(first, i, j)=='i-j' and edge_type(second, i, j)=='i<-j': cost += 1./4.
+                # there was no edge
+                elif edge_type(first, i, j)=='/' and edge_type(second, i, j)=='i-j': cost += 1./2.
+                elif edge_type(first, i, j)=='/' and edge_type(second, i, j)=='i->j': cost += 1
+                elif edge_type(first, i, j)=='/' and edge_type(second, i, j)=='i<-j': cost += 1
+
+                else:  
+                    raise ValueError(f'invalid combination of edge types {i}, {j}')
+    
+    # cost = cost / (N*(N-1))/2
+    return cost, count
+
+def _evaluate_graph_against_truth(pred_graph, true_graph, tag, key=None):
+    """Align predicted and ground-truth graphs and compute the structural hamming distance."""
+    if pred_graph is None:
+        print(f"\033[91m[Graph Eval] {tag}: no graph provided; skipping.\033[0m")
+        return None
+    if true_graph is None:
+        print(f"\033[91m[Graph Eval] {tag}: ground-truth graph unavailable; skipping.\033[0m")
+        return None
+
+    aligned_pred = pred_graph.reindex(index=true_graph.index, columns=true_graph.columns, fill_value=0)
+    aligned_true = true_graph.copy()
+    # np.fill_diagonal(aligned_pred.values, 0)
+    # np.fill_diagonal(aligned_true.values, 0)
+    
+    aligned_pred = aligned_pred.copy(deep=True)
+    arr = aligned_pred.to_numpy(copy=True)
+    np.fill_diagonal(arr, 0)
+    aligned_pred.iloc[:, :] = arr
+    
+    alighed_true = aligned_true.copy(deep=True)
+    arr = alighed_true.to_numpy(copy=True)
+    np.fill_diagonal(arr, 0)
+    aligned_true.iloc[:, :] = arr
+
+    cost, count = hamming_distance(aligned_pred, aligned_true)
+    avg_cost = cost / count if count else 0.0
+    print(
+        f"\033[94m[Graph Eval] {tag}: hamming_cost={cost:.4f}, avg_cost={avg_cost:.4f}, differing_pairs={count}\033[0m"
+    )
+    metrics = {
+        "hamming_cost": float(cost),
+        "avg_cost": float(avg_cost),
+        "differing_pairs": int(count),
+    }
+    key = key or tag.lower().replace(" ", "_").replace("-", "_")
+    return key, metrics

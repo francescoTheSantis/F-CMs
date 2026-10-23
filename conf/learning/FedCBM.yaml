@@ -1,0 +1,18 @@
+defaults:
+  - commons
+  - _self_
+
+mode: FedCBM
+
+subgraphs:
+  rnd_drift: 1000000
+
+settings:
+  n_rounds: ${trainer.max_epochs}
+  local_epochs: 1
+  num_threads: 1
+  feature_source: input
+  svm_lr: 0.01
+  svm_weight_decay: 1e-4
+  svm_log_every: 50
+  head_max_iter: ${trainer.max_epochs}

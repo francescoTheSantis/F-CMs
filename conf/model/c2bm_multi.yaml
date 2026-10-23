@@ -1,0 +1,11 @@
+_target_: "src.models.c2bm_multi.MultimodalC2BM"
+hidden_size: ${dataset.hidden_size}
+concept_hidden_size: 4
+n_layers_encoder: 2
+n_layers_concept_encoder: 2
+n_layers_propagation: 1
+activation: leaky_relu
+concept_loss_weight: 0.5
+prop_type: 'equations'
+cat_latent: false
+name: 'c2bm_multi'
