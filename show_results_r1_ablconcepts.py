@@ -21,38 +21,6 @@ args = parser.parse_args()
 
 # List the paths containing the sweeps' results
 paths = [
-    #"/home/admin/Federated-C2BM_v2/outputs/multirun/12-09-51_int_siim_seed1",
-    #"/home/admin/Federated-C2BM_v2/outputs/multirun/12-08-41_int_siim_s_seed1",
-    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-24/09-37-35_rebuttal_r1_concept_asia_d_10",
-    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-24/10-26-24_rebuttal_r1_concept_asia_s_10"
-    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-24/10-49-21_rebuttal_r1_concept_asia_d_30",
-    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-24/11-14-58_rebuttal_r1_concept_asia_s_30",
-    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-24/11-36-32_rebuttal_r1_concept_asia_d_60",
-    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-24/12-02-02_rebuttal_r1_concept_asia_s_60"
-    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-24/12-14-47_rebuttal_r1_concept_asia_d_30",
-    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-24/12-38-14_rebuttal_r1_concept_asia_s_30"
-    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-24/13-17-02",
-    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-24/13-50-46"
-    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-25/11-22-57_asia_drift1",
-    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-25/11-24-56_asia_drift2",
-    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-25/11-28-10_asia_drift3",
-    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-25/11-46-53_alarm_drift1",
-    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-25/11-54-02_alarm_drift2",
-    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-25/12-15-41_alarm_drift3",
-    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-25/18-43-16_chexpert_drift1",
-    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-25/18-48-39_chexpert_drift2",
-    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-25/19-12-21_chexpert_drift3"
-    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-25/20-42-53_siim_drift1",
-    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-25/20-45-00_siim_drift2",
-    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-25/21-26-00_siim_drift3"
-    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-27/01-03-06_asia_r1_steps_1",
-    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-27/01-06-37_asia_r1_steps_2",
-    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-27/01-16-44_asia_r1_steps_0",
-    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-27/01-19-05_alarm_r1_steps_0",
-    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-27/01-28-05_alarm_r1_steps_1",
-    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-27/01-48-42_alarm_r1_steps_2"
-    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-27/08-11-53_chexpert_r1_steps_0"
-    #"/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-27/08-17-47_chexpert_r1_steps_1"
     "/home/admin/Federated-C2BM_v2/outputs/multirun/2026-07-27/08-38-41_chexpert_r1_steps_2"
 
 ]

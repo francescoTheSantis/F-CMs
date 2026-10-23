@@ -74,7 +74,7 @@ engine:
     lr: 0.01
 
 trainer:
-  devices: [0]
+  devices: 1
   deterministic: true
   max_epochs: 60
   # Federated early stopping starts at the drift round. A value larger than
