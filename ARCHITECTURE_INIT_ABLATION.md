@@ -81,9 +81,9 @@ dataset/architecture/split/method/seed identities rather than mixing reruns.
 
 The saved runs are filtered using `SEED2 = [1,2,3]` at the top of the plotting
 script. Change this list to select different seeds. With `--across-seed`, the script
-writes one figure per coverage expansion: Asia above Alarm, C2BM left of CGM.
-The files are `architecture_init_ablation_10_50_to_100.{png,pdf}` and
-`architecture_init_ablation_51_75_to_100.{png,pdf}` in the output directory.
+writes one figure per dataset: 10–50% → 100% above 51–75% → 100%, C2BM left of CGM.
+The files are `architecture_init_ablation_asia.{png,pdf}` and
+`architecture_init_ablation_alarm.{png,pdf}` in the output directory.
 
 The report contains:
 

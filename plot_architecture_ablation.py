@@ -824,12 +824,13 @@ def plot_across_seed(
             .sort_values(["method", "seed", "round"])
         )
         curve_rows = []
-        if split_group not in figures:
-            figures[split_group] = plt.subplots(
-                2, 2, figsize=(10.6, 8.3), sharex=True, sharey="row"
+        if dataset not in figures:
+            figures[dataset] = plt.subplots(
+                2, 2, figsize=(10.6, 8.3), sharex=True, sharey=True
             )
-        fig, axes = figures[split_group]
-        ax = axes[["asia", "alarm"].index(dataset), ["c2bm", "cgm"].index(architecture)]
+        fig, axes = figures[dataset]
+        ax = axes[["10_50_to_100", "51_75_to_100"].index(split_group),
+                  ["c2bm", "cgm"].index(architecture)]
         for method in _method_sequence(seed_level["method"]):
             method_group = seed_level[seed_level["method"].astype(str) == method]
             grouped = method_group.groupby("round", sort=True)["client_mean_loss"]
@@ -851,7 +852,8 @@ def plot_across_seed(
             ax.axvline(shift, color="black", linestyle="--", linewidth=1.4, label="structural shift")
         ax.set_xlabel("Federated round")
         ax.set_ylabel("Validation task loss")
-        ax.set_title(f"{dataset.title()} · {architecture.upper()}")
+        coverage = {"10_50_to_100": "10–50% → 100%", "51_75_to_100": "51–75% → 100%"}[split_group]
+        ax.set_title(f"{dataset.title()} · {architecture.upper()} · {coverage}")
         ax.grid(True, linestyle=":", alpha=0.5)
 
         group_dir = output_dir / "across_seed" / _slug(dataset) / _slug(architecture) / _slug(split_group)
@@ -873,12 +875,12 @@ def plot_across_seed(
             group_dir / "mean_across_seeds_metrics.md",
             f"Across-seed metrics: {dataset}, {architecture}, {split_group}",
         )
-    for split_group, (fig, axes) in figures.items():
+    for dataset, (fig, axes) in figures.items():
         handles, labels = axes[0, 0].get_legend_handles_labels()
         fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 0.99),
                    ncol=4, frameon=False)
         fig.tight_layout(rect=(0, 0, 1, 0.94))
-        _save_figure(fig, output_dir / f"architecture_init_ablation_{_slug(split_group)}",
+        _save_figure(fig, output_dir / f"architecture_init_ablation_{_slug(dataset)}",
                      formats, dpi)
     return len(figures)
 
@@ -902,7 +904,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--across-seed",
         action="store_true",
-        help="Plot one 2x2 figure per coverage expansion, with mean and ±1 SD across seeds.",
+        help="Plot one 2x2 figure per dataset, with coverage ranges in rows and architectures in columns.",
     )
     parser.add_argument(
         "--formats",
