@@ -23,9 +23,12 @@ import numpy as np
 import pandas as pd
 
 
+SEED2 = [1,2,3]
+
+
 METHOD_ORDER = ("full_reinit", "partial_random", "partial_zero")
 METHOD_STYLES = {
-    "full_reinit": {"label": "full_reinit", "color": "#d62728"},
+    "full_reinit": {"label": "current", "color": "#d62728"},
     "partial_random": {"label": "partial_random", "color": "#1f77b4"},
     "partial_zero": {"label": "partial_zero", "color": "#2ca02c"},
 }
@@ -810,7 +813,7 @@ def plot_across_seed(
     formats: Sequence[str],
     dpi: int,
 ) -> int:
-    count = 0
+    figures = {}
     for key, group in rounds.groupby(list(ACROSS_SEED_GROUP), dropna=False, sort=True):
         dataset, architecture, split_group = key
         seed_level = (
@@ -821,7 +824,12 @@ def plot_across_seed(
             .sort_values(["method", "seed", "round"])
         )
         curve_rows = []
-        fig, ax = plt.subplots(figsize=(8.0, 4.8))
+        if split_group not in figures:
+            figures[split_group] = plt.subplots(
+                2, 2, figsize=(10.6, 8.3), sharex=True, sharey="row"
+            )
+        fig, axes = figures[split_group]
+        ax = axes[["asia", "alarm"].index(dataset), ["c2bm", "cgm"].index(architecture)]
         for method in _method_sequence(seed_level["method"]):
             method_group = seed_level[seed_level["method"].astype(str) == method]
             grouped = method_group.groupby("round", sort=True)["client_mean_loss"]
@@ -842,15 +850,12 @@ def plot_across_seed(
         if math.isfinite(shift):
             ax.axvline(shift, color="black", linestyle="--", linewidth=1.4, label="structural shift")
         ax.set_xlabel("Federated round")
-        ax.set_ylabel("Mean seed-level client-mean task loss")
-        ax.set_title(f"{dataset} · {architecture} · {split_group}\nshading: ±1 SD across seeds")
+        ax.set_ylabel("Validation task loss")
+        ax.set_title(f"{dataset.title()} · {architecture.upper()}")
         ax.grid(True, linestyle=":", alpha=0.5)
-        ax.legend(frameon=False, ncol=2)
-        fig.tight_layout()
 
         group_dir = output_dir / "across_seed" / _slug(dataset) / _slug(architecture) / _slug(split_group)
-        base = group_dir / "mean_across_seeds"
-        _save_figure(fig, base, formats, dpi)
+        group_dir.mkdir(parents=True, exist_ok=True)
         pd.concat(curve_rows, ignore_index=True).to_csv(group_dir / "mean_across_seeds_curve.csv", index=False)
 
         if summary_metrics.empty:
@@ -868,8 +873,14 @@ def plot_across_seed(
             group_dir / "mean_across_seeds_metrics.md",
             f"Across-seed metrics: {dataset}, {architecture}, {split_group}",
         )
-        count += 1
-    return count
+    for split_group, (fig, axes) in figures.items():
+        handles, labels = axes[0, 0].get_legend_handles_labels()
+        fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 0.99),
+                   ncol=4, frameon=False)
+        fig.tight_layout(rect=(0, 0, 1, 0.94))
+        _save_figure(fig, output_dir / f"architecture_init_ablation_{_slug(split_group)}",
+                     formats, dpi)
+    return len(figures)
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -891,7 +902,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--across-seed",
         action="store_true",
-        help="Also plot the mean across seed-level client means, shaded by ±1 sample SD across seeds.",
+        help="Plot one 2x2 figure per coverage expansion, with mean and ±1 SD across seeds.",
     )
     parser.add_argument(
         "--formats",
@@ -929,6 +940,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise SystemExit("No results/architecture_ablation directories were found.")
     print(f"[architecture-ablation] found {len(artifact_dirs)} artifact directories")
     clients, rounds, metrics = load_artifacts(artifact_dirs)
+    clients = clients[clients["seed"].isin(SEED2)]
+    print("clients filtered by SEED2", clients['seed'])
+    rounds = rounds[rounds["seed"].isin(SEED2)]
+    metrics = metrics[metrics["seed"].isin(SEED2)]
     if rounds.empty:
         raise SystemExit("No validation round summaries were found.")
     _validate_round_frame(rounds)
@@ -953,7 +968,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise SystemExit(
             "Controlled-design checks failed; see controlled_design_checks.csv."
         )
-    per_seed_count = plot_per_seed(rounds, metrics, output_dir, formats, args.dpi)
+    per_seed_count = 0
 
     metrics_per_seed = metrics.copy()
     if not metrics_per_seed.empty:

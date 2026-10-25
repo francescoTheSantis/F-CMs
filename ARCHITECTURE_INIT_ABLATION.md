@@ -3,8 +3,8 @@
 This experiment isolates the parameter-transfer rule used at the structural-shift
 round. Everything before the shift is shared across the three methods:
 
-- `full_reinit`: preserve same-name/same-shape tensors and fully reinitialize a
-  changed-shape tensor (the backward-compatible default).
+- `full_reinit` (shown as `current`): preserve same-name/same-shape tensors and
+  fully reinitialize a changed-shape tensor (the backward-compatible default).
 - `partial_random`: copy semantically corresponding old blocks and leave only new
   blocks at their normal random initialization.
 - `partial_zero`: copy corresponding blocks and zero only new blocks when doing so
@@ -79,20 +79,22 @@ By default, figures are written as PNG and PDF. Use, for example,
 Pass one completed sweep directory per dataset; the script rejects duplicate
 dataset/architecture/split/method/seed identities rather than mixing reruns.
 
+The saved runs are filtered using `SEED2 = [1,2,3]` at the top of the plotting
+script. Change this list to select different seeds. With `--across-seed`, the script
+writes one figure per coverage expansion: Asia above Alarm, C2BM left of CGM.
+The files are `architecture_init_ablation_10_50_to_100.{png,pdf}` and
+`architecture_init_ablation_51_75_to_100.{png,pdf}` in the output directory.
+
 The report contains:
 
-- one figure for each seed/dataset/architecture/shift group under `per_seed/`;
-- a CSV and Markdown metric table adjacent to every per-seed figure;
-- optional across-seed figures and their source curves/tables under `across_seed/`;
+- optional combined across-seed figures, with source curves/tables under `across_seed/`;
 - `metrics_per_seed.csv`, the combined tidy per-seed metrics;
 - `metrics_summary.csv`, mean and sample standard deviation across seeds;
 - `reviewer_tables.md`, compact copy-ready mean ± standard-deviation tables.
 - `controlled_design_checks.csv`, an audit that all three methods are present,
   have matching round/client grids, and have equal pre-shift per-client losses.
 
-In a per-seed figure, each line is the arithmetic mean validation task loss across
-eligible federation clients and the band is ±1 population standard deviation across
-those clients. In an across-seed figure, each seed first contributes one client-mean
+In an across-seed figure, each seed first contributes one client-mean
 curve; the line is the mean of those seed-level curves and the band is ±1 sample
 standard deviation across seeds. Clients are never pooled across seeds.
 
