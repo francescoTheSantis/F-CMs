@@ -343,7 +343,7 @@ def update_config_from_data(cfg: DictConfig, datasets, subgraphs_concept_names, 
                 c_info = {'names': subset_concepts, 'cardinality': [datasets[0].c_info['cardinality'][datasets[0].c_info['names'].index(name)] for name in subset_concepts]}
                 total_clients = len(subset_clients)
 
-            path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
+            path = cfg.learning.subgraphs.get("cache_path", str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption))
             # just initialize it with dataset[0], then I'll update configuration and model with the different clients
             input_size = datasets[0].data["train"].X.shape[-1] if datasets[0].data["train"].X is not None else None
             if hasattr(datasets[0].data["train"], "X_image") and hasattr(datasets[0].data["train"], "X_text"):
@@ -480,7 +480,7 @@ def update_intervention_policy_and_graph(cfg, interv_policy, graph, datasets):
     updated_graph = graph.loc[c_names+cfg.model.y_info['names'], c_names+cfg.model.y_info['names']]
     return updated_policy, updated_graph
 
-def update_config_from_data_subgroup_clients(cfg, subgroup_clients, datasets, subgraphs_concept_names, node_order ):
+def update_config_from_data_subgroup_clients(cfg, subgroup_clients, datasets, subgraphs_concept_names, node_order, cache_path=None):
     
     if subgroup_clients is None:
         return None
@@ -490,7 +490,7 @@ def update_config_from_data_subgroup_clients(cfg, subgroup_clients, datasets, su
     # Get concepts from subgroup clients subgraphs
     subgroup_concepts = set()
     for cid in subgroup_clients:
-        path = str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
+        path = cache_path or str(CACHE / cfg.dataset.name / cfg.learning.annotation_assumption)
         subgraph_id = identify_subgraph(path, cid)
         if subgraph_id is not None:
             client_concepts = subgraphs_concept_names[f'subgraph_{subgraph_id}']
@@ -499,6 +499,8 @@ def update_config_from_data_subgroup_clients(cfg, subgroup_clients, datasets, su
     # Create a temporary cfg with filtered c_info for use with update_intervention_policy_and_graph
     subgroup_concepts_list = list(subgroup_concepts)
     cfg_predrift = copy.deepcopy(cfg)
+    if cache_path is not None:
+        OmegaConf.update(cfg_predrift, "learning.subgraphs.cache_path", cache_path, force_add=True)
     with open_dict(cfg_predrift):
         cfg_predrift.learning.n_clients = len(subgroup_clients)
     cfg_predrift = update_config_from_data(cfg_predrift, datasets, subgraphs_concept_names, subset_concepts = subgroup_concepts_list, subset_clients = subgroup_clients, node_order = node_order) 
