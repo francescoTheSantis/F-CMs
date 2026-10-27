@@ -833,6 +833,10 @@ def build_client_subgraph_ids(
     client_selection_mode="all",
     client_selection_mode_postdrift=None,
     ):
+    """Repeat the mode's existing subgraphs over the complete final-ten cohort.
+
+    Subgraph IDs are zero-based; client IDs are one-based.
+    """
     
     if dataset_client_multiplier < 1:
         raise ValueError("dataset_client_multiplier must be >= 1.")
@@ -894,21 +898,24 @@ def build_client_subgraph_ids(
         range(first_last_ten_client_id, n_dataset_clients + 1),
         client_subgraph_ids[-10:],
     ))
+    all_client_ids = [client_id for client_id, _ in candidates]
+
+    def assign_subgraphs(mode):
+        selected = select_clients(candidates, mode)
+        assignments = list(client_subgraph_ids)
+        for index, client_id in enumerate(all_client_ids):
+            assignments[client_id - 1] = selected[index % len(selected)][1]
+        return assignments
 
     if client_selection_mode_postdrift is None:
-        selected_clients = select_clients(candidates, client_selection_mode)
-        selected_source_client_ids = [client_id for client_id, _ in selected_clients]
-        return n_dataset_clients, client_subgraph_ids, selected_source_client_ids
+        return n_dataset_clients, assign_subgraphs(client_selection_mode), all_client_ids
 
-    # Select both phases independently from the same final ten generated
-    # clients, preserving the original mixed add/no-add candidate pool.
-    selected_predrift = select_clients(candidates, client_selection_mode)
-    selected_postdrift = select_clients(candidates, client_selection_mode_postdrift)
+    select_clients(candidates, client_selection_mode_postdrift)
     return (
         n_dataset_clients,
-        client_subgraph_ids,
-        [client_id for client_id, _ in selected_predrift],
-        [client_id for client_id, _ in selected_postdrift],
+        assign_subgraphs(client_selection_mode),
+        all_client_ids,
+        list(all_client_ids),
     )
 
 def build_client_subgraph_ids_for_datasets(
@@ -1108,6 +1115,7 @@ def generate_split(cfg, datasets, graph, y_index, precomputed_subgraphs=None):
     client_modalities = None
     predrift_client_ids = None
     postdrift_client_ids = None
+    postdrift_subgraph_ids = None
 
     if len(datasets)>1:
         # if cfg.learning.subgraphs.get('dict_subgraph_with_add_nodes', {}) != {}:
@@ -1203,6 +1211,17 @@ def generate_split(cfg, datasets, graph, y_index, precomputed_subgraphs=None):
             client_selection_mode=predrift_mode,
             client_selection_mode_postdrift=postdrift_mode,
         )
+        _, postdrift_ids, _ = build_client_subgraph_ids(
+            n, subgraphs_with_add_nodes, dataset_client_multiplier,
+            drift_add_nodes_ratio, client_selection_mode=postdrift_mode,
+        )
+        drift_round = int(cfg.learning.subgraphs.rnd_drift)
+        n_rounds = int(OmegaConf.select(cfg, "learning.settings.n_rounds",
+                                      default=OmegaConf.select(cfg, "trainer.max_epochs", default=0)))
+        if drift_round <= 1:
+            client_subgraph_ids = postdrift_ids
+        elif drift_round <= n_rounds and postdrift_ids != client_subgraph_ids:
+            postdrift_subgraph_ids = postdrift_ids
         print(
             f"Pre-drift clients ({predrift_mode}): {predrift_client_ids}\n"
             f"Post-drift clients ({postdrift_mode}): {postdrift_client_ids}"
@@ -1246,6 +1265,14 @@ def generate_split(cfg, datasets, graph, y_index, precomputed_subgraphs=None):
     split_and_save(cfg, datasets, graph, "val", n_dataset_clients, subgraphs, subgraphs_task_excluded, root, client_subgraph_ids, client_modalities)
     split_and_save(cfg, datasets, graph, "test", n_dataset_clients, subgraphs, subgraphs_task_excluded, root, client_subgraph_ids, client_modalities)
 
+    if postdrift_subgraph_ids is not None:
+        postdrift_root = os.path.join(root, "postdrift")
+        os.makedirs(postdrift_root, exist_ok=True)
+        for split in ("train", "val", "test"):
+            split_and_save(cfg, datasets, graph, split, n_dataset_clients, subgraphs,
+                           subgraphs_task_excluded, postdrift_root, postdrift_subgraph_ids, client_modalities)
+        OmegaConf.update(cfg, "learning.subgraphs.postdrift_cache_path", postdrift_root, force_add=True)
+
     if predrift_client_ids is not None:
         OmegaConf.update(cfg, "learning.subgraphs.predrift_client_ids", predrift_client_ids, force_add=True)
         OmegaConf.update(cfg, "learning.subgraphs.postdrift_client_ids", postdrift_client_ids, force_add=True)
@@ -1263,6 +1290,8 @@ def generate_split(cfg, datasets, graph, y_index, precomputed_subgraphs=None):
         path = os.path.join(root, f"test.pkl")
         with open(path, 'wb') as f:
             pickle.dump(test_dataloader, f)
+        if postdrift_subgraph_ids is not None:
+            shutil.copyfile(path, os.path.join(postdrift_root, "test.pkl"))
 
     return subgraphs, subgraphs_concept_names, subgraphs_with_add_nodes, add_nodes_values, add_nodes_names
 

@@ -1,4 +1,5 @@
 import itertools
+import random
 import shutil
 import shutil
 import sys
@@ -323,7 +324,7 @@ def _print_task_label_distribution(
 
 
 
-@hydra.main(config_path="conf", config_name="test", version_base="1.3")
+@hydra.main(config_path="conf", config_name="test_asia_r1_2steps_2", version_base="1.3")
 def main(cfg: DictConfig) -> None:
     # various preliminaries, it set the seed for reproducibility
     torch.set_num_threads(cfg.get("num_threads", 1))
@@ -741,7 +742,16 @@ def main(cfg: DictConfig) -> None:
         _print_task_label_distribution(train_dataloaders, task_name, "train", per_client=True)
         _print_task_label_distribution(val_dataloaders, task_name, "val", per_client=False)
         _print_task_label_distribution(test_dataloaders, task_name, "test", per_client=False)
+        audit_torch_state, audit_random_state = torch.get_rng_state(), random.getstate()
         train_dataloaders, canary_loaders, true_in_outs, sia_loader = dataprocess_auditing(train_dataloaders, n_saved_clients, cfg) # NOTE: for the moment we are reducing the training data size
+        postdrift_path = cfg.learning.subgraphs.get("postdrift_cache_path", path)
+        train_postdrift, val_postdrift, test_postdrift = train_dataloaders, val_dataloaders, test_dataloaders
+        if postdrift_path != path:
+            train_postdrift, val_postdrift, test_postdrift = load_dataloaders(cfg, postdrift_path, n_saved_clients)
+            # Repeat the same sample selection on the differently masked data.
+            torch.set_rng_state(audit_torch_state)
+            random.setstate(audit_random_state)
+            train_postdrift, _, _, _ = dataprocess_auditing(train_postdrift, n_saved_clients, cfg)
         _print_task_label_distribution(train_dataloaders, task_name, "train after auditing", per_client=True)
         print("\033[94mNumber of samples per client:\033[0m")
         for client_idx, train_loader in enumerate(train_dataloaders, start=1):
@@ -801,7 +811,11 @@ def main(cfg: DictConfig) -> None:
 
         else:
             predrift_clients = None
-            postdrift_clients = list(range(1, n_clients + 1))
+            postdrift_clients = [
+                int(client_id) for client_id in cfg.learning.subgraphs.get(
+                    "postdrift_client_ids", range(1, n_clients + 1)
+                )
+            ]
 
         tracked_client_ids = list(dict.fromkeys(
             (predrift_clients or []) + postdrift_clients
@@ -822,7 +836,7 @@ def main(cfg: DictConfig) -> None:
                                                            subgraphs_concept_names, 
                                                            node_order)
         cfg_postdrift = update_config_from_data_subgroup_clients(
-            cfg, postdrift_clients, datasets, subgraphs_concept_names, node_order
+            cfg, postdrift_clients, datasets, subgraphs_concept_names, node_order, cache_path=postdrift_path
         )
 
 
@@ -851,6 +865,16 @@ def main(cfg: DictConfig) -> None:
                                                              train_dataloaders, 
                                                              datasets[0].y_info["names"][0], 
                                                              graph)
+            local_graphs_postdrift, local_weights_postdrift = local_graphs, local_weights
+            if postdrift_path != path:
+                postdrift_loaders = filter_dataloaders_by_concepts(
+                    list(train_postdrift), cfg_postdrift, postdrift_clients,
+                    subgraphs_concept_names, datasets[0].c_info["names"], postdrift_path,
+                )
+                local_graphs_postdrift, local_weights_postdrift = build_local_graphs(
+                    postdrift_clients, cfg_postdrift, postdrift_loaders,
+                    datasets[0].y_info["names"][0], graph,
+                )
 
             # aggregate graphs for pre-drift and post-drift clients
             # predrift
@@ -878,8 +902,8 @@ def main(cfg: DictConfig) -> None:
             t_agg_postdrift = time.time()
             graph_postdrift, _ = aggregate_graph_proposals(
                 client_selection = postdrift_clients or predrift_clients,
-                local_graphs=local_graphs,
-                weights=local_weights,
+                local_graphs=local_graphs_postdrift,
+                weights=local_weights_postdrift,
                 config_input=cfg_postdrift,
                 task_node=datasets[0].y_info["names"][0]
             )
@@ -946,12 +970,12 @@ def main(cfg: DictConfig) -> None:
             subgraphs_concept_names, datasets[0].c_info["names"], path,
         )
         train_dataloaders_postdrift = filter_dataloaders_by_concepts(
-            list(train_dataloaders), cfg_postdrift, postdrift_clients,
-            subgraphs_concept_names, datasets[0].c_info["names"], path,
+            list(train_postdrift), cfg_postdrift, postdrift_clients,
+            subgraphs_concept_names, datasets[0].c_info["names"], postdrift_path,
         )
         val_dataloaders_postdrift = filter_dataloaders_by_concepts(
-            list(val_dataloaders), cfg_postdrift, postdrift_clients,
-            subgraphs_concept_names, datasets[0].c_info["names"], path,
+            list(val_postdrift), cfg_postdrift, postdrift_clients,
+            subgraphs_concept_names, datasets[0].c_info["names"], postdrift_path,
         )
 
         # Keep separate test views as well: the best checkpoint may belong to
@@ -966,8 +990,8 @@ def main(cfg: DictConfig) -> None:
             loader_client_ids=None if per_client_testset else [1],
         )
         test_dataloaders_postdrift = filter_dataloaders_by_concepts(
-            list(test_dataloaders), cfg_postdrift, postdrift_clients,
-            subgraphs_concept_names, datasets[0].c_info["names"], path,
+            list(test_postdrift), cfg_postdrift, postdrift_clients,
+            subgraphs_concept_names, datasets[0].c_info["names"], postdrift_path,
             loader_client_ids=None if per_client_testset else [1],
         )
 
