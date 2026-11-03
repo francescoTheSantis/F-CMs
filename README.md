@@ -4,6 +4,7 @@ This is the official implementation of the paper:
 
 > **Federated Concept-Based Models: Interpretable Models with Distributed Supervision**  
 > Dario Fenoglio*, Arianna Casanova*, Francesco De Santis, Gabriele Dominici, Johannes Schneider, Pietro Barbiero, Giovanni De Felice, Marc Langheinrich, Martin Gjoreski  
+> *Advances in Neural Information Processing Systems (NeurIPS 2026)*  
 > [arXiv:2602.04093](https://arxiv.org/abs/2602.04093)
 
 `*` Equal contribution.
@@ -174,10 +175,11 @@ This project is released under the MIT License. See [LICENSE](LICENSE) for detai
 If you use this repository, please cite:
 
 ```bibtex
-@article{fenoglio2026fcms,
-  title   = {Federated Concept-Based Models: Interpretable Models with Distributed Supervision},
-  author  = {Fenoglio, Dario and Casanova, Arianna and De Santis, Francesco and Dominici, Gabriele and Schneider, Johannes and Barbiero, Pietro and De Felice, Giovanni and Langheinrich, Marc and Gjoreski, Martin},
-  journal = {arXiv preprint arXiv:2602.04093},
-  year    = {2026}
+@inproceedings{fenoglio2026fcms,
+  title     = {Federated Concept-Based Models: Interpretable Models with Distributed Supervision},
+  author    = {Fenoglio, Dario and Casanova, Arianna and De Santis, Francesco and Dominici, Gabriele and Schneider, Johannes and Barbiero, Pietro and De Felice, Giovanni and Langheinrich, Marc and Gjoreski, Martin},
+  booktitle = {Advances in Neural Information Processing Systems},
+  year      = {2026},
+  url       = {https://arxiv.org/abs/2602.04093}
 }
 ```
